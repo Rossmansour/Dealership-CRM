@@ -22,6 +22,15 @@ const DB_PATH = path.join(__dirname, 'data', 'db.json');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
+// ---------- SMS (Twilio) config ----------
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
+let twilioClient = null;
+if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+  twilioClient = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -222,6 +231,56 @@ app.delete('/api/leads/:id/activities/:activityId', (req, res) => {
   lead.activities = (lead.activities || []).filter(a => a.id !== req.params.activityId);
   writeDB(db);
   res.status(204).send();
+});
+
+// ---------- Real SMS sending (Twilio) ----------
+//
+// This is deliberately separate from the manual "log a text I already
+// sent" flow above -- this one actually dials out to Twilio and sends a
+// real message, so it needs its own explicit action rather than being
+// folded into the general activity log form.
+
+app.post('/api/leads/:id/send-text', async (req, res) => {
+  if (!twilioClient) {
+    return res.status(500).json({
+      error: 'SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your .env file to enable this feature.'
+    });
+  }
+
+  const db = readDB();
+  const lead = db.leads.find(l => l.id === req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
+
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text is required' });
+
+  try {
+    const message = await twilioClient.messages.create({
+      body: text,
+      from: TWILIO_PHONE_NUMBER,
+      to: lead.phone
+    });
+
+    // Log it in the activity feed automatically so the send is part of
+    // the same history as manually-logged calls/texts/notes.
+    if (!lead.activities) lead.activities = [];
+    const activity = {
+      id: crypto.randomUUID(),
+      type: 'text',
+      text: `${text} (sent via SMS)`,
+      date: new Date().toISOString()
+    };
+    lead.activities.unshift(activity);
+    writeDB(db);
+
+    res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
+  } catch (err) {
+    // Twilio errors are usually about trial account restrictions
+    // (unverified recipient number) or a malformed phone number --
+    // pass the real message through so it's actionable, not just "failed".
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------- DEALS (Deal Calculator + Proposals) ----------
@@ -675,6 +734,39 @@ RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
 
     const suggestion = await callAI(systemInstruction, [], 'Draft the follow-up message now.');
     res.json({ suggestion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// AI Lead Snapshot: a short summary of where things stand with this
+// customer -- their situation, momentum, and a recommended next action --
+// so a salesperson doesn't have to re-read the whole activity log to get
+// back up to speed on a lead they haven't touched in a few days.
+app.post('/api/ai/lead-snapshot', async (req, res) => {
+  try {
+    const { leadId } = req.body;
+    const db = readDB();
+    const lead = db.leads.find(l => l.id === leadId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const car = db.cars.find(c => c.id === lead.carId);
+    const relatedDeals = (db.deals || []).filter(d => d.leadId === leadId).map(redactDeal);
+    const today = new Date().toISOString().split('T')[0];
+
+    const systemInstruction = `You are a sales assistant at a used-car dealership. Summarize this customer's
+situation for a salesperson who is about to contact them, in 3-4 sentences: where things stand, how
+engaged/warm they seem based on communication recency and content, and ONE concrete recommended next action.
+Do not invent facts not present in the data below. Return ONLY the summary text, no preamble or headers.
+
+Today's date is ${today}.
+CUSTOMER: ${JSON.stringify({ name: lead.name, type: lead.type, status: lead.status, source: lead.source, notes: lead.notes, dateAdded: lead.dateAdded }, null, 2)}
+VEHICLE THEY'RE INTERESTED IN: ${car ? JSON.stringify({ year: car.year, make: car.make, model: car.model, price: car.price, status: car.status }, null, 2) : 'None linked'}
+FULL COMMUNICATION LOG (newest first): ${JSON.stringify(lead.activities || [], null, 2)}
+RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
+
+    const snapshot = await callAI(systemInstruction, [], 'Write the snapshot now.');
+    res.json({ snapshot });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

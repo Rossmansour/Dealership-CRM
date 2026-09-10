@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dealership CRM</title>
+<link rel="stylesheet" href="style.css" />
+<script>
+  // Applied before the page renders so there's no flash of the wrong
+  // theme while the rest of the page and app.js are still loading.
+  (function() {
+    if (localStorage.getItem('theme') === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  })();
+</script>
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="brandHomeBtn">🚗 Dealership CRM</h1>
+  <nav>
+    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+    <button class="tab-btn" data-tab="inventory">Inventory</button>
+    <button class="tab-btn" data-tab="leads">Leads</button>
+    <button class="tab-btn" data-tab="deals">Deals</button>
+    <button class="tab-btn" data-tab="assistant">AI Assistant</button>
+    <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- DASHBOARD -->
+  <section id="dashboard" class="tab-panel active">
+    <div class="stats-grid" id="statsGrid"></div>
+  </section>
+
+  <!-- INVENTORY -->
+  <section id="inventory" class="tab-panel">
+    <div class="panel-header">
+      <input type="text" id="carSearch" placeholder="Search make, model, or VIN..." />
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="available">Available</option>
+        <option value="pending">Pending</option>
+        <option value="sold">Sold</option>
+      </select>
+      <button class="btn-primary" id="addCarBtn">+ Add Car</button>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Make</th><th>Model</th><th>Year</th><th>Mileage</th>
+          <th>Price</th><th>Status</th><th>Days Listed</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="carTableBody"></tbody>
+    </table>
+  </section>
+
+  <!-- LEADS -->
+  <section id="leads" class="tab-panel">
+    <div class="panel-header">
+      <div class="view-toggle">
+        <button type="button" class="view-toggle-btn active" id="leadsViewTableBtn">Table</button>
+        <button type="button" class="view-toggle-btn" id="leadsViewKanbanBtn">Pipeline</button>
+      </div>
+      <select id="leadStatusFilter">
+        <option value="">All statuses</option>
+        <option value="new">New</option>
+        <option value="contacted">Contacted</option>
+        <option value="negotiating">Negotiating</option>
+        <option value="won">Won</option>
+        <option value="lost">Lost</option>
+      </select>
+      <button class="btn-primary" id="addLeadBtn">+ Add Lead</button>
+    </div>
+
+    <div id="leadsTableView">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Type</th><th>Contact</th><th>Source</th><th>Interested In</th>
+            <th>Status</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="leadTableBody"></tbody>
+      </table>
+    </div>
+
+    <div id="leadsKanbanView" class="kanban-board" style="display:none;"></div>
+  </section>
+
+  <!-- DEALS -->
+  <section id="deals" class="tab-panel">
+    <div class="panel-header">
+      <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Deal #</th><th>Customer</th><th>Vehicle</th><th>Status</th>
+          <th>Monthly Payment</th><th>Credit App</th><th>Date</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="dealTableBody"></tbody>
+    </table>
+  </section>
+
+  <!-- AI ASSISTANT -->
+  <section id="assistant" class="tab-panel">
+    <div class="assistant-intro">
+      Ask about your inventory, leads, or deals -- or ask for a report. Examples:
+      <div class="assistant-examples">
+        <button class="example-chip" onclick="askExample(this)">How many cars have we sold?</button>
+        <button class="example-chip" onclick="askExample(this)">Summarize my leads by status</button>
+        <button class="example-chip" onclick="askExample(this)">Which deals still need credit approval?</button>
+      </div>
+    </div>
+    <div id="chatMessages" class="chat-messages"></div>
+    <form id="chatForm" class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Ask a question or request a report..." required />
+      <button type="submit" class="btn-primary">Send</button>
+    </form>
+  </section>
+
+</main>
+
+<!-- Car Modal -->
+<div class="modal" id="carModal">
+  <div class="modal-content">
+    <h2 id="carModalTitle">Add Car</h2>
+    <form id="carForm">
+      <input type="hidden" id="carId" />
+      <label>Make <input type="text" id="carMake" required /></label>
+      <label>Model <input type="text" id="carModel" required /></label>
+      <label>Year <input type="number" id="carYear" required /></label>
+      <label>VIN <input type="text" id="carVin" /></label>
+      <label>Mileage <input type="number" id="carMileage" /></label>
+      <label>Cost (what you paid) <input type="number" id="carCost" /></label>
+      <label>Asking Price <input type="number" id="carPrice" required /></label>
+      <label>Status
+        <select id="carStatus">
+          <option value="available">Available</option>
+          <option value="pending">Pending</option>
+          <option value="sold">Sold</option>
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancelCarBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Lead Modal -->
+<div class="modal" id="leadModal">
+  <div class="modal-content">
+    <h2 id="leadModalTitle">Add Lead</h2>
+    <form id="leadForm">
+      <input type="hidden" id="leadId" />
+      <label>Type
+        <select id="leadType">
+          <option value="individual">Individual</option>
+          <option value="business">Business</option>
+        </select>
+      </label>
+      <label><span id="leadNameLabelText">Name</span> <input type="text" id="leadName" required /></label>
+      <label>Phone <input type="text" id="leadPhone" /></label>
+      <label>Email <input type="email" id="leadEmail" /></label>
+      <label>Source
+        <select id="leadSource">
+          <option value="walk-in">Walk-in</option>
+          <option value="phone">Phone</option>
+          <option value="website">Website</option>
+          <option value="referral">Referral</option>
+          <option value="autotrader">Autotrader</option>
+          <option value="cargurus">CarGurus</option>
+          <option value="facebook">Facebook Marketplace</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label>Interested Car
+        <select id="leadCarId">
+          <option value="">-- None --</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="leadStatus">
+          <option value="new">New</option>
+          <option value="contacted">Contacted</option>
+          <option value="negotiating">Negotiating</option>
+          <option value="won">Won</option>
+          <option value="lost">Lost</option>
+        </select>
+      </label>
+      <label>Notes <textarea id="leadNotes"></textarea></label>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancelLeadBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Lead Profile Modal -->
+<div class="modal" id="leadProfileModal">
+  <div class="modal-content modal-wide">
+    <div class="profile-header">
+      <div>
+        <h2 id="profileName">Customer Name</h2>
+        <div id="profileBadges"></div>
+      </div>
+      <button type="button" class="btn-secondary" id="editFromProfileBtn">Edit Details</button>
+    </div>
+
+    <button type="button" class="btn-secondary" id="aiSnapshotBtn" style="margin-bottom:12px;">🔍 AI Snapshot</button>
+    <div id="aiSnapshotBox" style="display:none;"></div>
+
+    <div class="profile-info-grid" id="profileInfoGrid"></div>
+
+    <div class="ca-section-title">Related Deals</div>
+    <div id="profileDealsList"></div>
+    <div id="profileNoCarNotice" style="display:none;"></div>
+    <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
+
+    <div class="ca-section-title">Communication Log</div>
+
+    <div class="send-text-box">
+      <strong>📱 Send Text Message</strong>
+      <p class="send-text-hint">This sends a real SMS to this customer's phone via Twilio -- not just a log entry.</p>
+      <textarea id="sendTextInput" rows="2" placeholder="Type a message to send..."></textarea>
+      <div class="send-text-actions">
+        <button type="button" class="btn-primary" id="sendTextBtn">Send Text</button>
+      </div>
+      <div id="sendTextStatus"></div>
+    </div>
+
+    <button type="button" class="btn-secondary" id="aiSuggestReplyBtn" style="margin-bottom:12px;">✨ AI Suggested Reply</button>
+    <div id="aiSuggestionBox" style="display:none;"></div>
+    <form id="activityForm" class="activity-form">
+      <select id="activityType">
+        <option value="call">Call</option>
+        <option value="text">Text</option>
+        <option value="email">Email</option>
+        <option value="note">Note</option>
+      </select>
+      <textarea id="activityText" rows="3" placeholder="What happened? e.g. Left voicemail about financing options" required></textarea>
+      <button type="submit" class="btn-primary">Add</button>
+    </form>
+    <div id="activityLogList"></div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeProfileBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Deal Modal (quick create -> generates Deal #) -->
+<div class="modal" id="newDealModal">
+  <div class="modal-content">
+    <h2>Create Deal</h2>
+    <form id="newDealForm">
+      <label>Customer (Lead)
+        <select id="newDealLeadId" required></select>
+      </label>
+      <label>Vehicle
+        <select id="newDealCarId" required></select>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="cancelNewDealBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Create Deal #</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Deal Workspace Modal (Desking + Credit Application) -->
+<div class="modal" id="dealWorkspaceModal">
+  <div class="modal-content modal-wide">
+    <div class="workspace-header">
+      <h2 id="workspaceTitle">Deal #1001</h2>
+      <select id="dealStatusSelect">
+        <option value="working">Working</option>
+        <option value="credit_submitted">Credit Submitted</option>
+        <option value="approved">Approved</option>
+        <option value="conditional">Conditional</option>
+        <option value="declined">Declined</option>
+        <option value="finalized">Finalized</option>
+      </select>
+    </div>
+
+    <div class="sub-tabs">
+      <button class="sub-tab-btn active" data-subtab="desking">Desking</button>
+      <button class="sub-tab-btn" data-subtab="creditapp">Credit Application</button>
+    </div>
+
+    <!-- Desking sub-tab -->
+    <div id="desking" class="sub-tab-panel active">
+      <form id="deskingForm">
+        <input type="hidden" id="workingDealId" />
+        <div class="form-grid">
+          <label>Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
+          <label>Rebate / Discount <input type="number" id="dealRebate" value="0" /></label>
+        </div>
+
+        <label class="checkbox-label">
+          <input type="checkbox" id="hasTradeCheckbox" /> Customer has a trade-in
+        </label>
+
+        <div class="form-grid" id="tradeFields" style="display:none;">
+          <label>Trade-In Value <input type="number" id="dealTradeInValue" value="0" /></label>
+          <label>Trade-In Payoff Owed <input type="number" id="dealTradeInPayoff" value="0" /></label>
+        </div>
+
+        <div class="form-grid">
+          <label>Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
+          <label>Sales Tax Rate (%) <input type="number" step="0.01" id="dealTaxRate" value="7" /></label>
+          <label>Doc Fee <input type="number" id="dealDocFee" value="150" /></label>
+          <label>Title Fee <input type="number" id="dealTitleFee" value="75" /></label>
+          <label>Registration Fee <input type="number" id="dealRegistrationFee" value="50" /></label>
+          <label>APR (%) <input type="number" step="0.01" id="dealApr" value="6.5" /></label>
+          <label>Loan Term
+            <select id="dealTermMonths">
+              <option value="36">36 months</option>
+              <option value="48">48 months</option>
+              <option value="60" selected>60 months</option>
+              <option value="72">72 months</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="viewProposalFromWorkspaceBtn">View Proposal</button>
+          <button type="submit" class="btn-primary">Save & Recalculate</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Credit Application sub-tab -->
+    <div id="creditapp" class="sub-tab-panel">
+      <form id="creditAppForm">
+        <div id="creditAppFieldsContainer"></div>
+        <div class="modal-actions">
+          <button type="submit" class="btn-primary">Save Credit Application</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeWorkspaceBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Proposal (printable) Modal -->
+<div class="modal" id="proposalModal">
+  <div class="modal-content modal-wide">
+    <div id="proposalContent" class="proposal-sheet"></div>
+    <div class="modal-actions no-print">
+      <button type="button" class="btn-secondary" id="closeProposalBtn">Close</button>
+      <button type="button" class="btn-primary" id="printProposalBtn">Print / Save as PDF</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -46,6 +46,20 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
 - **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
 
+**Real SMS (Twilio)**
+- A dedicated "Send Text" flow on each lead's profile that sends an actual SMS via Twilio, not just a logged note -- the send and the log entry happen together automatically
+- Separate on purpose from the manual "log a call I already made" form, since one triggers a real message and the other is just historical record-keeping
+
+**Leads Pipeline (Kanban board)**
+- Toggle between a table view and a drag-and-drop pipeline view of leads, styled after how DriveCentric and Tekion visualize lead flow
+- Drag a card from one stage to another (New → Contacted → Negotiating → Won/Lost) to update that lead's status instantly
+
+**AI Lead Snapshot**
+- One click on a lead's profile generates a short AI summary of where things stand with that customer -- their situation, momentum, and one recommended next action -- instead of re-reading their whole communication history
+
+**"Needs Follow-Up" Alerts**
+- Any open lead (not won or lost) that hasn't been contacted in 3+ days gets flagged automatically, both on the Dashboard (a running count) and as a badge on their card/row -- modeled after the "smart alerts for leads going cold" feature in real dealership CRMs
+
 **AI Assistant**
 - A chat panel that can answer questions about your actual data -- "how many cars have we sold?", "summarize my leads by status", "which deals still need credit approval?" -- or generate a free-form report on request
 - An **"✨ AI Suggested Reply"** button on every lead's profile that drafts a short, context-aware follow-up message based on that customer's info, their interested vehicle, and their recent communication log -- one click adds it to the activity log once you're happy with it
@@ -76,6 +90,9 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **The communication log is a list of timestamped entries, not a single notes field.** A single text box gets overwritten -- the fact that a customer was called on Monday and texted on Wednesday is lost the moment someone edits it. A real sales process needs the history, not just the latest state.
 - **Every AI call goes through one function, not scattered `fetch` calls.** Both the chat assistant and the suggested-reply feature call the same `callAI()` function in `server.js`. That's the only place that knows Gemini's specific request format -- swapping providers, or adding a fallback if one provider goes down, means changing one function instead of hunting through the codebase.
 - **SSNs are redacted before anything reaches the AI provider, but income, employer, and deal status are not.** A blanket "redact everything sensitive" approach would make the assistant useless for its actual job (answering questions about deals). The redaction list is deliberately narrow: strip what could enable identity theft, keep what's needed to be useful.
+- **Sending a real text is a separate action from logging one manually.** They look similar in the UI but do very different things -- one dials out to a real phone, the other just records history. Folding them into a single form would risk someone accidentally sending a real SMS while just trying to log a call they made from their cell phone.
+- **"Needs Follow-Up" is computed from activity recency, not a manually-set flag.** A salesperson forgetting to flag a lead is exactly the failure mode this feature exists to catch -- so it can't depend on someone remembering to flag it themselves. It's derived automatically from whether anyone has logged contact in the last few days.
+- **The Kanban board and the table view share the exact same underlying `leads` data and the same `openLeadProfile()` function.** Dragging a card just calls the same `PUT /api/leads/:id` endpoint the Edit Details form already uses -- there's no separate "pipeline" data model to keep in sync with the table.
 - **Calculations happen server-side, not in the browser.** The frontend just displays whatever the API returns — it never recomputes the math itself. That way there's one source of truth, and if the formula ever needs to change (say, a state-specific tax rule), it only changes in one place.
 
 ## Tech stack
@@ -96,6 +113,21 @@ The AI Assistant and Suggested Reply button need a free Google Gemini API key to
 `.env` is gitignored, so your key never gets committed. If you deploy this (e.g. to Render), set `GEMINI_API_KEY` as an environment variable in that platform's dashboard instead of using a `.env` file.
 
 **Swapping providers later:** every AI call in this project funnels through one function, `callAI()`, in `server.js`. Switching to OpenAI, Anthropic, or any other provider only means rewriting that one function -- the redaction logic, the context building, and both API routes stay exactly the same.
+
+## Setting up real SMS (Twilio)
+
+The "Send Text" feature on a lead's profile needs a Twilio account to actually send messages.
+
+1. Sign up at [twilio.com](https://www.twilio.com/try-twilio) and grab a free trial phone number.
+2. In your `.env` file, add:
+   ```
+   TWILIO_ACCOUNT_SID=your-sid-here
+   TWILIO_AUTH_TOKEN=your-token-here
+   TWILIO_PHONE_NUMBER=+1XXXXXXXXXX
+   ```
+3. Restart the server.
+
+**Trial account limitations** (not bugs): Twilio trial accounts can only text phone numbers you've manually verified in the Twilio console first, and every message gets a "Sent from your Twilio trial account" prefix. Both go away once you upgrade to a paid account.
 
 ## Running it locally
 
