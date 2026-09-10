@@ -20,7 +20,7 @@ const DB_PATH = path.join(__dirname, 'data', 'db.json');
 // Swapping providers later (e.g. to OpenAI or Anthropic) only means
 // rewriting that one function -- nothing else in this file needs to change.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -555,7 +555,7 @@ async function callAI(systemInstruction, history, userMessage) {
     throw new Error('AI is not configured. Set GEMINI_API_KEY in your .env file to enable this feature.');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
   // Gemini's chat format: prior turns go in `contents` alternating
   // user/model, with the current message appended as the latest user turn.
@@ -566,7 +566,10 @@ async function callAI(systemInstruction, history, userMessage) {
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY
+    },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemInstruction }] },
       contents
