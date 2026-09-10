@@ -178,6 +178,43 @@
   </div>
 </div>
 
+<!-- Lead Profile Modal -->
+<div class="modal" id="leadProfileModal">
+  <div class="modal-content modal-wide">
+    <div class="profile-header">
+      <div>
+        <h2 id="profileName">Customer Name</h2>
+        <div id="profileBadges"></div>
+      </div>
+      <button type="button" class="btn-secondary" id="editFromProfileBtn">Edit Details</button>
+    </div>
+
+    <div class="profile-info-grid" id="profileInfoGrid"></div>
+
+    <div class="ca-section-title">Related Deals</div>
+    <div id="profileDealsList"></div>
+    <div id="profileNoCarNotice" style="display:none;"></div>
+    <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
+
+    <div class="ca-section-title">Communication Log</div>
+    <form id="activityForm" class="activity-form">
+      <select id="activityType">
+        <option value="call">Call</option>
+        <option value="text">Text</option>
+        <option value="email">Email</option>
+        <option value="note">Note</option>
+      </select>
+      <input type="text" id="activityText" placeholder="What happened? e.g. Left voicemail about financing options" required />
+      <button type="submit" class="btn-primary">Add</button>
+    </form>
+    <div id="activityLogList"></div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeProfileBtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- New Deal Modal (quick create -> generates Deal #) -->
 <div class="modal" id="newDealModal">
   <div class="modal-content">

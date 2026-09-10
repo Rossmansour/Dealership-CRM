@@ -154,6 +154,7 @@ app.post('/api/leads', (req, res) => {
     notes: notes || '',
     status: status || 'new', // new | contacted | negotiating | won | lost
     source: source || 'other', // walk-in | phone | website | referral | autotrader | cargurus | facebook | other
+    activities: [], // communication log: { id, type, text, date }
     dateAdded: new Date().toISOString()
   };
 
@@ -178,6 +179,38 @@ app.delete('/api/leads/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Lead not found' });
 
   db.leads.splice(idx, 1);
+  writeDB(db);
+  res.status(204).send();
+});
+
+// ---------- Lead activity log (calls, texts, emails, notes) ----------
+
+app.post('/api/leads/:id/activities', (req, res) => {
+  const db = readDB();
+  const lead = db.leads.find(l => l.id === req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  const { type, text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text is required' });
+
+  if (!lead.activities) lead.activities = [];
+  const activity = {
+    id: crypto.randomUUID(),
+    type: type || 'note', // call | text | email | note
+    text,
+    date: new Date().toISOString()
+  };
+  lead.activities.unshift(activity); // newest first
+  writeDB(db);
+  res.status(201).json(activity);
+});
+
+app.delete('/api/leads/:id/activities/:activityId', (req, res) => {
+  const db = readDB();
+  const lead = db.leads.find(l => l.id === req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+  lead.activities = (lead.activities || []).filter(a => a.id !== req.params.activityId);
   writeDB(db);
   res.status(204).send();
 });

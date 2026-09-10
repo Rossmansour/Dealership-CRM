@@ -131,7 +131,7 @@ function renderLeads() {
     const carLabel = car ? `${car.year} ${car.make} ${car.model}` : '-';
     return `
       <tr>
-        <td>${l.name}</td>
+        <td><button class="deal-number-link" onclick="openLeadProfile('${l.id}')">${l.name}</button></td>
         <td><span class="badge ${l.type === 'business' ? 'finalized' : 'working'}">${l.type === 'business' ? 'Business' : 'Individual'}</span></td>
         <td>${l.phone || l.email || '-'}</td>
         <td>${formatSource(l.source)}</td>
@@ -314,6 +314,159 @@ document.getElementById('leadForm').addEventListener('submit', async (e) => {
 
   leadModal.classList.remove('active');
   await loadAll();
+
+  // If this edit was launched from the lead profile, hop back to it
+  // afterward instead of just closing, so the flow feels continuous.
+  if (returnToProfileAfterEdit) {
+    returnToProfileAfterEdit = false;
+    openLeadProfile(id);
+  }
+});
+
+// ---------- Lead Profile (activity log + related deals) ----------
+
+let returnToProfileAfterEdit = false;
+let currentProfileLeadId = null;
+const leadProfileModal = document.getElementById('leadProfileModal');
+
+const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝' };
+const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note' };
+
+window.openLeadProfile = function(leadId) {
+  const lead = leads.find(l => l.id === leadId);
+  if (!lead) return;
+  currentProfileLeadId = leadId;
+
+  document.getElementById('profileName').textContent = lead.name;
+  document.getElementById('profileBadges').innerHTML = `
+    <span class="badge ${lead.type === 'business' ? 'finalized' : 'working'}">${lead.type === 'business' ? 'Business' : 'Individual'}</span>
+    <span class="badge ${lead.status}">${lead.status}</span>
+  `;
+
+  const car = cars.find(c => c.id === lead.carId);
+  document.getElementById('profileInfoGrid').innerHTML = `
+    <div class="info-item"><div class="label">Phone</div><div class="value">${lead.phone || '-'}</div></div>
+    <div class="info-item"><div class="label">Email</div><div class="value">${lead.email || '-'}</div></div>
+    <div class="info-item"><div class="label">Source</div><div class="value">${formatSource(lead.source)}</div></div>
+    <div class="info-item"><div class="label">Interested In</div><div class="value">${car ? `${car.year} ${car.make} ${car.model}` : '-'}</div></div>
+    <div class="info-item"><div class="label">Added</div><div class="value">${new Date(lead.dateAdded).toLocaleDateString()}</div></div>
+    <div class="info-item"><div class="label">Notes</div><div class="value">${lead.notes || '-'}</div></div>
+  `;
+
+  renderProfileDeals(lead);
+  renderActivityLog(lead);
+
+  leadProfileModal.classList.add('active');
+};
+
+function renderProfileDeals(lead) {
+  const relatedDeals = deals.filter(d => d.leadId === lead.id);
+  const listEl = document.getElementById('profileDealsList');
+  const noCarNotice = document.getElementById('profileNoCarNotice');
+  const createBtn = document.getElementById('profileCreateDealBtn');
+
+  if (relatedDeals.length === 0) {
+    listEl.innerHTML = `<p class="no-deals-note">No deals yet for this customer.</p>`;
+  } else {
+    listEl.innerHTML = relatedDeals.map(d => {
+      const car = cars.find(c => c.id === d.carId);
+      return `
+        <div class="related-deal-row">
+          <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal('${d.id}')">D-${d.dealNumber}</button> -- ${car ? `${car.year} ${car.make} ${car.model}` : 'Unknown vehicle'}</span>
+          <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Creating a deal needs a vehicle. If the lead already has one attached,
+  // skip straight to it; otherwise let the create button fall back to the
+  // full picker on the Deals tab instead of guessing a vehicle for them.
+  if (lead.carId && cars.find(c => c.id === lead.carId && c.status !== 'sold')) {
+    noCarNotice.style.display = 'none';
+    createBtn.style.display = 'inline-block';
+    createBtn.onclick = () => createDealFromProfile(lead.id, lead.carId);
+  } else {
+    noCarNotice.style.display = 'block';
+    noCarNotice.innerHTML = `<p class="no-car-note">This customer isn't linked to an available vehicle yet -- set "Interested Car" via Edit Details, or use "+ Create Deal" on the Deals tab to pick one.</p>`;
+    createBtn.style.display = 'none';
+  }
+}
+
+async function createDealFromProfile(leadId, carId) {
+  const res = await fetch(`${API}/deals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leadId, carId })
+  });
+  const newDeal = await res.json();
+  leadProfileModal.classList.remove('active');
+  await loadAll();
+  openDealWorkspace(newDeal.id);
+}
+
+window.closeProfileAndOpenDeal = function(dealId) {
+  leadProfileModal.classList.remove('active');
+  openDealWorkspace(dealId);
+};
+
+function renderActivityLog(lead) {
+  const activities = lead.activities || [];
+  const listEl = document.getElementById('activityLogList');
+
+  if (activities.length === 0) {
+    listEl.innerHTML = `<p class="no-deals-note">No calls, texts, or notes logged yet.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = activities.map(a => `
+    <div class="activity-entry">
+      <div class="activity-icon">${ACTIVITY_ICONS[a.type] || '📝'}</div>
+      <div class="activity-body">
+        <div class="activity-meta">
+          <span>${ACTIVITY_LABELS[a.type] || 'Note'} -- ${new Date(a.date).toLocaleString()}</span>
+          <button class="activity-delete" onclick="deleteActivity('${lead.id}','${a.id}')">Delete</button>
+        </div>
+        <div class="activity-text">${a.text}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+document.getElementById('activityForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const type = document.getElementById('activityType').value;
+  const text = document.getElementById('activityText').value;
+  if (!text.trim()) return;
+
+  await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, text })
+  });
+
+  document.getElementById('activityText').value = '';
+  await loadAll();
+  // Re-render just the log in place so the modal doesn't visibly reopen
+  const lead = leads.find(l => l.id === currentProfileLeadId);
+  if (lead) renderActivityLog(lead);
+});
+
+window.deleteActivity = async function(leadId, activityId) {
+  await fetch(`${API}/leads/${leadId}/activities/${activityId}`, { method: 'DELETE' });
+  await loadAll();
+  const lead = leads.find(l => l.id === leadId);
+  if (lead) renderActivityLog(lead);
+};
+
+document.getElementById('editFromProfileBtn').addEventListener('click', () => {
+  leadProfileModal.classList.remove('active');
+  returnToProfileAfterEdit = true;
+  editLead(currentProfileLeadId);
+});
+
+document.getElementById('closeProfileBtn').addEventListener('click', () => {
+  leadProfileModal.classList.remove('active');
 });
 
 // ---------- Deals (Deal #, Desking, Credit App, Proposals) ----------

@@ -51,7 +51,8 @@
       "notes": "Wants to test drive this weekend",
       "status": "contacted",
       "source": "website",
-      "dateAdded": "2026-08-20T00:00:00.000Z"
+      "dateAdded": "2026-08-20T00:00:00.000Z",
+      "activities": []
     },
     {
       "id": "l2",
@@ -63,7 +64,21 @@
       "notes": "Negotiating on price, offered $20,500",
       "status": "negotiating",
       "source": "walk-in",
-      "dateAdded": "2026-08-22T00:00:00.000Z"
+      "dateAdded": "2026-08-22T00:00:00.000Z",
+      "activities": [
+        {
+          "id": "a2",
+          "type": "note",
+          "text": "Very motivated buyer, wants to close by end of month",
+          "date": "2026-08-24T15:00:00.000Z"
+        },
+        {
+          "id": "a1",
+          "type": "call",
+          "text": "Called to confirm trade-in appraisal appointment for Thursday",
+          "date": "2026-08-23T10:00:00.000Z"
+        }
+      ]
     },
     {
       "id": "l3",
@@ -75,7 +90,8 @@
       "notes": "Closed the deal",
       "status": "won",
       "source": "referral",
-      "dateAdded": "2026-08-01T00:00:00.000Z"
+      "dateAdded": "2026-08-01T00:00:00.000Z",
+      "activities": []
     }
   ],
   "deals": [
