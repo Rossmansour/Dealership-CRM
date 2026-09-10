@@ -24,6 +24,7 @@
     <button class="tab-btn" data-tab="inventory">Inventory</button>
     <button class="tab-btn" data-tab="leads">Leads</button>
     <button class="tab-btn" data-tab="deals">Deals</button>
+    <button class="tab-btn" data-tab="assistant">AI Assistant</button>
     <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
   </nav>
 </header>
@@ -96,6 +97,23 @@
       </thead>
       <tbody id="dealTableBody"></tbody>
     </table>
+  </section>
+
+  <!-- AI ASSISTANT -->
+  <section id="assistant" class="tab-panel">
+    <div class="assistant-intro">
+      Ask about your inventory, leads, or deals -- or ask for a report. Examples:
+      <div class="assistant-examples">
+        <button class="example-chip" onclick="askExample(this)">How many cars have we sold?</button>
+        <button class="example-chip" onclick="askExample(this)">Summarize my leads by status</button>
+        <button class="example-chip" onclick="askExample(this)">Which deals still need credit approval?</button>
+      </div>
+    </div>
+    <div id="chatMessages" class="chat-messages"></div>
+    <form id="chatForm" class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="Ask a question or request a report..." required />
+      <button type="submit" class="btn-primary">Send</button>
+    </form>
   </section>
 
 </main>
@@ -197,6 +215,8 @@
     <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
 
     <div class="ca-section-title">Communication Log</div>
+    <button type="button" class="btn-secondary" id="aiSuggestReplyBtn" style="margin-bottom:12px;">✨ AI Suggested Reply</button>
+    <div id="aiSuggestionBox" style="display:none;"></div>
     <form id="activityForm" class="activity-form">
       <select id="activityType">
         <option value="call">Call</option>

@@ -46,6 +46,12 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
 - **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
 
+**AI Assistant**
+- A chat panel that can answer questions about your actual data -- "how many cars have we sold?", "summarize my leads by status", "which deals still need credit approval?" -- or generate a free-form report on request
+- An **"✨ AI Suggested Reply"** button on every lead's profile that drafts a short, context-aware follow-up message based on that customer's info, their interested vehicle, and their recent communication log -- one click adds it to the activity log once you're happy with it
+- Runs on Google's Gemini API (free tier, no credit card required) -- see **Setting up the AI features** below
+- SSNs are stripped out before anything is sent to the AI provider, even though the rest of a deal's info (income, employer, deal status) is included so the assistant can actually be useful
+
 **Dark Mode**
 - Toggle in the top nav, saved across visits (persists in the browser)
 - Every screen -- including the printable proposal preview on-screen -- adapts; printing always forces light colors regardless of the current theme, since a dark-background printout wastes ink and looks broken on paper
@@ -68,6 +74,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **"Individual vs Business" lives on both the lead and the credit application, not just one place.** A lead's type is a CRM-level fact about who the prospect is; the application type is a financing decision that could reasonably differ (e.g., a sole proprietor buying under their own name instead of the business's). Tying them together would have been simpler but less accurate to how dealerships actually operate.
 - **Heading text uses a separate color variable from background navy**, even though both start from the same navy color in light mode. A color chosen for a background (dark navy on white) doesn't automatically work as text on a dark surface -- reusing it directly made dashboard numbers nearly invisible in dark mode. Splitting them into `--navy` (backgrounds) and `--heading` (text) fixed the contrast without a special case for every dark-mode override.
 - **The communication log is a list of timestamped entries, not a single notes field.** A single text box gets overwritten -- the fact that a customer was called on Monday and texted on Wednesday is lost the moment someone edits it. A real sales process needs the history, not just the latest state.
+- **Every AI call goes through one function, not scattered `fetch` calls.** Both the chat assistant and the suggested-reply feature call the same `callAI()` function in `server.js`. That's the only place that knows Gemini's specific request format -- swapping providers, or adding a fallback if one provider goes down, means changing one function instead of hunting through the codebase.
+- **SSNs are redacted before anything reaches the AI provider, but income, employer, and deal status are not.** A blanket "redact everything sensitive" approach would make the assistant useless for its actual job (answering questions about deals). The redaction list is deliberately narrow: strip what could enable identity theft, keep what's needed to be useful.
 - **Calculations happen server-side, not in the browser.** The frontend just displays whatever the API returns — it never recomputes the math itself. That way there's one source of truth, and if the formula ever needs to change (say, a state-specific tax rule), it only changes in one place.
 
 ## Tech stack
@@ -75,6 +83,19 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Backend:** Node.js + Express, REST API
 - **Storage:** JSON file (kept intentionally simple — no database setup required to run this)
 - **Frontend:** Vanilla HTML/CSS/JavaScript, no framework
+
+## Setting up the AI features
+
+The AI Assistant and Suggested Reply button need a free Google Gemini API key to work (everything else in the app works fine without one).
+
+1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and grab a free key (no credit card required).
+2. In the `car-crm` folder, copy `.env.example` to a new file named `.env`.
+3. Paste your key in: `GEMINI_API_KEY=your-key-here`
+4. Restart the server (`npm start`).
+
+`.env` is gitignored, so your key never gets committed. If you deploy this (e.g. to Render), set `GEMINI_API_KEY` as an environment variable in that platform's dashboard instead of using a `.env` file.
+
+**Swapping providers later:** every AI call in this project funnels through one function, `callAI()`, in `server.js`. Switching to OpenAI, Anthropic, or any other provider only means rewriting that one function -- the redaction logic, the context building, and both API routes stay exactly the same.
 
 ## Running it locally
 
@@ -98,7 +119,8 @@ Then open **http://localhost:3000** in your browser. Sample data is pre-loaded s
 
 ```
 car-crm/
-├── server.js          # Express API (cars, leads, stats endpoints)
+├── server.js          # Express API (cars, leads, deals, credit apps, AI endpoints)
+├── .env.example         # Template for your Gemini API key (copy to .env)
 ├── data/db.json        # JSON data store (seeded with sample data)
 ├── public/
 │   ├── index.html       # App shell + modals

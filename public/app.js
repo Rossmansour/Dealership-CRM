@@ -362,6 +362,10 @@ window.openLeadProfile = function(leadId) {
   renderProfileDeals(lead);
   renderActivityLog(lead);
 
+  const suggestionBox = document.getElementById('aiSuggestionBox');
+  suggestionBox.style.display = 'none';
+  suggestionBox.innerHTML = '';
+
   leadProfileModal.classList.add('active');
 };
 
@@ -1106,6 +1110,116 @@ document.getElementById('closeProposalBtn').addEventListener('click', () => {
 
 document.getElementById('printProposalBtn').addEventListener('click', () => {
   window.print();
+});
+
+// ---------- AI Assistant (chat) ----------
+
+let chatHistory = []; // { role: 'user' | 'assistant', text }
+
+function renderChatBubble(role, text) {
+  const div = document.createElement('div');
+  div.className = `chat-bubble ${role}`;
+  div.textContent = text;
+  document.getElementById('chatMessages').appendChild(div);
+  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+}
+
+async function sendChatMessage(question) {
+  renderChatBubble('user', question);
+  chatHistory.push({ role: 'user', text: question });
+
+  const loadingBubble = document.createElement('div');
+  loadingBubble.className = 'chat-bubble assistant';
+  loadingBubble.textContent = 'Thinking...';
+  document.getElementById('chatMessages').appendChild(loadingBubble);
+  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+
+  try {
+    const res = await fetch(`${API}/ai/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, history: chatHistory.slice(0, -1) })
+    });
+    const data = await res.json();
+    loadingBubble.remove();
+
+    if (!res.ok) {
+      renderChatBubble('error', data.error || 'Something went wrong.');
+      return;
+    }
+    renderChatBubble('assistant', data.answer);
+    chatHistory.push({ role: 'assistant', text: data.answer });
+  } catch (err) {
+    loadingBubble.remove();
+    renderChatBubble('error', 'Could not reach the AI assistant. Is the server running?');
+  }
+}
+
+document.getElementById('chatForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('chatInput');
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = '';
+  sendChatMessage(question);
+});
+
+window.askExample = function(btn) {
+  sendChatMessage(btn.textContent);
+};
+
+// ---------- AI Suggested Reply (on a lead's profile) ----------
+
+document.getElementById('aiSuggestReplyBtn').addEventListener('click', async () => {
+  const box = document.getElementById('aiSuggestionBox');
+  box.style.display = 'block';
+  box.innerHTML = `<div class="ai-suggestion-box">Generating a suggestion...</div>`;
+
+  try {
+    const res = await fetch(`${API}/ai/suggest-reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId: currentProfileLeadId })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      box.innerHTML = `<div class="ai-suggestion-box">Couldn't generate a suggestion: ${data.error}</div>`;
+      return;
+    }
+
+    box.innerHTML = `
+      <div class="ai-suggestion-box">
+        <strong>Suggested reply:</strong>
+        <textarea id="aiSuggestionText">${data.suggestion}</textarea>
+        <div class="ai-suggestion-actions">
+          <button type="button" class="btn-secondary" id="dismissSuggestionBtn">Dismiss</button>
+          <button type="button" class="btn-primary" id="logSuggestionBtn">Add as Activity</button>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('dismissSuggestionBtn').addEventListener('click', () => {
+      box.style.display = 'none';
+      box.innerHTML = '';
+    });
+
+    document.getElementById('logSuggestionBtn').addEventListener('click', async () => {
+      const text = document.getElementById('aiSuggestionText').value;
+      await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'note', text: `AI-suggested reply sent: ${text}` })
+      });
+      box.style.display = 'none';
+      box.innerHTML = '';
+      await loadAll();
+      const lead = leads.find(l => l.id === currentProfileLeadId);
+      if (lead) renderActivityLog(lead);
+    });
+  } catch (err) {
+    box.innerHTML = `<div class="ai-suggestion-box">Could not reach the AI assistant. Is the server running?</div>`;
+  }
 });
 
 // ---------- Init ----------

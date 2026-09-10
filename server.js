@@ -4,6 +4,8 @@
 // which keeps setup dead simple (no install/config needed) while still
 // exercising real REST API patterns (GET/POST/PUT/DELETE).
 
+require('dotenv').config();
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -12,6 +14,13 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
+
+// ---------- AI provider config ----------
+// Everything AI-related funnels through the single callAI() function below.
+// Swapping providers later (e.g. to OpenAI or Anthropic) only means
+// rewriting that one function -- nothing else in this file needs to change.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -525,6 +534,147 @@ app.get('/api/stats', (req, res) => {
     totalLeads: leads.length,
     conversionRate
   });
+});
+
+// ---------- AI Assistant ----------
+//
+// Two features live here:
+// 1. A general Q&A / report assistant that can see a snapshot of the
+//    dealership's data and answer questions about it in plain English.
+// 2. A "suggested reply" generator for a single lead, used from that
+//    lead's profile.
+//
+// Both funnel through callAI() below, which is the ONLY function that
+// knows how to talk to Gemini. To swap providers later (OpenAI,
+// Anthropic, etc.), this is the only function that needs to change --
+// everything above it (redaction, context building, the routes) stays
+// exactly the same, since they just call callAI(systemInstruction, history, message).
+
+async function callAI(systemInstruction, history, userMessage) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('AI is not configured. Set GEMINI_API_KEY in your .env file to enable this feature.');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+  // Gemini's chat format: prior turns go in `contents` alternating
+  // user/model, with the current message appended as the latest user turn.
+  const contents = [
+    ...history.map(h => ({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.text }] })),
+    { role: 'user', parts: [{ text: userMessage }] }
+  ];
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      contents
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error (${response.status}): ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned an empty response.');
+  return text;
+}
+
+// Strip sensitive fields before anything gets sent to a third-party AI
+// provider. The AI doesn't need a real SSN to answer "how many leads are
+// in negotiation" or draft a follow-up text -- so it never sees one.
+function redactApplicant(a) {
+  if (!a) return a;
+  const { ssn, ...safe } = a;
+  return { ...safe, ssn: ssn ? '[redacted]' : '' };
+}
+
+function redactDeal(deal) {
+  if (!deal.creditApp) return deal;
+  return {
+    ...deal,
+    creditApp: {
+      ...deal.creditApp,
+      applicant: redactApplicant(deal.creditApp.applicant),
+      coApplicant: redactApplicant(deal.creditApp.coApplicant)
+    }
+  };
+}
+
+// Builds the plain-English + JSON snapshot the AI sees for every general
+// question. The dataset here is small enough to send in full each time --
+// at real dealership scale you'd summarize or paginate this instead of
+// dumping every record into the prompt.
+function buildDataContext() {
+  const db = readDB();
+  const today = new Date().toISOString().split('T')[0];
+
+  const safeDeals = (db.deals || []).map(redactDeal);
+
+  return `
+Today's date is ${today}.
+
+CARS (inventory):
+${JSON.stringify(db.cars, null, 2)}
+
+LEADS (customers/prospects):
+${JSON.stringify(db.leads, null, 2)}
+
+DEALS (SSNs redacted):
+${JSON.stringify(safeDeals, null, 2)}
+`;
+}
+
+app.post('/api/ai/query', async (req, res) => {
+  try {
+    const { question, history } = req.body;
+    if (!question) return res.status(400).json({ error: 'question is required' });
+
+    const systemInstruction = `You are an assistant embedded in a small used-car dealership's CRM tool.
+Answer questions about the dealership's inventory, leads, and deals using ONLY the data provided below.
+If asked to "create a report," format your answer clearly with headings/bullet points as plain text (no markdown tables).
+If the data doesn't contain what's needed to answer, say so plainly instead of guessing.
+Keep answers concise and business-relevant -- this is being used by a salesperson or manager, not a developer.
+
+${buildDataContext()}`;
+
+    const answer = await callAI(systemInstruction, history || [], question);
+    res.json({ answer });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/ai/suggest-reply', async (req, res) => {
+  try {
+    const { leadId } = req.body;
+    const db = readDB();
+    const lead = db.leads.find(l => l.id === leadId);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    const car = db.cars.find(c => c.id === lead.carId);
+    const relatedDeals = (db.deals || []).filter(d => d.leadId === leadId).map(redactDeal);
+
+    const systemInstruction = `You are a sales assistant at a used-car dealership, helping a salesperson draft a
+reply or follow-up message to a specific customer. Write ONE short, professional, friendly message
+(2-4 sentences) they could send by text or email. Do not invent facts not present in the data below --
+only reference the vehicle, deal status, or past communications that are actually there.
+Return ONLY the message text, no preamble like "Here's a draft:".
+
+CUSTOMER: ${JSON.stringify({ name: lead.name, type: lead.type, status: lead.status, notes: lead.notes }, null, 2)}
+VEHICLE THEY'RE INTERESTED IN: ${car ? JSON.stringify({ year: car.year, make: car.make, model: car.model, price: car.price, status: car.status }, null, 2) : 'None linked'}
+RECENT COMMUNICATION LOG (newest first): ${JSON.stringify((lead.activities || []).slice(0, 5), null, 2)}
+RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
+
+    const suggestion = await callAI(systemInstruction, [], 'Draft the follow-up message now.');
+    res.json({ suggestion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
