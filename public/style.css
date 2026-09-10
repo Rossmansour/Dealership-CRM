@@ -54,6 +54,12 @@ body {
 
 .topbar h1 { font-size: 20px; margin: 0; }
 
+#brandHomeBtn {
+  cursor: pointer;
+  user-select: none;
+}
+#brandHomeBtn:hover { opacity: 0.85; }
+
 nav { display: flex; gap: 8px; }
 
 .tab-btn {
@@ -367,10 +373,12 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
 
 .activity-form {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-bottom: 16px;
 }
 .activity-form select {
+  align-self: flex-start;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -378,15 +386,19 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   color: var(--text);
   font-size: 14px;
 }
-.activity-form input {
-  flex: 1;
-  padding: 8px 10px;
+.activity-form textarea {
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 70px;
 }
+.activity-form button { align-self: flex-end; }
 
 .activity-entry {
   display: flex;

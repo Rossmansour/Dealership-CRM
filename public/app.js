@@ -44,6 +44,12 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+// Clicking the "Dealership CRM" title in the top left jumps back to the
+// Dashboard, same as clicking the Dashboard tab itself.
+document.getElementById('brandHomeBtn').addEventListener('click', () => {
+  document.querySelector('.tab-btn[data-tab="dashboard"]').click();
+});
+
 // ---------- Data loading ----------
 
 async function loadAll() {

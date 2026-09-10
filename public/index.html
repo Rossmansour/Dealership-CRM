@@ -18,7 +18,7 @@
 <body>
 
 <header class="topbar">
-  <h1>🚗 Dealership CRM</h1>
+  <h1 id="brandHomeBtn">🚗 Dealership CRM</h1>
   <nav>
     <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
     <button class="tab-btn" data-tab="inventory">Inventory</button>
@@ -204,7 +204,7 @@
         <option value="email">Email</option>
         <option value="note">Note</option>
       </select>
-      <input type="text" id="activityText" placeholder="What happened? e.g. Left voicemail about financing options" required />
+      <textarea id="activityText" rows="3" placeholder="What happened? e.g. Left voicemail about financing options" required></textarea>
       <button type="submit" class="btn-primary">Add</button>
     </form>
     <div id="activityLogList"></div>
