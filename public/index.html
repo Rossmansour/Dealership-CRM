@@ -51,7 +51,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Make</th><th>Model</th><th>Year</th><th>Mileage</th>
+          <th>Photo</th><th>Make</th><th>Model</th><th>Year</th><th>Mileage</th>
           <th>Price</th><th>Status</th><th>Days Listed</th><th></th>
         </tr>
       </thead>
@@ -147,6 +147,15 @@
           <option value="sold">Sold</option>
         </select>
       </label>
+
+      <div id="carPhotosSection" style="display:none;">
+        <div class="ca-section-title">Photos</div>
+        <div id="carPhotoGrid" class="photo-grid"></div>
+        <label>Add Photos <input type="file" id="carPhotoInput" accept="image/*" multiple /></label>
+        <button type="button" class="btn-secondary" id="uploadCarPhotosBtn">Upload</button>
+        <div id="carPhotoUploadStatus"></div>
+      </div>
+
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelCarBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save</button>
@@ -230,8 +239,9 @@
 
     <div class="send-text-box">
       <strong>📱 Send Text Message</strong>
-      <p class="send-text-hint">This sends a real SMS to this customer's phone via Twilio -- not just a log entry.</p>
+      <p class="send-text-hint">This sends a real SMS (or MMS, if a photo is attached) to this customer's phone via Twilio -- not just a log entry.</p>
       <textarea id="sendTextInput" rows="2" placeholder="Type a message to send..."></textarea>
+      <div id="sendTextPhotoPicker"></div>
       <div class="send-text-actions">
         <button type="button" class="btn-primary" id="sendTextBtn">Send Text</button>
       </div>

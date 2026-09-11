@@ -9,6 +9,7 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
+    "multer": "^2.3.0",
     "twilio": "^6.1.1"
   }
 }

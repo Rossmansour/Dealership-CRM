@@ -11,7 +11,8 @@
       "price": 17900,
       "status": "available",
       "dateAdded": "2026-08-01T00:00:00.000Z",
-      "dateSold": null
+      "dateSold": null,
+      "photos": []
     },
     {
       "id": "c2",

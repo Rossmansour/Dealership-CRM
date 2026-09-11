@@ -46,6 +46,11 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
 - **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
 
+**Vehicle Photos & Picture Texts**
+- Upload photos to any car in inventory (Edit Car → Photos section) -- shown as a thumbnail in the Inventory table
+- From a lead's profile, the **Send Text** box lets you attach one of their interested vehicle's photos, sending a real **MMS** (picture text) instead of plain SMS
+- ⚠️ **Photos live on the server's disk, same as `db.json`** -- on a host with an ephemeral filesystem (Render's free tier), uploaded photos disappear on every restart/redeploy, exactly like the rest of the data. Fine for a demo, not for real production use without switching to real file storage (e.g. S3, Cloudinary).
+
 **Real SMS (Twilio)**
 - A dedicated "Send Text" flow on each lead's profile that sends an actual SMS via Twilio, not just a logged note -- the send and the log entry happen together automatically
 - Separate on purpose from the manual "log a call I already made" form, since one triggers a real message and the other is just historical record-keeping
@@ -93,6 +98,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Sending a real text is a separate action from logging one manually.** They look similar in the UI but do very different things -- one dials out to a real phone, the other just records history. Folding them into a single form would risk someone accidentally sending a real SMS while just trying to log a call they made from their cell phone.
 - **"Needs Follow-Up" is computed from activity recency, not a manually-set flag.** A salesperson forgetting to flag a lead is exactly the failure mode this feature exists to catch -- so it can't depend on someone remembering to flag it themselves. It's derived automatically from whether anyone has logged contact in the last few days.
 - **The Kanban board and the table view share the exact same underlying `leads` data and the same `openLeadProfile()` function.** Dragging a card just calls the same `PUT /api/leads/:id` endpoint the Edit Details form already uses -- there's no separate "pipeline" data model to keep in sync with the table.
+- **Photo uploads only appear on the Edit Car screen, not Add Car.** A photo needs a car ID to attach to, and that ID doesn't exist until the car's first save. Rather than fake an ID or save a draft car, the flow just asks for the basics first, then photos on the follow-up edit -- an honest reflection of the actual dependency instead of hiding it.
 - **Calculations happen server-side, not in the browser.** The frontend just displays whatever the API returns — it never recomputes the math itself. That way there's one source of truth, and if the formula ever needs to change (say, a state-specific tax rule), it only changes in one place.
 
 ## Tech stack

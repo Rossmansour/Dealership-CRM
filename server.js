@@ -7,6 +7,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -30,6 +31,33 @@ let twilioClient = null;
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
   twilioClient = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
+
+// ---------- Photo uploads ----------
+// Car photos are saved to disk under public/uploads/cars, which Express
+// already serves statically -- so a saved file at
+// public/uploads/cars/abc123.jpg is reachable at /uploads/cars/abc123.jpg
+// with zero extra routing. NOTE: on a host with an ephemeral filesystem
+// (like Render's free tier), these files disappear on restart, same as
+// data/db.json -- fine for a demo, not for real production use.
+const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'cars');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '.jpg';
+      cb(null, `${crypto.randomUUID()}${ext}`);
+    }
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per photo
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed.'));
+    }
+    cb(null, true);
+  }
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -102,6 +130,7 @@ app.post('/api/cars', (req, res) => {
     cost: Number(cost) || 0,
     price: Number(price),
     status: status || 'available', // available | pending | sold
+    photos: [], // array of paths like /uploads/cars/abc123.jpg
     dateAdded: new Date().toISOString(),
     dateSold: null
   };
@@ -137,6 +166,47 @@ app.delete('/api/cars/:id', (req, res) => {
 
   db.cars.splice(idx, 1);
   writeDB(db);
+  res.status(204).send();
+});
+
+// ---------- Car photos ----------
+
+// Upload one or more photos for a car. Field name must be "photos".
+app.post('/api/cars/:id/photos', upload.array('photos', 8), (req, res) => {
+  const db = readDB();
+  const car = db.cars.find(c => c.id === req.params.id);
+  if (!car) return res.status(404).json({ error: 'Car not found' });
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No photos were uploaded.' });
+  }
+
+  if (!car.photos) car.photos = [];
+  const newPaths = req.files.map(f => `/uploads/cars/${f.filename}`);
+  car.photos.push(...newPaths);
+
+  writeDB(db);
+  res.status(201).json({ photos: car.photos });
+});
+
+// Delete one photo from a car (removes both the DB reference and the file on disk).
+app.delete('/api/cars/:id/photos', (req, res) => {
+  const db = readDB();
+  const car = db.cars.find(c => c.id === req.params.id);
+  if (!car) return res.status(404).json({ error: 'Car not found' });
+
+  const { photoPath } = req.body;
+  if (!photoPath) return res.status(400).json({ error: 'photoPath is required' });
+
+  car.photos = (car.photos || []).filter(p => p !== photoPath);
+  writeDB(db);
+
+  // Best-effort cleanup of the actual file -- if it's already gone
+  // (e.g. wiped by a host restart), that's fine, just move on.
+  const filename = path.basename(photoPath);
+  const filePath = path.join(UPLOAD_DIR, filename);
+  fs.unlink(filePath, () => {});
+
   res.status(204).send();
 });
 
@@ -252,23 +322,36 @@ app.post('/api/leads/:id/send-text', async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
 
-  const { text } = req.body;
-  if (!text) return res.status(400).json({ error: 'text is required' });
+  const { text, photoPath } = req.body;
+  if (!text && !photoPath) return res.status(400).json({ error: 'text or photoPath is required' });
 
   try {
-    const message = await twilioClient.messages.create({
-      body: text,
+    const messagePayload = {
+      body: text || '',
       from: TWILIO_PHONE_NUMBER,
       to: lead.phone
-    });
+    };
+
+    // Sending a photo turns this into an MMS -- Twilio needs a full,
+    // publicly-reachable URL for the image, not a relative path, so we
+    // build one from the incoming request's own host.
+    if (photoPath) {
+      const publicUrl = `${req.protocol}://${req.get('host')}${photoPath}`;
+      messagePayload.mediaUrl = [publicUrl];
+    }
+
+    const message = await twilioClient.messages.create(messagePayload);
 
     // Log it in the activity feed automatically so the send is part of
     // the same history as manually-logged calls/texts/notes.
     if (!lead.activities) lead.activities = [];
+    const logText = photoPath
+      ? `${text ? text + ' ' : ''}[photo attached] (sent via ${text ? 'MMS' : 'MMS, no caption'})`
+      : `${text} (sent via SMS)`;
     const activity = {
       id: crypto.randomUUID(),
       type: 'text',
-      text: `${text} (sent via SMS)`,
+      text: logText,
       date: new Date().toISOString()
     };
     lead.activities.unshift(activity);

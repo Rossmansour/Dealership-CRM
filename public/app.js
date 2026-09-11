@@ -128,8 +128,12 @@ function renderCars() {
 
   document.getElementById('carTableBody').innerHTML = filtered.map(c => {
     const daysListed = Math.round((new Date() - new Date(c.dateAdded)) / (1000 * 60 * 60 * 24));
+    const thumb = (c.photos && c.photos[0])
+      ? `<img class="inventory-thumb" src="${c.photos[0]}" alt="${c.make} ${c.model}" />`
+      : `<div class="inventory-thumb-placeholder">🚗</div>`;
     return `
       <tr>
+        <td>${thumb}</td>
         <td>${c.make}</td>
         <td>${c.model}</td>
         <td>${c.year}</td>
@@ -298,6 +302,7 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   document.getElementById('carModalTitle').textContent = 'Add Car';
   document.getElementById('carForm').reset();
   document.getElementById('carId').value = '';
+  document.getElementById('carPhotosSection').style.display = 'none';
   carModal.classList.add('active');
 });
 
@@ -317,7 +322,74 @@ window.editCar = function(id) {
   document.getElementById('carCost').value = car.cost;
   document.getElementById('carPrice').value = car.price;
   document.getElementById('carStatus').value = car.status;
+
+  // Photos can only be attached to a car that already exists (it needs
+  // an id to upload against), so this section is Edit-only.
+  document.getElementById('carPhotosSection').style.display = 'block';
+  document.getElementById('carPhotoInput').value = '';
+  document.getElementById('carPhotoUploadStatus').innerHTML = '';
+  renderCarPhotoGrid(car);
+
   carModal.classList.add('active');
+};
+
+function renderCarPhotoGrid(car) {
+  const grid = document.getElementById('carPhotoGrid');
+  const photos = car.photos || [];
+  if (photos.length === 0) {
+    grid.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">No photos yet.</p>`;
+    return;
+  }
+  grid.innerHTML = photos.map(p => `
+    <div class="photo-thumb">
+      <img src="${p}" alt="Car photo" />
+      <button type="button" class="photo-delete-btn" onclick="deleteCarPhoto('${car.id}','${p}')">×</button>
+    </div>
+  `).join('');
+}
+
+document.getElementById('uploadCarPhotosBtn').addEventListener('click', async () => {
+  const carId = document.getElementById('carId').value;
+  const fileInput = document.getElementById('carPhotoInput');
+  const statusEl = document.getElementById('carPhotoUploadStatus');
+  if (!fileInput.files || fileInput.files.length === 0) return;
+
+  const formData = new FormData();
+  for (const file of fileInput.files) {
+    formData.append('photos', file);
+  }
+
+  statusEl.innerHTML = `<div style="font-size:13px;color:var(--text-muted);">Uploading...</div>`;
+
+  try {
+    const res = await fetch(`${API}/cars/${carId}/photos`, { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      statusEl.innerHTML = `<div class="send-text-status-error">${data.error}</div>`;
+      return;
+    }
+
+    statusEl.innerHTML = '';
+    fileInput.value = '';
+    await loadAll();
+    const car = cars.find(c => c.id === carId);
+    if (car) renderCarPhotoGrid(car);
+  } catch (err) {
+    statusEl.innerHTML = `<div class="send-text-status-error">Upload failed. Is the server running?</div>`;
+  }
+});
+
+window.deleteCarPhoto = async function(carId, photoPath) {
+  if (!confirm('Remove this photo?')) return;
+  await fetch(`${API}/cars/${carId}/photos`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ photoPath })
+  });
+  await loadAll();
+  const car = cars.find(c => c.id === carId);
+  if (car) renderCarPhotoGrid(car);
 };
 
 window.deleteCar = async function(id) {
@@ -479,8 +551,40 @@ window.openLeadProfile = function(leadId) {
 
   document.getElementById('sendTextInput').value = '';
   document.getElementById('sendTextStatus').innerHTML = '';
+  renderSendTextPhotoPicker(car);
 
   leadProfileModal.classList.add('active');
+};
+
+let selectedSendTextPhoto = null;
+
+function renderSendTextPhotoPicker(car) {
+  selectedSendTextPhoto = null;
+  const container = document.getElementById('sendTextPhotoPicker');
+
+  if (!car || !car.photos || car.photos.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Attach a photo of the ${car.year} ${car.make} ${car.model} (optional):</div>
+    <div class="photo-picker-grid">
+      ${car.photos.map(p => `<img src="${p}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" />`).join('')}
+    </div>
+  `;
+}
+
+window.toggleSendTextPhoto = function(imgEl) {
+  const photo = imgEl.dataset.photo;
+  const alreadySelected = selectedSendTextPhoto === photo;
+  document.querySelectorAll('.photo-picker-thumb').forEach(el => el.classList.remove('selected'));
+  if (alreadySelected) {
+    selectedSendTextPhoto = null;
+  } else {
+    selectedSendTextPhoto = photo;
+    imgEl.classList.add('selected');
+  }
 };
 
 function renderProfileDeals(lead) {
@@ -1339,7 +1443,7 @@ document.getElementById('aiSuggestReplyBtn').addEventListener('click', async () 
 document.getElementById('sendTextBtn').addEventListener('click', async () => {
   const text = document.getElementById('sendTextInput').value.trim();
   const statusEl = document.getElementById('sendTextStatus');
-  if (!text) return;
+  if (!text && !selectedSendTextPhoto) return;
 
   statusEl.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">Sending...</div>`;
 
@@ -1347,7 +1451,7 @@ document.getElementById('sendTextBtn').addEventListener('click', async () => {
     const res = await fetch(`${API}/leads/${currentProfileLeadId}/send-text`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify({ text, photoPath: selectedSendTextPhoto })
     });
     const data = await res.json();
 
@@ -1356,8 +1460,10 @@ document.getElementById('sendTextBtn').addEventListener('click', async () => {
       return;
     }
 
-    statusEl.innerHTML = `<div class="send-text-status-success">✓ Text sent and logged.</div>`;
+    statusEl.innerHTML = `<div class="send-text-status-success">✓ ${selectedSendTextPhoto ? 'Picture text' : 'Text'} sent and logged.</div>`;
     document.getElementById('sendTextInput').value = '';
+    selectedSendTextPhoto = null;
+    document.querySelectorAll('.photo-picker-thumb').forEach(el => el.classList.remove('selected'));
     await loadAll();
     const lead = leads.find(l => l.id === currentProfileLeadId);
     if (lead) renderActivityLog(lead);
