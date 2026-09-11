@@ -65,13 +65,35 @@ async function loadAll() {
   renderStats(statsRes);
   renderCars();
   renderLeads();
+  renderLeadsKanban();
   renderDeals();
   populateLeadCarOptions();
+}
+
+// ---------- Needs-follow-up detection ----------
+// A lead "needs follow-up" if it's still an open opportunity (not
+// won/lost) and nobody has logged a call/text/email/note in the last
+// few days. This is computed entirely client-side since the leads
+// array already carries everything needed (activities, dateAdded).
+
+const FOLLOWUP_THRESHOLD_DAYS = 3;
+
+function daysSinceLastContact(lead) {
+  const activities = lead.activities || [];
+  const lastDate = activities.length > 0 ? activities[0].date : lead.dateAdded;
+  return Math.floor((new Date() - new Date(lastDate)) / (1000 * 60 * 60 * 24));
+}
+
+function needsFollowUp(lead) {
+  if (lead.status === 'won' || lead.status === 'lost') return false;
+  return daysSinceLastContact(lead) >= FOLLOWUP_THRESHOLD_DAYS;
 }
 
 // ---------- Dashboard ----------
 
 function renderStats(stats) {
+  const followUpCount = leads.filter(needsFollowUp).length;
+
   const cards = [
     { label: 'Available Cars', value: stats.availableCars },
     { label: 'Inventory Value', value: `$${stats.inventoryValue.toLocaleString()}` },
@@ -79,9 +101,10 @@ function renderStats(stats) {
     { label: 'Total Profit', value: `$${stats.totalProfit.toLocaleString()}` },
     { label: 'Avg Days on Lot', value: stats.avgDaysOnLot },
     { label: 'Lead Conversion Rate', value: `${stats.conversionRate}%` },
+    { label: 'Needs Follow-Up', value: followUpCount, warn: followUpCount > 0 },
   ];
   document.getElementById('statsGrid').innerHTML = cards.map(c => `
-    <div class="stat-card">
+    <div class="stat-card ${c.warn ? 'stat-card-warn' : ''}">
       <div class="label">${c.label}</div>
       <div class="value">${c.value}</div>
     </div>
@@ -135,6 +158,7 @@ function renderLeads() {
   document.getElementById('leadTableBody').innerHTML = filtered.map(l => {
     const car = cars.find(c => c.id === l.carId);
     const carLabel = car ? `${car.year} ${car.make} ${car.model}` : '-';
+    const followUpFlag = needsFollowUp(l) ? `<span class="followup-badge">Needs Follow-Up</span>` : '';
     return `
       <tr>
         <td><button class="deal-number-link" onclick="openLeadProfile('${l.id}')">${l.name}</button></td>
@@ -142,7 +166,7 @@ function renderLeads() {
         <td>${l.phone || l.email || '-'}</td>
         <td>${formatSource(l.source)}</td>
         <td>${carLabel}</td>
-        <td><span class="badge ${l.status}">${l.status}</span></td>
+        <td><span class="badge ${l.status}">${l.status}</span>${followUpFlag}</td>
         <td>${l.notes || ''}</td>
         <td class="row-actions">
           <button onclick="editLead('${l.id}')">Edit</button>
@@ -163,6 +187,89 @@ function formatSource(source) {
 }
 
 document.getElementById('leadStatusFilter').addEventListener('change', renderLeads);
+
+// ---------- Leads pipeline (Kanban board) ----------
+
+const LEAD_PIPELINE_STAGES = [
+  { key: 'new', label: 'New' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'negotiating', label: 'Negotiating' },
+  { key: 'won', label: 'Won' },
+  { key: 'lost', label: 'Lost' }
+];
+
+document.getElementById('leadsViewTableBtn').addEventListener('click', () => setLeadsView('table'));
+document.getElementById('leadsViewKanbanBtn').addEventListener('click', () => setLeadsView('kanban'));
+
+function setLeadsView(view) {
+  document.getElementById('leadsTableView').style.display = view === 'table' ? 'block' : 'none';
+  document.getElementById('leadsKanbanView').style.display = view === 'kanban' ? 'flex' : 'none';
+  document.getElementById('leadStatusFilter').style.display = view === 'table' ? 'inline-block' : 'none';
+  document.getElementById('leadsViewTableBtn').classList.toggle('active', view === 'table');
+  document.getElementById('leadsViewKanbanBtn').classList.toggle('active', view === 'kanban');
+}
+
+function renderLeadsKanban() {
+  const board = document.getElementById('leadsKanbanView');
+
+  board.innerHTML = LEAD_PIPELINE_STAGES.map(stage => {
+    const stageLeads = leads.filter(l => l.status === stage.key);
+    return `
+      <div class="kanban-column" data-status="${stage.key}">
+        <div class="kanban-column-header"><span>${stage.label}</span><span>${stageLeads.length}</span></div>
+        <div class="kanban-column-body">
+          ${stageLeads.map(l => {
+            const car = cars.find(c => c.id === l.carId);
+            const followUpFlag = needsFollowUp(l) ? `<span class="followup-badge">Follow-up</span>` : '';
+            return `
+              <div class="kanban-card" draggable="true" data-lead-id="${l.id}">
+                <button class="kanban-card-name" onclick="openLeadProfile('${l.id}')">${l.name}</button>
+                <div class="kanban-card-meta">${car ? `${car.year} ${car.make} ${car.model}` : 'No vehicle linked'}</div>
+                <div class="kanban-card-meta">${formatSource(l.source)}${followUpFlag}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  wireKanbanDragAndDrop();
+}
+
+function wireKanbanDragAndDrop() {
+  document.querySelectorAll('.kanban-card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.leadId);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+  });
+
+  document.querySelectorAll('.kanban-column').forEach(column => {
+    column.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      column.classList.add('drag-over');
+    });
+    column.addEventListener('dragleave', () => {
+      column.classList.remove('drag-over');
+    });
+    column.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      column.classList.remove('drag-over');
+      const leadId = e.dataTransfer.getData('text/plain');
+      const newStatus = column.dataset.status;
+      const lead = leads.find(l => l.id === leadId);
+      if (!lead || lead.status === newStatus) return;
+
+      await fetch(`${API}/leads/${leadId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      await loadAll();
+    });
+  });
+}
 
 // Relabel "Name" -> "Business Name" when Business is selected, since a
 // business lead doesn't have a first/last name the way a person does.
@@ -365,6 +472,13 @@ window.openLeadProfile = function(leadId) {
   const suggestionBox = document.getElementById('aiSuggestionBox');
   suggestionBox.style.display = 'none';
   suggestionBox.innerHTML = '';
+
+  const snapshotBox = document.getElementById('aiSnapshotBox');
+  snapshotBox.style.display = 'none';
+  snapshotBox.innerHTML = '';
+
+  document.getElementById('sendTextInput').value = '';
+  document.getElementById('sendTextStatus').innerHTML = '';
 
   leadProfileModal.classList.add('active');
 };
@@ -1219,6 +1333,60 @@ document.getElementById('aiSuggestReplyBtn').addEventListener('click', async () 
     });
   } catch (err) {
     box.innerHTML = `<div class="ai-suggestion-box">Could not reach the AI assistant. Is the server running?</div>`;
+  }
+});
+
+document.getElementById('sendTextBtn').addEventListener('click', async () => {
+  const text = document.getElementById('sendTextInput').value.trim();
+  const statusEl = document.getElementById('sendTextStatus');
+  if (!text) return;
+
+  statusEl.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">Sending...</div>`;
+
+  try {
+    const res = await fetch(`${API}/leads/${currentProfileLeadId}/send-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      statusEl.innerHTML = `<div class="send-text-status-error">Couldn't send: ${data.error}</div>`;
+      return;
+    }
+
+    statusEl.innerHTML = `<div class="send-text-status-success">✓ Text sent and logged.</div>`;
+    document.getElementById('sendTextInput').value = '';
+    await loadAll();
+    const lead = leads.find(l => l.id === currentProfileLeadId);
+    if (lead) renderActivityLog(lead);
+  } catch (err) {
+    statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
+  }
+});
+
+document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
+  const box = document.getElementById('aiSnapshotBox');
+  box.style.display = 'block';
+  box.innerHTML = `<div class="ai-snapshot-box">Reading through their history...</div>`;
+
+  try {
+    const res = await fetch(`${API}/ai/lead-snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId: currentProfileLeadId })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      box.innerHTML = `<div class="ai-snapshot-box">Couldn't generate a snapshot: ${data.error}</div>`;
+      return;
+    }
+
+    box.innerHTML = `<div class="ai-snapshot-box"><strong>🔍 Snapshot</strong><p>${data.snapshot}</p></div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="ai-snapshot-box">Could not reach the AI assistant. Is the server running?</div>`;
   }
 });
 

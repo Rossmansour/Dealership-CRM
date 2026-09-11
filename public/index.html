@@ -62,6 +62,10 @@
   <!-- LEADS -->
   <section id="leads" class="tab-panel">
     <div class="panel-header">
+      <div class="view-toggle">
+        <button type="button" class="view-toggle-btn active" id="leadsViewTableBtn">Table</button>
+        <button type="button" class="view-toggle-btn" id="leadsViewKanbanBtn">Pipeline</button>
+      </div>
       <select id="leadStatusFilter">
         <option value="">All statuses</option>
         <option value="new">New</option>
@@ -72,15 +76,20 @@
       </select>
       <button class="btn-primary" id="addLeadBtn">+ Add Lead</button>
     </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Name</th><th>Type</th><th>Contact</th><th>Source</th><th>Interested In</th>
-          <th>Status</th><th>Notes</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="leadTableBody"></tbody>
-    </table>
+
+    <div id="leadsTableView">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Type</th><th>Contact</th><th>Source</th><th>Interested In</th>
+            <th>Status</th><th>Notes</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="leadTableBody"></tbody>
+      </table>
+    </div>
+
+    <div id="leadsKanbanView" class="kanban-board" style="display:none;"></div>
   </section>
 
   <!-- DEALS -->
@@ -207,6 +216,9 @@
       <button type="button" class="btn-secondary" id="editFromProfileBtn">Edit Details</button>
     </div>
 
+    <button type="button" class="btn-secondary" id="aiSnapshotBtn" style="margin-bottom:12px;">🔍 AI Snapshot</button>
+    <div id="aiSnapshotBox" style="display:none;"></div>
+
     <div class="profile-info-grid" id="profileInfoGrid"></div>
 
     <div class="ca-section-title">Related Deals</div>
@@ -215,6 +227,17 @@
     <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
 
     <div class="ca-section-title">Communication Log</div>
+
+    <div class="send-text-box">
+      <strong>📱 Send Text Message</strong>
+      <p class="send-text-hint">This sends a real SMS to this customer's phone via Twilio -- not just a log entry.</p>
+      <textarea id="sendTextInput" rows="2" placeholder="Type a message to send..."></textarea>
+      <div class="send-text-actions">
+        <button type="button" class="btn-primary" id="sendTextBtn">Send Text</button>
+      </div>
+      <div id="sendTextStatus"></div>
+    </div>
+
     <button type="button" class="btn-secondary" id="aiSuggestReplyBtn" style="margin-bottom:12px;">✨ AI Suggested Reply</button>
     <div id="aiSuggestionBox" style="display:none;"></div>
     <form id="activityForm" class="activity-form">
