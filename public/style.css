@@ -795,6 +795,23 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   margin-bottom: 20px;
 }
 
+/* Every text/number/date/select/textarea field anywhere on the full deal
+   page gets themed here, in one place -- this covers both the Desking
+   panels and the Credit Application fields (the latter used to inherit
+   theming from .modal-content before this page stopped being a modal,
+   which is why they were rendering as plain white boxes in dark mode). */
+.deal-fullpage input:not([type="checkbox"]),
+.deal-fullpage select,
+.deal-fullpage textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
 .deal-panel {
   background: var(--surface);
   border: 1px solid var(--border);
