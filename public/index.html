@@ -320,30 +320,42 @@
   </div>
 </div>
 
-<!-- Deal Workspace Modal (Desking + Credit Application) -->
-<div class="modal" id="dealWorkspaceModal">
-  <div class="modal-content modal-wide">
-    <div class="workspace-header">
-      <h2 id="workspaceTitle">Deal #1001</h2>
+<!-- Deal Full Page (Desking + Credit Application) -->
+<div class="deal-fullpage" id="dealFullPage">
+  <div class="deal-fullpage-header">
+    <button type="button" class="btn-secondary" id="backToDealsBtn">&larr; Back to Deals</button>
+    <h2 id="workspaceTitle">Deal #1001</h2>
+    <div class="deal-fullpage-header-right">
+      <select id="dealTypeSelect">
+        <option value="retail">Retail</option>
+        <option value="lease">Lease</option>
+        <option value="cash">Cash</option>
+      </select>
       <select id="dealStatusSelect">
         <option value="working">Stored / Working</option>
         <option value="delivered">Delivered</option>
         <option value="closed">Closed</option>
         <option value="finalized">Finalized</option>
       </select>
+      <button type="button" class="btn-primary" id="saveDealBtn">💾 Save</button>
     </div>
+  </div>
 
-    <div class="sub-tabs">
-      <button class="sub-tab-btn active" data-subtab="desking">Desking</button>
-      <button class="sub-tab-btn" data-subtab="creditapp">Credit Application</button>
-    </div>
+  <div class="sub-tabs">
+    <button class="sub-tab-btn active" data-subtab="desking">Desking</button>
+    <button class="sub-tab-btn" data-subtab="creditapp">Credit Application</button>
+  </div>
 
-    <!-- Desking sub-tab -->
-    <div id="desking" class="sub-tab-panel active">
-      <form id="deskingForm">
-        <input type="hidden" id="workingDealId" />
-        <div class="ca-section-title">Customer & Vehicle</div>
-        <div class="form-grid">
+  <!-- Desking sub-tab -->
+  <div id="desking" class="sub-tab-panel active">
+    <form id="deskingForm">
+      <input type="hidden" id="workingDealId" />
+
+      <div class="deal-grid">
+
+        <!-- Customer & Vehicle -->
+        <div class="deal-panel">
+          <div class="ca-section-title">Customer & Vehicle</div>
           <label>Customer
             <select id="dealAssignedLeadId">
               <option value="">-- No customer assigned yet --</option>
@@ -356,58 +368,110 @@
           </label>
         </div>
 
-        <div class="ca-section-title">Pricing</div>
-        <div class="form-grid">
-          <label>Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
-          <label>Rebate / Discount <input type="number" id="dealRebate" value="0" /></label>
-        </div>
-
-        <label class="checkbox-label">
-          <input type="checkbox" id="hasTradeCheckbox" /> Customer has a trade-in
-        </label>
-
-        <div class="form-grid" id="tradeFields" style="display:none;">
-          <label>Trade-In Value <input type="number" id="dealTradeInValue" value="0" /></label>
-          <label>Trade-In Payoff Owed <input type="number" id="dealTradeInPayoff" value="0" /></label>
-        </div>
-
-        <div class="form-grid">
-          <label>Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
+        <!-- Pricing (shared by retail and lease) -->
+        <div class="deal-panel">
+          <div class="ca-section-title">Pricing</div>
+          <label id="vehiclePriceLabel">Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
+          <label id="msrpField" style="display:none;">MSRP <input type="number" id="dealMsrp" value="0" /></label>
+          <label>Rebate <input type="number" id="dealRebate" value="0" /></label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="hasTradeCheckbox" /> Customer has a trade-in
+          </label>
+          <div class="form-grid" id="tradeFields" style="display:none;">
+            <label>Trade-In Value <input type="number" id="dealTradeInValue" value="0" /></label>
+            <label>Trade-In Payoff Owed <input type="number" id="dealTradeInPayoff" value="0" /></label>
+          </div>
+          <label id="downPaymentLabel">Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
           <label>Sales Tax Rate (%) <input type="number" step="0.01" id="dealTaxRate" value="7" /></label>
-          <label>Doc Fee <input type="number" id="dealDocFee" value="150" /></label>
+          <label>Term (months) <input type="number" id="dealTermMonths" value="60" /></label>
+        </div>
+
+        <!-- Retail-only financing -->
+        <div class="deal-panel" id="retailPanel">
+          <div class="ca-section-title">Retail Financing</div>
           <label>Title Fee <input type="number" id="dealTitleFee" value="75" /></label>
           <label>Registration Fee <input type="number" id="dealRegistrationFee" value="50" /></label>
           <label>APR (%) <input type="number" step="0.01" id="dealApr" value="6.5" /></label>
-          <label>Loan Term
-            <select id="dealTermMonths">
-              <option value="36">36 months</option>
-              <option value="48">48 months</option>
-              <option value="60" selected>60 months</option>
-              <option value="72">72 months</option>
+        </div>
+
+        <!-- Lease-only: Capitalization -->
+        <div class="deal-panel" id="leaseCapPanel" style="display:none;">
+          <div class="ca-section-title">Capitalization</div>
+          <label>Acquisition Fee <input type="number" id="dealAcquisitionFee" value="595" /></label>
+          <div class="readout-row"><span>Gross Cap Cost</span><strong id="readoutGrossCapCost">$0.00</strong></div>
+        </div>
+
+        <!-- Lease-only: Cap Cost Reduction -->
+        <div class="deal-panel" id="leaseCapReductionPanel" style="display:none;">
+          <div class="ca-section-title">Cap Cost Reduction</div>
+          <label>Cash Back to Customer <input type="number" id="dealCashBack" value="0" /></label>
+          <div class="readout-row"><span>Total Cap Reduction</span><strong id="readoutCapReduction">$0.00</strong></div>
+          <div class="readout-row"><span>Net Cap Cost</span><strong id="readoutNetCapCost">$0.00</strong></div>
+        </div>
+
+        <!-- Lease-only: Residual -->
+        <div class="deal-panel" id="leaseResidualPanel" style="display:none;">
+          <div class="ca-section-title">Residual</div>
+          <label>Residual % (of MSRP) <input type="number" step="0.01" id="dealResidualPercent" value="50" /></label>
+          <label>Annual Miles
+            <select id="dealAnnualMiles">
+              <option value="10000">10,000</option>
+              <option value="12000" selected>12,000</option>
+              <option value="15000">15,000</option>
             </select>
           </label>
+          <div class="readout-row"><span>Residual Amount</span><strong id="readoutResidualAmount">$0.00</strong></div>
         </div>
 
-        <div class="modal-actions">
-          <button type="button" class="btn-secondary" id="viewProposalFromWorkspaceBtn">View Proposal</button>
-          <button type="submit" class="btn-primary">Save & Recalculate</button>
+        <!-- Lease-only: Payment details -->
+        <div class="deal-panel" id="leasePaymentPanel" style="display:none;">
+          <div class="ca-section-title">Lease Payment</div>
+          <label>Money Factor <input type="number" step="0.00001" id="dealMoneyFactor" value="0" /></label>
+          <label>Security Deposit <input type="number" id="dealSecurityDeposit" value="0" /></label>
+          <label># Advanced Payments <input type="number" id="dealAdvancedPayments" value="0" /></label>
+          <div class="readout-row"><span>Due at Signing</span><strong id="readoutDueAtSigning">$0.00</strong></div>
         </div>
-      </form>
-    </div>
 
-    <!-- Credit Application sub-tab -->
-    <div id="creditapp" class="sub-tab-panel">
-      <form id="creditAppForm">
-        <div id="creditAppFieldsContainer"></div>
-        <div class="modal-actions">
-          <button type="submit" class="btn-primary">Save Credit Application</button>
+        <!-- F&I Products (shared by retail and lease) -->
+        <div class="deal-panel" id="fiProductsPanel">
+          <div class="ca-section-title">F&amp;I Products &amp; Fees</div>
+          <label>Doc Fee <input type="number" id="dealDocFee" value="150" /></label>
+          <label>License Fee <input type="number" id="dealLicenseFee" value="0" /></label>
+          <label>Dealer Fees <input type="number" id="dealDealerFees" value="0" /></label>
+          <label>GAP Premium <input type="number" id="dealGapPremium" value="0" /></label>
+          <label>Service Contract (ESC) Premium <input type="number" id="dealServicePremium" value="0" /></label>
+          <label>Maintenance Premium <input type="number" id="dealMaintenancePremium" value="0" /></label>
+          <label>Aftermarket / Accessories <input type="number" id="dealAftermarketAmount" value="0" /></label>
         </div>
-      </form>
-    </div>
 
-    <div class="modal-actions">
-      <button type="button" class="btn-secondary" id="closeWorkspaceBtn">Close</button>
-    </div>
+        <!-- Summary (shared, read-only, updates after Save) -->
+        <div class="deal-panel deal-summary-panel">
+          <div class="ca-section-title">Summary <span class="summary-hint">(updates after Save)</span></div>
+          <div class="readout-row" id="readoutAmountFinancedRow"><span>Amount Financed</span><strong id="readoutAmountFinanced">$0.00</strong></div>
+          <div class="payment-highlight">
+            <div class="amount" id="readoutMonthlyPayment">$0.00/mo</div>
+            <div id="readoutTermLine">for 60 months</div>
+          </div>
+          <div class="readout-row"><span>Total Deal Cost</span><strong id="readoutTotalDealCost">$0.00</strong></div>
+        </div>
+
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="viewProposalFromWorkspaceBtn">View Proposal</button>
+        <button type="submit" class="btn-primary">Save &amp; Recalculate</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Credit Application sub-tab -->
+  <div id="creditapp" class="sub-tab-panel">
+    <form id="creditAppForm">
+      <div id="creditAppFieldsContainer"></div>
+      <div class="modal-actions">
+        <button type="submit" class="btn-primary">Save Credit Application</button>
+      </div>
+    </form>
   </div>
 </div>
 

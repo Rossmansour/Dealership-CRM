@@ -321,6 +321,7 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   background: rgba(0,0,0,0.4);
   align-items: center;
   justify-content: center;
+  z-index: 600;
 }
 
 .modal.active { display: flex; }
@@ -749,6 +750,88 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   border-radius: 10px;
   margin-left: 6px;
 }
+
+/* ---------- Deal full page (replaces the old workspace modal) ---------- */
+
+.deal-fullpage {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 500;
+  overflow-y: auto;
+  padding: 20px 32px 60px;
+}
+.deal-fullpage.active { display: block; }
+
+.deal-fullpage-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.deal-fullpage-header h2 { margin: 0; color: var(--heading); flex: 1; min-width: 160px; }
+.deal-fullpage-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.deal-fullpage-header-right select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.deal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.deal-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.deal-panel label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.deal-panel label input,
+.deal-panel label select {
+  width: 100%;
+  padding: 8px 10px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.readout-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px dashed var(--border);
+  font-size: 14px;
+  margin-top: 8px;
+}
+.readout-row strong { color: var(--heading); }
+
+.deal-summary-panel { border: 2px solid var(--blue); }
+.summary-hint { font-size: 11px; font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
 
 /* ---------- Send Text box ---------- */
 

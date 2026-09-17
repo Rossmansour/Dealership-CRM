@@ -851,9 +851,9 @@ window.deleteDeal = async function(id) {
   await loadAll();
 };
 
-// ---------- Deal Workspace (Desking + Credit Application) ----------
+// ---------- Deal Full Page (Desking + Credit Application) ----------
 
-const dealWorkspaceModal = document.getElementById('dealWorkspaceModal');
+const dealFullPage = document.getElementById('dealFullPage');
 let currentWorkspaceDealId = null;
 
 window.openDealWorkspace = function(dealId) {
@@ -863,6 +863,7 @@ window.openDealWorkspace = function(dealId) {
 
   document.getElementById('workspaceTitle').textContent = `Deal #D-${deal.dealNumber}`;
   document.getElementById('dealStatusSelect').value = deal.status;
+  document.getElementById('dealTypeSelect').value = deal.dealType || 'retail';
   document.getElementById('workingDealId').value = deal.id;
 
   // Customer/Vehicle can be assigned now or left blank and filled in later --
@@ -880,22 +881,45 @@ window.openDealWorkspace = function(dealId) {
       .join('');
   carSelect.value = deal.carId || '';
 
-  // Fill desking fields
+  // Shared fields
   document.getElementById('dealVehiclePrice').value = deal.vehiclePrice;
   document.getElementById('dealRebate').value = deal.rebate;
   document.getElementById('dealTradeInValue').value = deal.tradeInValue;
   document.getElementById('dealTradeInPayoff').value = deal.tradeInPayoff;
   document.getElementById('dealDownPayment').value = deal.downPayment;
   document.getElementById('dealTaxRate').value = deal.taxRate;
-  document.getElementById('dealDocFee').value = deal.docFee;
-  document.getElementById('dealTitleFee').value = deal.titleFee;
-  document.getElementById('dealRegistrationFee').value = deal.registrationFee;
-  document.getElementById('dealApr').value = deal.apr;
   document.getElementById('dealTermMonths').value = deal.termMonths;
+
+  // Retail-only fields
+  document.getElementById('dealTitleFee').value = deal.titleFee || 75;
+  document.getElementById('dealRegistrationFee').value = deal.registrationFee || 50;
+  document.getElementById('dealApr').value = deal.apr || 6.5;
+
+  // Lease-only fields
+  document.getElementById('dealMsrp').value = deal.msrp || 0;
+  document.getElementById('dealAcquisitionFee').value = deal.acquisitionFee || 595;
+  document.getElementById('dealCashBack').value = deal.cashBack || 0;
+  document.getElementById('dealResidualPercent').value = deal.residualPercent || 50;
+  document.getElementById('dealAnnualMiles').value = deal.annualMiles || 12000;
+  document.getElementById('dealMoneyFactor').value = deal.moneyFactor || 0;
+  document.getElementById('dealSecurityDeposit').value = deal.securityDeposit || 0;
+  document.getElementById('dealAdvancedPayments').value = deal.advancedPayments || 0;
+
+  // F&I products (shared)
+  document.getElementById('dealDocFee').value = deal.docFee || 150;
+  document.getElementById('dealLicenseFee').value = deal.licenseFee || 0;
+  document.getElementById('dealDealerFees').value = deal.dealerFees || 0;
+  document.getElementById('dealGapPremium').value = deal.gapPremium || 0;
+  document.getElementById('dealServicePremium').value = deal.servicePremium || 0;
+  document.getElementById('dealMaintenancePremium').value = deal.maintenancePremium || 0;
+  document.getElementById('dealAftermarketAmount').value = deal.aftermarketAmount || 0;
 
   const hasTradeCheckbox = document.getElementById('hasTradeCheckbox');
   hasTradeCheckbox.checked = !!deal.hasTrade;
   document.getElementById('tradeFields').style.display = deal.hasTrade ? 'grid' : 'none';
+
+  updateDealTypePanels(deal.dealType || 'retail');
+  renderDealSummary(deal);
 
   // Build the credit application form fresh each time, since its shape
   // (business vs individual, with or without a co-applicant) changes
@@ -905,8 +929,72 @@ window.openDealWorkspace = function(dealId) {
   // Always open back on the Desking sub-tab
   switchSubTab('desking');
 
-  dealWorkspaceModal.classList.add('active');
+  // Full page takeover: hide the normal app chrome so the deal gets the
+  // whole screen (this is a lot of fields -- a modal was too cramped).
+  document.querySelector('.main-sidebar').style.display = 'none';
+  document.querySelector('.topbar').style.display = 'none';
+  document.querySelector('main').style.display = 'none';
+  document.body.style.marginLeft = '0';
+  dealFullPage.classList.add('active');
 };
+
+function closeDealFullPage() {
+  dealFullPage.classList.remove('active');
+  document.querySelector('.main-sidebar').style.display = 'flex';
+  document.querySelector('.topbar').style.display = 'flex';
+  document.querySelector('main').style.display = 'block';
+  document.body.style.marginLeft = '';
+}
+
+document.getElementById('backToDealsBtn').addEventListener('click', async () => {
+  closeDealFullPage();
+  await loadAll();
+  setActiveModule('sales-fi');
+});
+
+// Switching deal type shows/hides the panels that only apply to that type,
+// and swaps a couple of field labels ("Vehicle Price" vs "Selling Price",
+// "Down Payment" vs "Cash Down") so the same shared inputs read naturally
+// either way instead of needing two separate sets of fields.
+function updateDealTypePanels(dealType) {
+  const isLease = dealType === 'lease';
+  document.getElementById('retailPanel').style.display = isLease ? 'none' : 'block';
+  document.getElementById('leaseCapPanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('leaseCapReductionPanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('leaseResidualPanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('leasePaymentPanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('msrpField').style.display = isLease ? 'block' : 'none';
+
+  document.getElementById('vehiclePriceLabel').firstChild.textContent = isLease ? 'Selling Price ' : 'Vehicle Price ';
+  document.getElementById('downPaymentLabel').firstChild.textContent = isLease ? 'Cash Down ' : 'Down Payment ';
+
+  document.getElementById('readoutAmountFinancedRow').style.display = isLease ? 'none' : 'flex';
+}
+
+document.getElementById('dealTypeSelect').addEventListener('change', (e) => {
+  updateDealTypePanels(e.target.value);
+});
+
+// Populates the read-only computed figures (gross cap cost, net cap cost,
+// residual, amount financed, monthly payment, etc.) from the deal's last
+// saved calculation. These only update after a Save, same limitation the
+// desking form always had -- there's no live recalculation as you type.
+function renderDealSummary(deal) {
+  const isLease = (deal.dealType || 'retail') === 'lease';
+
+  if (isLease) {
+    document.getElementById('readoutGrossCapCost').textContent = `$${(deal.grossCapCost || 0).toLocaleString()}`;
+    document.getElementById('readoutCapReduction').textContent = `$${(deal.totalCapReduction || 0).toLocaleString()}`;
+    document.getElementById('readoutNetCapCost').textContent = `$${(deal.netCapCost || 0).toLocaleString()}`;
+    document.getElementById('readoutResidualAmount').textContent = `$${(deal.residualAmount || 0).toLocaleString()}`;
+    document.getElementById('readoutDueAtSigning').textContent = `$${(deal.dueAtSigning || 0).toLocaleString()}`;
+  }
+
+  document.getElementById('readoutAmountFinanced').textContent = `$${(deal.amountFinanced || 0).toLocaleString()}`;
+  document.getElementById('readoutMonthlyPayment').textContent = `$${(deal.monthlyPayment || 0).toLocaleString()}/mo`;
+  document.getElementById('readoutTermLine').textContent = `for ${deal.termMonths} months`;
+  document.getElementById('readoutTotalDealCost').textContent = `$${(deal.totalDealCost || 0).toLocaleString()}`;
+}
 
 // Picking a vehicle auto-fills its price, same convenience as before --
 // just now it can happen anytime from within the workspace, not only at
@@ -916,10 +1004,6 @@ document.getElementById('dealAssignedCarId').addEventListener('change', (e) => {
   if (selected && selected.dataset.price) {
     document.getElementById('dealVehiclePrice').value = selected.dataset.price;
   }
-});
-
-document.getElementById('closeWorkspaceBtn').addEventListener('click', () => {
-  dealWorkspaceModal.classList.remove('active');
 });
 
 // Sub-tab switching within the workspace
@@ -943,7 +1027,7 @@ document.getElementById('hasTradeCheckbox').addEventListener('change', (e) => {
   }
 });
 
-// Deal status dropdown (in the workspace header) saves immediately on change
+// Deal status dropdown (in the header) saves immediately on change
 document.getElementById('dealStatusSelect').addEventListener('change', async (e) => {
   await fetch(`${API}/deals/${currentWorkspaceDealId}`, {
     method: 'PUT',
@@ -953,38 +1037,67 @@ document.getElementById('dealStatusSelect').addEventListener('change', async (e)
   await loadAll();
 });
 
-// Desking form: save & recalculate
-document.getElementById('deskingForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const payload = {
+function buildDeskingPayload() {
+  return {
     leadId: document.getElementById('dealAssignedLeadId').value || null,
     carId: document.getElementById('dealAssignedCarId').value || null,
+    dealType: document.getElementById('dealTypeSelect').value,
     vehiclePrice: document.getElementById('dealVehiclePrice').value,
+    msrp: document.getElementById('dealMsrp').value,
     rebate: document.getElementById('dealRebate').value,
     hasTrade: document.getElementById('hasTradeCheckbox').checked,
     tradeInValue: document.getElementById('dealTradeInValue').value,
     tradeInPayoff: document.getElementById('dealTradeInPayoff').value,
     downPayment: document.getElementById('dealDownPayment').value,
     taxRate: document.getElementById('dealTaxRate').value,
-    docFee: document.getElementById('dealDocFee').value,
+    termMonths: document.getElementById('dealTermMonths').value,
     titleFee: document.getElementById('dealTitleFee').value,
     registrationFee: document.getElementById('dealRegistrationFee').value,
     apr: document.getElementById('dealApr').value,
-    termMonths: document.getElementById('dealTermMonths').value,
+    acquisitionFee: document.getElementById('dealAcquisitionFee').value,
+    cashBack: document.getElementById('dealCashBack').value,
+    residualPercent: document.getElementById('dealResidualPercent').value,
+    annualMiles: document.getElementById('dealAnnualMiles').value,
+    moneyFactor: document.getElementById('dealMoneyFactor').value,
+    securityDeposit: document.getElementById('dealSecurityDeposit').value,
+    advancedPayments: document.getElementById('dealAdvancedPayments').value,
+    docFee: document.getElementById('dealDocFee').value,
+    licenseFee: document.getElementById('dealLicenseFee').value,
+    dealerFees: document.getElementById('dealDealerFees').value,
+    gapPremium: document.getElementById('dealGapPremium').value,
+    servicePremium: document.getElementById('dealServicePremium').value,
+    maintenancePremium: document.getElementById('dealMaintenancePremium').value,
+    aftermarketAmount: document.getElementById('dealAftermarketAmount').value,
   };
+}
 
-  await fetch(`${API}/deals/${currentWorkspaceDealId}`, {
+// Desking form: save & recalculate. Both the header Save button and the
+// form's own submit button trigger this same save -- one authoritative
+// save path regardless of which button was clicked.
+async function saveDeskingForm() {
+  const payload = buildDeskingPayload();
+
+  const res = await fetch(`${API}/deals/${currentWorkspaceDealId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+  const updatedDeal = await res.json();
 
   await loadAll();
-  dealWorkspaceModal.classList.remove('active');
+  renderDealSummary(updatedDeal);
+}
+
+document.getElementById('deskingForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await saveDeskingForm();
+});
+
+document.getElementById('saveDealBtn').addEventListener('click', async () => {
+  await saveDeskingForm();
 });
 
 document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click', () => {
-  dealWorkspaceModal.classList.remove('active');
   viewProposal(currentWorkspaceDealId);
 });
 
@@ -1352,7 +1465,8 @@ document.getElementById('creditAppForm').addEventListener('submit', async (e) =>
   });
 
   await loadAll();
-  dealWorkspaceModal.classList.remove('active');
+  // Stay on the page (it's full-page now, not a modal) -- just quietly
+  // re-render so any computed fields reflect the save.
 });
 
 // ---------- Printable Proposal ----------
@@ -1369,15 +1483,55 @@ window.viewProposal = function(dealId) {
   const customerName = lead ? lead.name : 'Unknown Customer';
   const vehicleLabel = car ? `${car.year} ${car.make} ${car.model}` : 'Unknown Vehicle';
   const date = new Date(deal.dateCreated).toLocaleDateString();
+  const isLease = (deal.dealType || 'retail') === 'lease';
 
-  document.getElementById('proposalContent').innerHTML = `
-    <h2>Deal Proposal</h2>
-    <div class="proposal-meta">
-      <span><strong>Customer:</strong> ${customerName}</span>
-      <span><strong>Vehicle:</strong> ${vehicleLabel}</span>
-      <span><strong>Date:</strong> ${date}</span>
+  const fiRows = `
+      <tr><td>Doc Fee</td><td>+$${(deal.docFee || 0).toLocaleString()}</td></tr>
+      ${deal.licenseFee ? `<tr><td>License Fee</td><td>+$${deal.licenseFee.toLocaleString()}</td></tr>` : ''}
+      ${deal.dealerFees ? `<tr><td>Dealer Fees</td><td>+$${deal.dealerFees.toLocaleString()}</td></tr>` : ''}
+      ${deal.gapPremium ? `<tr><td>GAP Premium</td><td>+$${deal.gapPremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.servicePremium ? `<tr><td>Service Contract</td><td>+$${deal.servicePremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.maintenancePremium ? `<tr><td>Maintenance Plan</td><td>+$${deal.maintenancePremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.aftermarketAmount ? `<tr><td>Aftermarket / Accessories</td><td>+$${deal.aftermarketAmount.toLocaleString()}</td></tr>` : ''}
+  `;
+
+  const bodyHtml = isLease ? `
+    <table>
+      <tr><td>MSRP</td><td>$${(deal.msrp || 0).toLocaleString()}</td></tr>
+      <tr><td>Selling Price</td><td>$${deal.vehiclePrice.toLocaleString()}</td></tr>
+      <tr><td>Acquisition Fee</td><td>+$${(deal.acquisitionFee || 0).toLocaleString()}</td></tr>
+      ${fiRows}
+      <tr class="total-row"><td>Gross Cap Cost</td><td>$${(deal.grossCapCost || 0).toLocaleString()}</td></tr>
+    </table>
+    <table>
+      <tr><td>Cash Down</td><td>-$${deal.downPayment.toLocaleString()}</td></tr>
+      <tr><td>Rebate</td><td>-$${deal.rebate.toLocaleString()}</td></tr>
+      <tr><td>Net Trade Equity</td><td>-$${(deal.netTradeIn || 0).toLocaleString()}</td></tr>
+      ${deal.cashBack ? `<tr><td>Cash Back to Customer</td><td>+$${deal.cashBack.toLocaleString()}</td></tr>` : ''}
+      <tr class="total-row"><td>Net Cap Cost</td><td>$${(deal.netCapCost || 0).toLocaleString()}</td></tr>
+    </table>
+    <table>
+      <tr><td>Residual (${deal.residualPercent}% of MSRP)</td><td>$${(deal.residualAmount || 0).toLocaleString()}</td></tr>
+      <tr><td>Annual Miles</td><td>${(deal.annualMiles || 0).toLocaleString()}</td></tr>
+    </table>
+
+    <div class="payment-highlight">
+      <div class="amount">$${deal.monthlyPayment.toLocaleString()}/mo</div>
+      <div>for ${deal.termMonths} months, money factor ${deal.moneyFactor}</div>
     </div>
 
+    <table>
+      <tr><td>Due at Signing</td><td>$${(deal.dueAtSigning || 0).toLocaleString()}</td></tr>
+      <tr><td>Total of Payments</td><td>$${deal.totalOfPayments.toLocaleString()}</td></tr>
+      <tr class="total-row"><td>Total Lease Cost</td><td>$${deal.totalDealCost.toLocaleString()}</td></tr>
+    </table>
+
+    <p class="fine-print">
+      This proposal is an estimate for discussion purposes only and is not a binding offer to lease.
+      Sales tax is calculated on the monthly payment, per the most common state tax treatment for
+      leases; some states instead tax cap cost reduction upfront. Final terms are subject to credit approval.
+    </p>
+  ` : `
     <table>
       <tr><td>Vehicle Price</td><td>$${deal.vehiclePrice.toLocaleString()}</td></tr>
       <tr><td>Trade-In Value</td><td>-$${deal.tradeInValue.toLocaleString()}</td></tr>
@@ -1385,7 +1539,9 @@ window.viewProposal = function(dealId) {
       <tr><td>Rebate / Discount</td><td>-$${deal.rebate.toLocaleString()}</td></tr>
       <tr><td>Down Payment</td><td>-$${deal.downPayment.toLocaleString()}</td></tr>
       <tr><td>Sales Tax (${deal.taxRate}%)</td><td>+$${deal.salesTax.toLocaleString()}</td></tr>
-      <tr><td>Fees (doc, title, registration)</td><td>+$${deal.totalFees.toLocaleString()}</td></tr>
+      ${fiRows}
+      <tr><td>Title Fee</td><td>+$${(deal.titleFee || 0).toLocaleString()}</td></tr>
+      <tr><td>Registration Fee</td><td>+$${(deal.registrationFee || 0).toLocaleString()}</td></tr>
       <tr class="total-row"><td>Amount Financed</td><td>$${deal.amountFinanced.toLocaleString()}</td></tr>
     </table>
 
@@ -1404,6 +1560,16 @@ window.viewProposal = function(dealId) {
       Sales tax is calculated on vehicle price minus trade-in value, per typical state tax treatment;
       actual tax rules vary by state and jurisdiction. Final terms are subject to credit approval.
     </p>
+  `;
+
+  document.getElementById('proposalContent').innerHTML = `
+    <h2>Deal Proposal${isLease ? ' -- Lease' : ''}</h2>
+    <div class="proposal-meta">
+      <span><strong>Customer:</strong> ${customerName}</span>
+      <span><strong>Vehicle:</strong> ${vehicleLabel}</span>
+      <span><strong>Date:</strong> ${date}</span>
+    </div>
+    ${bodyHtml}
   `;
 
   proposalModal.classList.add('active');

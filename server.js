@@ -375,7 +375,21 @@ app.post('/api/leads/:id/send-text', async (req, res) => {
 // one source of truth -- the frontend just displays whatever this
 // function calculates, it never re-does the math itself.
 
-function calculateDeal(input) {
+// F&I menu products apply to both retail and lease deals -- pulled into
+// their own helper so both calculators build this part identically instead
+// of two copies of the same six fields drifting apart over time.
+function extractFiProducts(input) {
+  return {
+    gapPremium: Number(input.gapPremium) || 0,
+    servicePremium: Number(input.servicePremium) || 0, // extended service contract (ESC)
+    maintenancePremium: Number(input.maintenancePremium) || 0,
+    aftermarketAmount: Number(input.aftermarketAmount) || 0, // accessories/other aftermarket products
+    dealerFees: Number(input.dealerFees) || 0,
+    licenseFee: Number(input.licenseFee) || 0
+  };
+}
+
+function calculateRetailDeal(input) {
   const vehiclePrice = Number(input.vehiclePrice) || 0;
   const tradeInValue = Number(input.tradeInValue) || 0;
   const tradeInPayoff = Number(input.tradeInPayoff) || 0;
@@ -387,6 +401,7 @@ function calculateDeal(input) {
   const registrationFee = Number(input.registrationFee) || 0;
   const apr = Number(input.apr) || 0;
   const termMonths = Number(input.termMonths) || 60;
+  const fi = extractFiProducts(input);
 
   // Net trade-in equity: what the trade is actually worth toward the deal
   // after paying off whatever is still owed on it. Can be negative if the
@@ -399,10 +414,12 @@ function calculateDeal(input) {
   const taxableAmount = Math.max(vehiclePrice - netTradeIn, 0);
   const salesTax = taxableAmount * (taxRate / 100);
 
-  const totalFees = docFee + titleFee + registrationFee;
+  const totalFees = docFee + titleFee + registrationFee +
+    fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   // What's left to finance after trade-in, rebate, and down payment are
-  // subtracted, then tax and fees are added back in.
+  // subtracted, then tax and fees (including F&I products, which are
+  // typically financed into the deal) are added back in.
   let amountFinanced = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees;
   if (amountFinanced < 0) amountFinanced = 0;
 
@@ -421,6 +438,7 @@ function calculateDeal(input) {
   const totalDealCost = totalOfPayments + downPayment;
 
   return {
+    dealType: 'retail',
     vehiclePrice,
     tradeInValue,
     tradeInPayoff,
@@ -433,7 +451,8 @@ function calculateDeal(input) {
     docFee,
     titleFee,
     registrationFee,
-    totalFees,
+    ...fi,
+    totalFees: round2(totalFees),
     amountFinanced: round2(amountFinanced),
     apr,
     termMonths,
@@ -441,6 +460,115 @@ function calculateDeal(input) {
     totalOfPayments: round2(totalOfPayments),
     totalDealCost: round2(totalDealCost)
   };
+}
+
+// Lease math follows the standard industry formula used across DMS
+// platforms (capitalized cost, cap cost reduction, residual, money
+// factor) -- this is well-established math, not something proprietary to
+// any one system.
+function calculateLeaseDeal(input) {
+  const msrp = Number(input.msrp) || 0;
+  const vehiclePrice = Number(input.vehiclePrice) || 0; // negotiated selling price
+  const docFee = Number(input.docFee) || 0;
+  const acquisitionFee = Number(input.acquisitionFee) || 0;
+  const fi = extractFiProducts(input);
+
+  const cashDown = Number(input.downPayment) || 0;
+  const rebate = Number(input.rebate) || 0;
+  const tradeInValue = Number(input.tradeInValue) || 0;
+  const tradeInPayoff = Number(input.tradeInPayoff) || 0;
+  const cashBack = Number(input.cashBack) || 0;
+
+  const residualPercent = Number(input.residualPercent) || 0;
+  const annualMiles = Number(input.annualMiles) || 12000;
+  const moneyFactor = Number(input.moneyFactor) || 0;
+  const termMonths = Number(input.termMonths) || 36;
+  const securityDeposit = Number(input.securityDeposit) || 0;
+  const advancedPayments = Number(input.advancedPayments) || 0;
+  const taxRate = Number(input.taxRate) || 0;
+
+  // Gross capitalized cost: the negotiated price plus everything being
+  // rolled into the lease (fees, F&I products) instead of paid upfront.
+  const grossCapCost = vehiclePrice + docFee + acquisitionFee +
+    fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
+
+  const netTradeIn = tradeInValue - tradeInPayoff;
+
+  // Cap cost reduction: everything that reduces what actually gets
+  // capitalized into the lease -- cash down, rebates, and net trade
+  // equity all lower it; cash back to the customer raises it.
+  const totalCapReduction = cashDown + rebate + netTradeIn - cashBack;
+  const netCapCost = Math.max(grossCapCost - totalCapReduction, 0);
+
+  const residualAmount = msrp * (residualPercent / 100);
+
+  // Depreciation: the vehicle's projected loss in value over the lease
+  // term, spread evenly across the monthly payments.
+  const monthlyDepreciation = (netCapCost - residualAmount) / termMonths;
+
+  // Rent charge: the lease's equivalent of interest, based on the money
+  // factor (roughly APR / 2400) applied to the sum of net cap cost and
+  // residual, not just the financed portion.
+  const monthlyRentCharge = (netCapCost + residualAmount) * moneyFactor;
+
+  const baseMonthlyPayment = monthlyDepreciation + monthlyRentCharge;
+
+  // Tax-on-monthly-payment is the most common method across states, and
+  // the one implemented here -- some states instead tax the cap cost
+  // reduction upfront (or a mix of both), which is a documented
+  // simplification, the same spirit as the retail tax assumption.
+  const monthlyTax = baseMonthlyPayment * (taxRate / 100);
+  const totalMonthlyPayment = baseMonthlyPayment + monthlyTax;
+
+  // Due at signing: whatever isn't capitalized into the lease -- the cap
+  // cost reduction itself, any advance payments, and the security deposit.
+  const dueAtSigning = totalCapReduction + (totalMonthlyPayment * advancedPayments) + securityDeposit;
+
+  const totalOfPayments = totalMonthlyPayment * termMonths;
+  const totalDealCost = totalOfPayments + totalCapReduction;
+
+  return {
+    dealType: 'lease',
+    msrp,
+    vehiclePrice,
+    docFee,
+    acquisitionFee,
+    ...fi,
+    downPayment: cashDown,
+    rebate,
+    tradeInValue,
+    tradeInPayoff,
+    netTradeIn,
+    cashBack,
+    grossCapCost: round2(grossCapCost),
+    totalCapReduction: round2(totalCapReduction),
+    netCapCost: round2(netCapCost),
+    residualPercent,
+    residualAmount: round2(residualAmount),
+    annualMiles,
+    moneyFactor,
+    termMonths,
+    securityDeposit,
+    advancedPayments,
+    taxRate,
+    monthlyDepreciation: round2(monthlyDepreciation),
+    monthlyRentCharge: round2(monthlyRentCharge),
+    baseMonthlyPayment: round2(baseMonthlyPayment),
+    monthlyTax: round2(monthlyTax),
+    monthlyPayment: round2(totalMonthlyPayment), // shared field name with retail so the UI can display either uniformly
+    dueAtSigning: round2(dueAtSigning),
+    totalOfPayments: round2(totalOfPayments),
+    totalDealCost: round2(totalDealCost)
+  };
+}
+
+// Single entry point the routes call -- picks the right calculator based
+// on dealType so nothing outside this function needs to know there are
+// two different math paths.
+function calculateDeal(input) {
+  const dealType = input.dealType || 'retail';
+  if (dealType === 'lease') return calculateLeaseDeal(input);
+  return calculateRetailDeal({ ...input, dealType: 'retail' });
 }
 
 function round2(n) {

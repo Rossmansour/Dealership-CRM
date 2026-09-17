@@ -237,7 +237,8 @@
         "status": "pending",
         "dateSubmitted": "2026-08-23T00:00:00.000Z"
       },
-      "dateCreated": "2026-08-23T00:00:00.000Z"
+      "dateCreated": "2026-08-23T00:00:00.000Z",
+      "dealType": "retail"
     }
   ],
   "nextDealNumber": 1002
