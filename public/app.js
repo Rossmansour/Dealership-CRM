@@ -5,6 +5,7 @@
 
 const API = '/api';
 let cars = [];
+let appSettings = {};
 let leads = [];
 let deals = [];
 
@@ -894,6 +895,7 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('dealDownPayment').value = deal.downPayment;
   document.getElementById('dealTaxRate').value = deal.taxRate;
   document.getElementById('dealTermMonths').value = deal.termMonths;
+  document.getElementById('dealState').value = deal.state || (deal.creditApp && deal.creditApp.applicant ? deal.creditApp.applicant.state : '') || '';
 
   // Retail-only fields
   document.getElementById('dealTitleFee').value = deal.titleFee || 75;
@@ -1097,6 +1099,7 @@ function buildDeskingPayload() {
     downPayment: document.getElementById('dealDownPayment').value,
     taxRate: document.getElementById('dealTaxRate').value,
     termMonths: document.getElementById('dealTermMonths').value,
+    state: document.getElementById('dealState').value,
     titleFee: document.getElementById('dealTitleFee').value,
     registrationFee: document.getElementById('dealRegistrationFee').value,
     apr: document.getElementById('dealApr').value,
@@ -1145,6 +1148,50 @@ document.getElementById('saveDealBtn').addEventListener('click', async () => {
 
 document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click', () => {
   viewProposal(currentWorkspaceDealId);
+});
+
+document.getElementById('autoCalcFeesBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('autoCalcFeesStatus');
+  const state = document.getElementById('dealState').value;
+  const carId = document.getElementById('dealAssignedCarId').value;
+  const price = document.getElementById('dealVehiclePrice').value;
+  const deal = deals.find(d => d.id === currentWorkspaceDealId);
+  const zip = (deal && deal.creditApp && deal.creditApp.applicant) ? deal.creditApp.applicant.zip : '';
+  const car = cars.find(c => c.id === carId);
+  const vehicleYear = car ? car.year : '';
+
+  if (!price) {
+    statusEl.innerHTML = `<div class="send-text-status-error">Enter a vehicle price first.</div>`;
+    return;
+  }
+
+  statusEl.innerHTML = `<div style="font-size:13px;color:var(--text-muted);">Calculating...</div>`;
+
+  try {
+    const res = await fetch(`${API}/fees/calculate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, zip, price, vehicleYear })
+    });
+    const result = await res.json();
+
+    if (!res.ok) {
+      statusEl.innerHTML = `<div class="send-text-status-error">${result.error}</div>`;
+      return;
+    }
+
+    document.getElementById('dealTaxRate').value = result.taxRate;
+    document.getElementById('dealLicenseFee').value = result.licenseFee;
+    document.getElementById('dealTitleFee').value = result.titleFee;
+    document.getElementById('dealRegistrationFee').value = result.registrationFee;
+
+    const tradeNote = result.tradeInReducesTaxableAmount
+      ? 'trade-in reduces taxable amount'
+      : 'full price is taxable, trade-in does not reduce it';
+    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed} (${tradeNote}). Estimate only -- verify against your state's current DMV schedule.</div>`;
+  } catch (err) {
+    statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
+  }
 });
 
 // "Duplicate as New Scenario" -- clones the current deal's numbers into a
@@ -1231,7 +1278,11 @@ function applicantFieldsHtml(prefix, title) {
       <label>Address 1 <input type="text" id="${prefix}Address1" /></label>
       <label>Address 2 <input type="text" id="${prefix}Address2" /></label>
       <div class="form-grid form-grid-3">
+        <label>City <input type="text" id="${prefix}City" /></label>
+        <label>State <input type="text" maxlength="2" id="${prefix}State" placeholder="CA" /></label>
         <label>Zip <input type="text" id="${prefix}Zip" /></label>
+      </div>
+      <div class="form-grid form-grid-3">
         <label>Phone <input type="text" id="${prefix}Phone" /></label>
         <label>Email <input type="email" id="${prefix}Email" /></label>
       </div>
@@ -1323,6 +1374,8 @@ function fillApplicantFields(prefix, a) {
   document.getElementById(`${prefix}LicenseNumber`).value = a.licenseNumber || '';
   document.getElementById(`${prefix}Address1`).value = a.address1 || '';
   document.getElementById(`${prefix}Address2`).value = a.address2 || '';
+  document.getElementById(`${prefix}City`).value = a.city || '';
+  document.getElementById(`${prefix}State`).value = a.state || '';
   document.getElementById(`${prefix}Zip`).value = a.zip || '';
   document.getElementById(`${prefix}Phone`).value = a.phone || '';
   document.getElementById(`${prefix}Email`).value = a.email || '';
@@ -1379,6 +1432,8 @@ function collectApplicantFields(prefix) {
     licenseNumber: document.getElementById(`${prefix}LicenseNumber`).value,
     address1: document.getElementById(`${prefix}Address1`).value,
     address2: document.getElementById(`${prefix}Address2`).value,
+    city: document.getElementById(`${prefix}City`).value,
+    state: document.getElementById(`${prefix}State`).value,
     zip: document.getElementById(`${prefix}Zip`).value,
     phone: document.getElementById(`${prefix}Phone`).value,
     email: document.getElementById(`${prefix}Email`).value,
@@ -1833,6 +1888,7 @@ const feeDefaultsModal = document.getElementById('feeDefaultsModal');
 document.getElementById('feeDefaultsBtn').addEventListener('click', async () => {
   const res = await fetch(`${API}/settings`);
   const settings = await res.json();
+  appSettings = settings;
   document.getElementById('settingsDocFee').value = settings.docFee;
   document.getElementById('settingsTitleFee').value = settings.titleFee;
   document.getElementById('settingsRegistrationFee').value = settings.registrationFee;
@@ -1840,7 +1896,14 @@ document.getElementById('feeDefaultsBtn').addEventListener('click', async () => 
   document.getElementById('settingsDealerFees').value = settings.dealerFees;
   document.getElementById('settingsAcquisitionFee').value = settings.acquisitionFee;
   document.getElementById('settingsTaxRate').value = settings.taxRate;
+  document.getElementById('settingsDmvFeeMethod').value = settings.dmvFeeMethod || 'flat';
+  document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
+  document.getElementById('dmvPercentageField').style.display = (settings.dmvFeeMethod === 'percentage') ? 'block' : 'none';
   feeDefaultsModal.classList.add('active');
+});
+
+document.getElementById('settingsDmvFeeMethod').addEventListener('change', (e) => {
+  document.getElementById('dmvPercentageField').style.display = (e.target.value === 'percentage') ? 'block' : 'none';
 });
 
 document.getElementById('cancelFeeDefaultsBtn').addEventListener('click', () => {
@@ -1857,12 +1920,15 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
     dealerFees: document.getElementById('settingsDealerFees').value,
     acquisitionFee: document.getElementById('settingsAcquisitionFee').value,
     taxRate: document.getElementById('settingsTaxRate').value,
+    dmvFeeMethod: document.getElementById('settingsDmvFeeMethod').value,
+    dmvFeePercentage: document.getElementById('settingsDmvFeePercentage').value,
   };
-  await fetch(`${API}/settings`, {
+  const res = await fetch(`${API}/settings`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+  appSettings = await res.json();
   feeDefaultsModal.classList.remove('active');
 });
 

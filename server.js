@@ -94,7 +94,14 @@ function defaultFeeSettings() {
     licenseFee: 0,
     dealerFees: 0,
     acquisitionFee: 595,
-    taxRate: 7
+    taxRate: 7,
+    // DMV/registration fee calculation is a documented simplification, not
+    // an attempt to replicate any specific state's real fee schedule --
+    // actual DMV fees vary by state and can involve vehicle weight, county,
+    // or age-based depreciation tables. "flat" uses registrationFee as-is
+    // (the default); "percentage" calculates it from the vehicle's price.
+    dmvFeeMethod: 'flat', // 'flat' | 'percentage'
+    dmvFeePercentage: 1.5
   };
 }
 
@@ -422,6 +429,120 @@ function extractFiProducts(input) {
   };
 }
 
+// ---------- State-specific sales tax & DMV fee lookup (CA and AZ) ----------
+//
+// Real DMV/registration fees and sales tax vary enormously by state --
+// there is no single national formula. This implements two states
+// accurately based on their actual published rules (CDTFA for California,
+// ADOT/AZDOR for Arizona). Any other state falls back to California's
+// numbers as a stand-in until it gets built out for real -- an explicit,
+// documented placeholder rather than a silent wrong guess.
+//
+// County/city rates are approximated from published county-level
+// reference rates using ZIP-code prefixes, not an exact address-level
+// CDTFA/ADOR lookup -- that would require a live rate API. This is a
+// reasonable approximation for a portfolio project, not a compliance-grade
+// tax engine, and is documented as such wherever it's surfaced.
+
+const CA_COUNTY_RATE_BY_ZIP_PREFIX = [
+  { prefixes: ['900', '901', '902', '903', '904', '905', '906', '907', '908', '910', '911', '912', '913'], rate: 9.75 }, // LA County
+  { prefixes: ['945', '946'], rate: 10.25 }, // Alameda County
+  { prefixes: ['940', '941'], rate: 8.625 }, // San Francisco
+  { prefixes: ['942', '943', '944'], rate: 9.375 }, // San Mateo / Santa Clara
+  { prefixes: ['950', '951', '952', '953'], rate: 9.375 }, // Santa Clara / San Jose area
+  { prefixes: ['920', '921'], rate: 7.75 }, // San Diego County
+  { prefixes: ['926', '927', '928'], rate: 7.75 }, // Orange County
+  { prefixes: ['956', '957', '958'], rate: 8.75 }, // Sacramento area
+];
+const CA_STATEWIDE_BASE_RATE = 7.25;
+
+const AZ_CITY_RATE_BY_ZIP_PREFIX = [
+  { prefixes: ['850', '851', '852', '853'], rate: 8.6 }, // Phoenix / Maricopa County
+  { prefixes: ['855', '856', '857'], rate: 8.7 }, // Tucson / Pima County
+];
+const AZ_STATEWIDE_BASE_RATE = 5.6;
+
+function lookupCombinedRate(zip, table, statewideBase) {
+  const prefix = (zip || '').toString().slice(0, 3);
+  const match = table.find(entry => entry.prefixes.includes(prefix));
+  return match ? match.rate : statewideBase;
+}
+
+// California: $74 base registration + $29 CHP fee + a value-tiered
+// Transportation Improvement Fee, title $28, and the Vehicle License Fee
+// (0.65% of the vehicle's value) mapped onto our "License Fee" field,
+// since VLF literally *is* California's vehicle license fee.
+function calculateCaliforniaFees(price) {
+  const vlf = price * 0.0065;
+  let tif;
+  if (price < 5000) tif = 28;
+  else if (price < 25000) tif = 56;
+  else if (price < 35000) tif = 112;
+  else if (price < 60000) tif = 168;
+  else tif = 224;
+
+  return {
+    taxRate: null, // filled in by caller from the ZIP lookup
+    registrationFee: round2(74 + 29 + tif),
+    titleFee: 28,
+    licenseFee: round2(vlf)
+  };
+}
+
+// Arizona: Vehicle License Tax (VLT) is 60% of the vehicle's value in
+// year one, depreciating 16.25% per year after that, taxed at $2.80 per
+// $100 for a new vehicle or $2.89 per $100 once it's a renewal/used
+// vehicle -- genuinely age-dependent, calculated here from the vehicle's
+// model year, not just a flat guess.
+function calculateArizonaFees(price, vehicleYear) {
+  const currentYear = new Date().getFullYear();
+  const age = Math.max(currentYear - (Number(vehicleYear) || currentYear), 0);
+
+  let assessedValue = price * 0.60;
+  for (let i = 0; i < age; i++) {
+    assessedValue *= 0.8375; // 16.25% annual depreciation
+  }
+  const vltRate = age === 0 ? 2.80 : 2.89;
+  const vlt = (assessedValue / 100) * vltRate;
+
+  return {
+    taxRate: null,
+    registrationFee: round2(9 + 5 + 1.50), // base registration + plate + air quality
+    titleFee: 4,
+    licenseFee: round2(vlt)
+  };
+}
+
+// Single entry point: given a state, ZIP, price, and vehicle year, returns
+// the calculated tax rate and DMV-style fees. Anything other than CA/AZ
+// uses California's numbers as the documented fallback.
+function calculateStateFees(state, zip, price, vehicleYear) {
+  const normalizedState = (state || '').trim().toUpperCase();
+
+  if (normalizedState === 'AZ') {
+    const fees = calculateArizonaFees(price, vehicleYear);
+    fees.taxRate = lookupCombinedRate(zip, AZ_CITY_RATE_BY_ZIP_PREFIX, AZ_STATEWIDE_BASE_RATE);
+    fees.stateUsed = 'AZ';
+    fees.tradeInReducesTaxableAmount = true; // Arizona credits trade-in value against the taxable amount
+    return fees;
+  }
+
+  // CA, or any other/unrecognized state -- California is the documented fallback.
+  const fees = calculateCaliforniaFees(price);
+  fees.taxRate = lookupCombinedRate(zip, CA_COUNTY_RATE_BY_ZIP_PREFIX, CA_STATEWIDE_BASE_RATE);
+  fees.stateUsed = (normalizedState === 'CA') ? 'CA' : `CA (fallback -- ${normalizedState || 'no state on file'} not yet built)`;
+  fees.tradeInReducesTaxableAmount = false; // California taxes the full price; trade-in does not reduce it
+  return fees;
+}
+
+app.post('/api/fees/calculate', (req, res) => {
+  const { state, zip, price, vehicleYear } = req.body;
+  if (!price) return res.status(400).json({ error: 'price is required' });
+
+  const result = calculateStateFees(state, zip, Number(price), vehicleYear);
+  res.json(result);
+});
+
 function calculateRetailDeal(input) {
   const vehiclePrice = Number(input.vehiclePrice) || 0;
   const tradeInValue = Number(input.tradeInValue) || 0;
@@ -435,16 +556,22 @@ function calculateRetailDeal(input) {
   const apr = Number(input.apr) || 0;
   const termMonths = Number(input.termMonths) || 60;
   const fi = extractFiProducts(input);
+  const state = (input.state || '').trim().toUpperCase();
 
   // Net trade-in equity: what the trade is actually worth toward the deal
   // after paying off whatever is still owed on it. Can be negative if the
   // customer owes more than the trade is worth (negative equity).
   const netTradeIn = tradeInValue - tradeInPayoff;
 
-  // Most states apply sales tax to the price AFTER trade-in credit, but
-  // BEFORE manufacturer rebates (rebates are still taxed in most states).
-  // This is a simplification worth calling out -- actual rules vary by state.
-  const taxableAmount = Math.max(vehiclePrice - netTradeIn, 0);
+  // Whether trade-in reduces the taxable amount is genuinely state-specific,
+  // not a minor rounding detail: Arizona credits trade-in value against the
+  // taxable amount (the general rule most states follow), but California
+  // taxes the full vehicle price regardless of trade-in (Rev. & Tax. Code
+  // section 6012). Anything other than AZ defaults to California's rule,
+  // matching the documented CA fallback used for unbuilt states.
+  const taxableAmount = state === 'AZ'
+    ? Math.max(vehiclePrice - netTradeIn, 0)
+    : vehiclePrice;
   const salesTax = taxableAmount * (taxRate / 100);
 
   const totalFees = docFee + titleFee + registrationFee +
@@ -472,6 +599,7 @@ function calculateRetailDeal(input) {
 
   return {
     dealType: 'retail',
+    state: input.state || '',
     vehiclePrice,
     tradeInValue,
     tradeInPayoff,
@@ -562,6 +690,7 @@ function calculateLeaseDeal(input) {
 
   return {
     dealType: 'lease',
+    state: input.state || '',
     msrp,
     vehiclePrice,
     docFee,
@@ -609,9 +738,12 @@ function calculateCashDeal(input) {
   const titleFee = Number(input.titleFee) || 0;
   const registrationFee = Number(input.registrationFee) || 0;
   const fi = extractFiProducts(input);
+  const state = (input.state || '').trim().toUpperCase();
 
   const netTradeIn = tradeInValue - tradeInPayoff;
-  const taxableAmount = Math.max(vehiclePrice - netTradeIn, 0);
+  const taxableAmount = state === 'AZ'
+    ? Math.max(vehiclePrice - netTradeIn, 0)
+    : vehiclePrice;
   const salesTax = taxableAmount * (taxRate / 100);
   const totalFees = docFee + titleFee + registrationFee +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
@@ -621,6 +753,7 @@ function calculateCashDeal(input) {
 
   return {
     dealType: 'cash',
+    state: input.state || '',
     vehiclePrice,
     tradeInValue,
     tradeInPayoff,
@@ -671,6 +804,8 @@ function defaultApplicant() {
     dob: '',
     address1: '',
     address2: '',
+    city: '',
+    state: '',
     zip: '',
     phone: '',
     homeDisclosure: false,

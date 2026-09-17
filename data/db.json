@@ -9,7 +9,7 @@
       "mileage": 42000,
       "cost": 14500,
       "price": 17900,
-      "status": "available",
+      "status": "pending",
       "dateAdded": "2026-08-01T00:00:00.000Z",
       "dateSold": null,
       "photos": [],

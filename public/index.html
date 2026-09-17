@@ -383,9 +383,12 @@
               <label id="msrpLabel" style="display:none;">MSRP <input type="number" id="dealMsrp" value="0" /></label>
               <label>Rebate <input type="number" id="dealRebate" value="0" /></label>
               <label id="downPaymentLabel">Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
+              <label>State <input type="text" maxlength="2" id="dealState" placeholder="CA" /></label>
               <label>Sales Tax Rate (%) <input type="number" step="0.01" id="dealTaxRate" value="7" /></label>
               <label id="termLabel">Term (months) <input type="number" id="dealTermMonths" value="60" /></label>
             </div>
+            <button type="button" class="btn-secondary" id="autoCalcFeesBtn" style="margin-bottom:12px;">🧮 Auto-Calculate Tax &amp; DMV Fees</button>
+            <div id="autoCalcFeesStatus"></div>
 
             <div class="ca-toggle-row">
               <label class="ca-inline-checkbox">
@@ -521,6 +524,18 @@
       <label>Dealer Fees <input type="number" id="settingsDealerFees" /></label>
       <label>Acquisition Fee (lease) <input type="number" id="settingsAcquisitionFee" /></label>
       <label>Default Sales Tax Rate (%) <input type="number" step="0.01" id="settingsTaxRate" /></label>
+
+      <div class="ca-section-title">DMV / Registration Fee Calculation</div>
+      <p class="send-text-hint" style="margin-top:-4px;">
+        DMV fees vary a lot by state (flat, weight-based, or value-based depreciation schedules). This is a simplified auto-calculation, not a replacement for checking your state's actual fee schedule.
+      </p>
+      <label>Calculation Method
+        <select id="settingsDmvFeeMethod">
+          <option value="flat">Flat Fee (use Registration Fee above)</option>
+          <option value="percentage">Percentage of Vehicle Price</option>
+        </select>
+      </label>
+      <label id="dmvPercentageField" style="display:none;">DMV Fee Percentage (%) <input type="number" step="0.01" id="settingsDmvFeePercentage" /></label>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelFeeDefaultsBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save Defaults</button>
