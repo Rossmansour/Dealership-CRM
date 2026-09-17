@@ -782,18 +782,20 @@ function renderDeals() {
   const searchTerm = document.getElementById('dealSearchInput').value;
   const dateFrom = document.getElementById('dealDateFrom').value;
   const dateTo = document.getElementById('dealDateTo').value;
+  const statusFilter = document.getElementById('dealStatusFilter').value;
 
   const filtered = deals.filter(d => {
     const lead = leads.find(l => l.id === d.leadId);
     const car = cars.find(c => c.id === d.carId);
+    if (statusFilter && d.status !== statusFilter) return false;
     return dealMatchesSearch(d, lead, car, searchTerm) && dealMatchesDateRange(d, dateFrom, dateTo);
   });
 
   document.getElementById('dealTableBody').innerHTML = filtered.map(d => {
     const lead = leads.find(l => l.id === d.leadId);
     const car = cars.find(c => c.id === d.carId);
-    const customerName = lead ? lead.name : 'Unknown';
-    const vehicleLabel = car ? `${car.year} ${car.make} ${car.model}` : 'Unknown';
+    const customerName = lead ? lead.name : '-- No customer --';
+    const vehicleLabel = car ? `${car.year} ${car.make} ${car.model}` : '-- No vehicle --';
     const date = new Date(d.dateCreated).toLocaleDateString();
     const creditStatus = d.creditApp ? d.creditApp.status : 'not_submitted';
     return `
@@ -816,62 +818,30 @@ function renderDeals() {
 document.getElementById('dealSearchInput').addEventListener('input', renderDeals);
 document.getElementById('dealDateFrom').addEventListener('change', renderDeals);
 document.getElementById('dealDateTo').addEventListener('change', renderDeals);
+document.getElementById('dealStatusFilter').addEventListener('change', renderDeals);
 document.getElementById('clearDealFiltersBtn').addEventListener('click', () => {
   document.getElementById('dealSearchInput').value = '';
   document.getElementById('dealDateFrom').value = '';
   document.getElementById('dealDateTo').value = '';
+  document.getElementById('dealStatusFilter').value = '';
   renderDeals();
 });
 
-// ---------- New Deal (quick create -> generates Deal #) ----------
+// ---------- New Deal (instant create -> generates Deal #, fill in details later) ----------
 
-const newDealModal = document.getElementById('newDealModal');
-
-document.getElementById('addDealBtn').addEventListener('click', () => {
-  if (leads.length === 0) {
-    alert('Add a lead first so you have a customer to attach this deal to.');
-    return;
-  }
-  if (cars.filter(c => c.status !== 'sold').length === 0) {
-    alert('Add a car to inventory first.');
-    return;
-  }
-  document.getElementById('newDealForm').reset();
-
-  const leadSelect = document.getElementById('newDealLeadId');
-  leadSelect.innerHTML = leads.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
-
-  const carSelect = document.getElementById('newDealCarId');
-  carSelect.innerHTML = cars
-    .filter(c => c.status !== 'sold')
-    .map(c => `<option value="${c.id}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
-    .join('');
-
-  newDealModal.classList.add('active');
-});
-
-document.getElementById('cancelNewDealBtn').addEventListener('click', () => {
-  newDealModal.classList.remove('active');
-});
-
-document.getElementById('newDealForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const payload = {
-    leadId: document.getElementById('newDealLeadId').value,
-    carId: document.getElementById('newDealCarId').value,
-  };
-
+document.getElementById('addDealBtn').addEventListener('click', async () => {
+  // No picker -- create a bare deal immediately and open straight into the
+  // workspace. Customer and vehicle can be assigned from the Desking tab
+  // whenever they're actually known, which matches how a desk sometimes
+  // starts a deal number before all the paperwork is in hand.
   const res = await fetch(`${API}/deals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({})
   });
   const newDeal = await res.json();
 
-  newDealModal.classList.remove('active');
   await loadAll();
-
-  // Jump straight into the desking tool for the deal that was just created
   openDealWorkspace(newDeal.id);
 });
 
@@ -894,6 +864,21 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('workspaceTitle').textContent = `Deal #D-${deal.dealNumber}`;
   document.getElementById('dealStatusSelect').value = deal.status;
   document.getElementById('workingDealId').value = deal.id;
+
+  // Customer/Vehicle can be assigned now or left blank and filled in later --
+  // populate the pickers with everything available, defaulting to "none"
+  // when the deal doesn't have one yet.
+  const leadSelect = document.getElementById('dealAssignedLeadId');
+  leadSelect.innerHTML = '<option value="">-- No customer assigned yet --</option>' +
+    leads.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+  leadSelect.value = deal.leadId || '';
+
+  const carSelect = document.getElementById('dealAssignedCarId');
+  carSelect.innerHTML = '<option value="">-- No vehicle assigned yet --</option>' +
+    cars.filter(c => c.status !== 'sold' || c.id === deal.carId)
+      .map(c => `<option value="${c.id}" data-price="${c.price}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
+      .join('');
+  carSelect.value = deal.carId || '';
 
   // Fill desking fields
   document.getElementById('dealVehiclePrice').value = deal.vehiclePrice;
@@ -922,6 +907,16 @@ window.openDealWorkspace = function(dealId) {
 
   dealWorkspaceModal.classList.add('active');
 };
+
+// Picking a vehicle auto-fills its price, same convenience as before --
+// just now it can happen anytime from within the workspace, not only at
+// deal creation.
+document.getElementById('dealAssignedCarId').addEventListener('change', (e) => {
+  const selected = e.target.options[e.target.selectedIndex];
+  if (selected && selected.dataset.price) {
+    document.getElementById('dealVehiclePrice').value = selected.dataset.price;
+  }
+});
 
 document.getElementById('closeWorkspaceBtn').addEventListener('click', () => {
   dealWorkspaceModal.classList.remove('active');
@@ -962,6 +957,8 @@ document.getElementById('dealStatusSelect').addEventListener('change', async (e)
 document.getElementById('deskingForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const payload = {
+    leadId: document.getElementById('dealAssignedLeadId').value || null,
+    carId: document.getElementById('dealAssignedCarId').value || null,
     vehiclePrice: document.getElementById('dealVehiclePrice').value,
     rebate: document.getElementById('dealRebate').value,
     hasTrade: document.getElementById('hasTradeCheckbox').checked,

@@ -117,6 +117,13 @@
   <section id="deals" class="tab-panel">
     <div class="panel-header deals-filter-header">
       <input type="text" id="dealSearchInput" placeholder="Search name, VIN, stock #, deal #, phone, email, company..." class="deal-search-input" />
+      <select id="dealStatusFilter">
+        <option value="">All statuses</option>
+        <option value="working">Stored / Working</option>
+        <option value="delivered">Delivered</option>
+        <option value="closed">Closed</option>
+        <option value="finalized">Finalized</option>
+      </select>
       <label class="deal-date-label">From <input type="date" id="dealDateFrom" /></label>
       <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
       <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
@@ -313,25 +320,6 @@
   </div>
 </div>
 
-<!-- New Deal Modal (quick create -> generates Deal #) -->
-<div class="modal" id="newDealModal">
-  <div class="modal-content">
-    <h2>Create Deal</h2>
-    <form id="newDealForm">
-      <label>Customer (Lead)
-        <select id="newDealLeadId" required></select>
-      </label>
-      <label>Vehicle
-        <select id="newDealCarId" required></select>
-      </label>
-      <div class="modal-actions">
-        <button type="button" class="btn-secondary" id="cancelNewDealBtn">Cancel</button>
-        <button type="submit" class="btn-primary">Create Deal #</button>
-      </div>
-    </form>
-  </div>
-</div>
-
 <!-- Deal Workspace Modal (Desking + Credit Application) -->
 <div class="modal" id="dealWorkspaceModal">
   <div class="modal-content modal-wide">
@@ -354,6 +342,21 @@
     <div id="desking" class="sub-tab-panel active">
       <form id="deskingForm">
         <input type="hidden" id="workingDealId" />
+        <div class="ca-section-title">Customer & Vehicle</div>
+        <div class="form-grid">
+          <label>Customer
+            <select id="dealAssignedLeadId">
+              <option value="">-- No customer assigned yet --</option>
+            </select>
+          </label>
+          <label>Vehicle
+            <select id="dealAssignedCarId">
+              <option value="">-- No vehicle assigned yet --</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="ca-section-title">Pricing</div>
         <div class="form-grid">
           <label>Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
           <label>Rebate / Discount <input type="number" id="dealRebate" value="0" /></label>

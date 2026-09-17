@@ -533,12 +533,13 @@ app.post('/api/deals', (req, res) => {
   if (!db.deals) db.deals = [];
   if (!db.nextDealNumber) db.nextDealNumber = 1001;
 
+  // Customer and vehicle are both optional at creation -- a deal number
+  // can be opened before either is known and filled in later from the
+  // Desking tab, matching how a desk sometimes starts a deal before all
+  // the paperwork is in hand.
   const { leadId, carId } = req.body;
-  if (!leadId || !carId) {
-    return res.status(400).json({ error: 'leadId and carId are required' });
-  }
 
-  const car = db.cars.find(c => c.id === carId);
+  const car = carId ? db.cars.find(c => c.id === carId) : null;
   const calculated = calculateDeal({
     vehiclePrice: req.body.vehiclePrice || (car ? car.price : 0),
     taxRate: req.body.taxRate ?? 7,
@@ -552,9 +553,9 @@ app.post('/api/deals', (req, res) => {
   const newDeal = {
     id: crypto.randomUUID(),
     dealNumber: db.nextDealNumber,
-    leadId,
-    carId,
-    status: 'working', // working | credit_submitted | approved | declined | finalized
+    leadId: leadId || null,
+    carId: carId || null,
+    status: 'working', // working | delivered | closed | finalized
     hasTrade: false,
     ...calculated,
     creditApp: defaultCreditApp(),
