@@ -17,14 +17,35 @@
 </head>
 <body>
 
+<!-- MODULE SIDEBAR -->
+<nav class="main-sidebar" id="mainSidebar">
+  <button class="sidebar-item active" data-module="crm">
+    <span class="sidebar-icon">👥</span>
+    <span class="sidebar-label">CRM</span>
+  </button>
+  <button class="sidebar-item" data-module="sales-fi">
+    <span class="sidebar-icon">🤝</span>
+    <span class="sidebar-label">Sales &amp; F&amp;I</span>
+  </button>
+  <button class="sidebar-item" data-module="vehicle-mgmt">
+    <span class="sidebar-icon">🚗</span>
+    <span class="sidebar-label">Vehicle Management System</span>
+  </button>
+  <button class="sidebar-item" data-module="service">
+    <span class="sidebar-icon">🔧</span>
+    <span class="sidebar-label">Service</span>
+  </button>
+</nav>
+
 <header class="topbar">
   <h1 id="brandHomeBtn">🚗 Dealership CRM</h1>
   <nav>
-    <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
-    <button class="tab-btn" data-tab="inventory">Inventory</button>
-    <button class="tab-btn" data-tab="leads">Leads</button>
-    <button class="tab-btn" data-tab="deals">Deals</button>
-    <button class="tab-btn" data-tab="assistant">AI Assistant</button>
+    <button class="tab-btn active" data-tab="dashboard" data-module="crm">Dashboard</button>
+    <button class="tab-btn" data-tab="leads" data-module="crm">Leads</button>
+    <button class="tab-btn" data-tab="assistant" data-module="crm">AI Assistant</button>
+    <button class="tab-btn" data-tab="inventory" data-module="vehicle-mgmt">Inventory</button>
+    <button class="tab-btn" data-tab="deals" data-module="sales-fi">Deals</button>
+    <button class="tab-btn" data-tab="service" data-module="service">Service</button>
     <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
   </nav>
 </header>
@@ -123,6 +144,25 @@
       <input type="text" id="chatInput" placeholder="Ask a question or request a report..." required />
       <button type="submit" class="btn-primary">Send</button>
     </form>
+  </section>
+
+  <!-- SERVICE (placeholder -- next module to build) -->
+  <section id="service" class="tab-panel">
+    <div class="module-placeholder">
+      <div class="module-placeholder-icon">🔧</div>
+      <h2>Service Module</h2>
+      <p>This is the next module on the roadmap -- built out one piece at a time, same as everything else here.</p>
+      <div class="module-placeholder-list">
+        <div class="ca-section-title">Planned for this module</div>
+        <ul>
+          <li>Service appointment scheduling</li>
+          <li>Repair order (RO) tracking</li>
+          <li>Technician assignment &amp; workload view</li>
+          <li>Parts lookup &amp; ordering</li>
+          <li>Service-to-sales handoff (linking service customers back to the CRM)</li>
+        </ul>
+      </div>
+    </div>
   </section>
 
 </main>

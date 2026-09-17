@@ -45,10 +45,39 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 // Clicking the "Dealership CRM" title in the top left jumps back to the
-// Dashboard, same as clicking the Dashboard tab itself.
+// CRM module's Dashboard, keeping the sidebar and visible tabs in sync.
 document.getElementById('brandHomeBtn').addEventListener('click', () => {
-  document.querySelector('.tab-btn[data-tab="dashboard"]').click();
+  setActiveModule('crm');
 });
+
+// ---------- Module sidebar (CRM / Sales & F&I / Vehicle Management / Service) ----------
+//
+// The left sidebar groups the app's tabs into DMS-style modules. Switching
+// modules just filters which top-nav tab buttons are visible and jumps to
+// the first one in that module -- the underlying tab-panel mechanism above
+// is unchanged, so nothing about how pages render had to change.
+
+function setActiveModule(moduleKey) {
+  document.querySelectorAll('.sidebar-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.module === moduleKey);
+  });
+
+  const tabsInModule = document.querySelectorAll(`.tab-btn[data-module="${moduleKey}"]`);
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.style.display = btn.dataset.module === moduleKey ? 'inline-block' : 'none';
+  });
+
+  if (tabsInModule.length > 0) {
+    tabsInModule[0].click();
+  }
+}
+
+document.querySelectorAll('.sidebar-item').forEach(item => {
+  item.addEventListener('click', () => setActiveModule(item.dataset.module));
+});
+
+// Start on the CRM module's Dashboard, matching the sidebar's default active state.
+setActiveModule('crm');
 
 // ---------- Data loading ----------
 

@@ -46,6 +46,17 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
 - **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
 
+## Module structure
+
+This app is organized as a DMS (Dealer Management System) with a left sidebar, similar in spirit to platforms like Tekion or DriveCentric. Hover over the sidebar to see full labels; click a module to switch into it:
+
+- **CRM** \u2014 Dashboard, Leads, AI Assistant
+- **Sales & F&I** \u2014 Deals (desking + credit applications)
+- **Vehicle Management System** \u2014 Inventory
+- **Service** \u2014 not built yet; currently a placeholder describing what's planned (appointment scheduling, repair order tracking, technician assignment, parts lookup, and linking service customers back into the CRM)
+
+Each module is being built out one at a time -- CRM and Sales & F&I are the most complete today, Vehicle Management (Inventory) covers the basics, and Service is next on the roadmap.
+
 **Vehicle Photos & Picture Texts**
 - Upload photos to any car in inventory (Edit Car → Photos section) -- shown as a thumbnail in the Inventory table
 - From a lead's profile, the **Send Text** box lets you attach one of their interested vehicle's photos, sending a real **MMS** (picture text) instead of plain SMS
