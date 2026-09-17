@@ -444,29 +444,52 @@ function extractFiProducts(input) {
 // reasonable approximation for a portfolio project, not a compliance-grade
 // tax engine, and is documented as such wherever it's surfaced.
 
-const CA_COUNTY_RATE_BY_ZIP_PREFIX = [
-  { prefixes: ['900', '901', '902', '903', '904', '905', '906', '907', '908', '910', '911', '912', '913'], rate: 9.75 }, // LA County
-  { prefixes: ['945', '946'], rate: 10.25 }, // Alameda County
-  { prefixes: ['940', '941'], rate: 8.625 }, // San Francisco
-  { prefixes: ['942', '943', '944'], rate: 9.375 }, // San Mateo / Santa Clara
-  { prefixes: ['950', '951', '952', '953'], rate: 9.375 }, // Santa Clara / San Jose area
-  { prefixes: ['920', '921'], rate: 7.75 }, // San Diego County
-  { prefixes: ['926', '927', '928'], rate: 7.75 }, // Orange County
-  { prefixes: ['956', '957', '958'], rate: 8.75 }, // Sacramento area
+// ZIP prefix -> county name, then county name -> combined sales tax rate.
+// Splitting it this way (instead of ZIP straight to a rate number) means
+// the county name itself can be shown/auto-filled in the UI, not just used
+// as an invisible lookup key.
+const CA_COUNTY_BY_ZIP_PREFIX = [
+  { prefixes: ['900', '901', '902', '903', '904', '905', '906', '907', '908', '910', '911', '912', '913'], county: 'Los Angeles' },
+  { prefixes: ['945', '946'], county: 'Alameda' },
+  { prefixes: ['940', '941'], county: 'San Francisco' },
+  { prefixes: ['942', '943', '944'], county: 'San Mateo' },
+  { prefixes: ['950', '951', '952', '953'], county: 'Santa Clara' },
+  { prefixes: ['920', '921'], county: 'San Diego' },
+  { prefixes: ['926', '927', '928'], county: 'Orange' },
+  { prefixes: ['956', '957', '958'], county: 'Sacramento' },
 ];
+const CA_COUNTY_RATES = {
+  'Los Angeles': 9.75, 'Alameda': 10.25, 'San Francisco': 8.625,
+  'San Mateo': 9.375, 'Santa Clara': 9.375, 'San Diego': 7.75,
+  'Orange': 7.75, 'Sacramento': 8.75
+};
 const CA_STATEWIDE_BASE_RATE = 7.25;
 
-const AZ_CITY_RATE_BY_ZIP_PREFIX = [
-  { prefixes: ['850', '851', '852', '853'], rate: 8.6 }, // Phoenix / Maricopa County
-  { prefixes: ['855', '856', '857'], rate: 8.7 }, // Tucson / Pima County
+const AZ_COUNTY_BY_ZIP_PREFIX = [
+  { prefixes: ['850', '851', '852', '853'], county: 'Maricopa' },
+  { prefixes: ['855', '856', '857'], county: 'Pima' },
 ];
+const AZ_COUNTY_RATES = { 'Maricopa': 8.6, 'Pima': 8.7 };
 const AZ_STATEWIDE_BASE_RATE = 5.6;
 
-function lookupCombinedRate(zip, table, statewideBase) {
+function lookupCounty(zip, table) {
   const prefix = (zip || '').toString().slice(0, 3);
   const match = table.find(entry => entry.prefixes.includes(prefix));
-  return match ? match.rate : statewideBase;
+  return match ? match.county : '';
 }
+
+function lookupCombinedRate(county, rateTable, statewideBase) {
+  return (county && rateTable[county] !== undefined) ? rateTable[county] : statewideBase;
+}
+
+app.get('/api/fees/county-lookup', (req, res) => {
+  const { state, zip } = req.query;
+  const normalizedState = (state || '').trim().toUpperCase();
+  const county = normalizedState === 'AZ'
+    ? lookupCounty(zip, AZ_COUNTY_BY_ZIP_PREFIX)
+    : lookupCounty(zip, CA_COUNTY_BY_ZIP_PREFIX); // CA table doubles as the fallback lookup too
+  res.json({ county });
+});
 
 // California: $74 base registration + $29 CHP fee + a value-tiered
 // Transportation Improvement Fee, title $28, and the Vehicle License Fee
@@ -516,30 +539,34 @@ function calculateArizonaFees(price, vehicleYear) {
 // Single entry point: given a state, ZIP, price, and vehicle year, returns
 // the calculated tax rate and DMV-style fees. Anything other than CA/AZ
 // uses California's numbers as the documented fallback.
-function calculateStateFees(state, zip, price, vehicleYear) {
+function calculateStateFees(state, zip, price, vehicleYear, county) {
   const normalizedState = (state || '').trim().toUpperCase();
 
   if (normalizedState === 'AZ') {
+    const resolvedCounty = county || lookupCounty(zip, AZ_COUNTY_BY_ZIP_PREFIX);
     const fees = calculateArizonaFees(price, vehicleYear);
-    fees.taxRate = lookupCombinedRate(zip, AZ_CITY_RATE_BY_ZIP_PREFIX, AZ_STATEWIDE_BASE_RATE);
+    fees.county = resolvedCounty;
+    fees.taxRate = lookupCombinedRate(resolvedCounty, AZ_COUNTY_RATES, AZ_STATEWIDE_BASE_RATE);
     fees.stateUsed = 'AZ';
     fees.tradeInReducesTaxableAmount = true; // Arizona credits trade-in value against the taxable amount
     return fees;
   }
 
   // CA, or any other/unrecognized state -- California is the documented fallback.
+  const resolvedCounty = county || lookupCounty(zip, CA_COUNTY_BY_ZIP_PREFIX);
   const fees = calculateCaliforniaFees(price);
-  fees.taxRate = lookupCombinedRate(zip, CA_COUNTY_RATE_BY_ZIP_PREFIX, CA_STATEWIDE_BASE_RATE);
+  fees.county = resolvedCounty;
+  fees.taxRate = lookupCombinedRate(resolvedCounty, CA_COUNTY_RATES, CA_STATEWIDE_BASE_RATE);
   fees.stateUsed = (normalizedState === 'CA') ? 'CA' : `CA (fallback -- ${normalizedState || 'no state on file'} not yet built)`;
   fees.tradeInReducesTaxableAmount = false; // California taxes the full price; trade-in does not reduce it
   return fees;
 }
 
 app.post('/api/fees/calculate', (req, res) => {
-  const { state, zip, price, vehicleYear } = req.body;
+  const { state, zip, price, vehicleYear, county } = req.body;
   if (!price) return res.status(400).json({ error: 'price is required' });
 
-  const result = calculateStateFees(state, zip, Number(price), vehicleYear);
+  const result = calculateStateFees(state, zip, Number(price), vehicleYear, county);
   res.json(result);
 });
 
@@ -806,6 +833,7 @@ function defaultApplicant() {
     address2: '',
     city: '',
     state: '',
+    county: '',
     zip: '',
     phone: '',
     homeDisclosure: false,

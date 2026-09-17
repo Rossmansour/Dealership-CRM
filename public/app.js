@@ -1155,13 +1155,25 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
   const state = document.getElementById('dealState').value;
   const carId = document.getElementById('dealAssignedCarId').value;
   const price = document.getElementById('dealVehiclePrice').value;
-  const deal = deals.find(d => d.id === currentWorkspaceDealId);
-  const zip = (deal && deal.creditApp && deal.creditApp.applicant) ? deal.creditApp.applicant.zip : '';
   const car = cars.find(c => c.id === carId);
   const vehicleYear = car ? car.year : '';
 
+  // Read the ZIP and County directly from the live Credit Application
+  // fields, not from the last-saved deal data -- if the address was just
+  // typed in but "Save Credit Application" hasn't been clicked yet, the
+  // saved copy would still be blank/stale, and this button should use
+  // whatever's actually on screen right now.
+  const zipField = document.getElementById('primaryZip');
+  const countyField = document.getElementById('primaryCounty');
+  const zip = zipField ? zipField.value : '';
+  const county = countyField ? countyField.value : '';
+
   if (!price) {
     statusEl.innerHTML = `<div class="send-text-status-error">Enter a vehicle price first.</div>`;
+    return;
+  }
+  if (!zip) {
+    statusEl.innerHTML = `<div class="send-text-status-error">No ZIP code found -- enter the customer's address on the Credit Application tab first (you don't need to save it, just fill it in).</div>`;
     return;
   }
 
@@ -1171,7 +1183,7 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
     const res = await fetch(`${API}/fees/calculate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, zip, price, vehicleYear })
+      body: JSON.stringify({ state, zip, price, vehicleYear, county })
     });
     const result = await res.json();
 
@@ -1188,7 +1200,8 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
     const tradeNote = result.tradeInReducesTaxableAmount
       ? 'trade-in reduces taxable amount'
       : 'full price is taxable, trade-in does not reduce it';
-    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed} (${tradeNote}). Estimate only -- verify against your state's current DMV schedule.</div>`;
+    const countyNote = result.county ? `${result.county} County` : 'statewide base rate -- county not recognized';
+    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}). Estimate only -- verify against your state's current DMV schedule.</div>`;
   } catch (err) {
     statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
   }
@@ -1251,6 +1264,28 @@ function selectOptionsHtml(options, selected) {
 // Builds the full field set for ONE applicant (primary or co-applicant).
 // Using one function for both means the two forms can never drift out
 // of sync with each other.
+// Called when a ZIP field changes in the credit application -- looks up
+// the county from the customer's ZIP (and whatever state is currently
+// typed in) so the sales rep doesn't have to know or type it themselves.
+// Only resolves for CA/AZ ZIPs today; other states just leave it blank
+// for now, same as the rest of the state-fee engine.
+window.autoFillCounty = async function(prefix) {
+  const zip = document.getElementById(`${prefix}Zip`).value;
+  const state = document.getElementById(`${prefix}State`).value;
+  if (!zip) return;
+
+  try {
+    const res = await fetch(`${API}/fees/county-lookup?state=${encodeURIComponent(state)}&zip=${encodeURIComponent(zip)}`);
+    const result = await res.json();
+    if (result.county) {
+      document.getElementById(`${prefix}County`).value = result.county;
+    }
+  } catch (err) {
+    // Silent failure is fine here -- county is a convenience auto-fill,
+    // not something that should interrupt filling out the rest of the form.
+  }
+};
+
 function applicantFieldsHtml(prefix, title) {
   return `
     <div class="ca-applicant-block" id="${prefix}ApplicantBlock">
@@ -1280,9 +1315,10 @@ function applicantFieldsHtml(prefix, title) {
       <div class="form-grid form-grid-3">
         <label>City <input type="text" id="${prefix}City" /></label>
         <label>State <input type="text" maxlength="2" id="${prefix}State" placeholder="CA" /></label>
-        <label>Zip <input type="text" id="${prefix}Zip" /></label>
+        <label>Zip <input type="text" id="${prefix}Zip" onchange="autoFillCounty('${prefix}')" /></label>
       </div>
       <div class="form-grid form-grid-3">
+        <label>County <input type="text" id="${prefix}County" placeholder="auto-fills from ZIP for CA/AZ" /></label>
         <label>Phone <input type="text" id="${prefix}Phone" /></label>
         <label>Email <input type="email" id="${prefix}Email" /></label>
       </div>
@@ -1376,6 +1412,7 @@ function fillApplicantFields(prefix, a) {
   document.getElementById(`${prefix}Address2`).value = a.address2 || '';
   document.getElementById(`${prefix}City`).value = a.city || '';
   document.getElementById(`${prefix}State`).value = a.state || '';
+  document.getElementById(`${prefix}County`).value = a.county || '';
   document.getElementById(`${prefix}Zip`).value = a.zip || '';
   document.getElementById(`${prefix}Phone`).value = a.phone || '';
   document.getElementById(`${prefix}Email`).value = a.email || '';
@@ -1434,6 +1471,7 @@ function collectApplicantFields(prefix) {
     address2: document.getElementById(`${prefix}Address2`).value,
     city: document.getElementById(`${prefix}City`).value,
     state: document.getElementById(`${prefix}State`).value,
+    county: document.getElementById(`${prefix}County`).value,
     zip: document.getElementById(`${prefix}Zip`).value,
     phone: document.getElementById(`${prefix}Phone`).value,
     email: document.getElementById(`${prefix}Email`).value,
