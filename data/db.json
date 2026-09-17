@@ -253,5 +253,124 @@
     "dealerFees": 0,
     "acquisitionFee": 595,
     "taxRate": 7
-  }
+  },
+  "taxRates": [
+    {
+      "id": "tr-ca-la",
+      "state": "CA",
+      "county": "Los Angeles",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 1.5
+    },
+    {
+      "id": "tr-ca-alameda",
+      "state": "CA",
+      "county": "Alameda",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.5,
+      "cityTaxRate": 1.5
+    },
+    {
+      "id": "tr-ca-sf",
+      "state": "CA",
+      "county": "San Francisco",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0.875
+    },
+    {
+      "id": "tr-ca-sanmateo",
+      "state": "CA",
+      "county": "San Mateo",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.125,
+      "cityTaxRate": 1
+    },
+    {
+      "id": "tr-ca-santaclara",
+      "state": "CA",
+      "county": "Santa Clara",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.125,
+      "cityTaxRate": 1
+    },
+    {
+      "id": "tr-ca-sandiego",
+      "state": "CA",
+      "county": "San Diego",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-orange",
+      "state": "CA",
+      "county": "Orange",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sacramento",
+      "state": "CA",
+      "county": "Sacramento",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.75,
+      "cityTaxRate": 0.75
+    },
+    {
+      "id": "tr-ca-default",
+      "state": "CA",
+      "county": "",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-maricopa",
+      "state": "AZ",
+      "county": "Maricopa",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0.7,
+      "cityTaxRate": 2.3
+    },
+    {
+      "id": "tr-az-pima",
+      "state": "AZ",
+      "county": "Pima",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 2.6
+    },
+    {
+      "id": "tr-az-default",
+      "state": "AZ",
+      "county": "",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "ff8bfd22-1877-43f6-b269-43887d9fdc1b",
+      "state": "CA",
+      "county": "Monterey",
+      "city": "Monterey",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 1.5
+    }
+  ]
 }

@@ -128,6 +128,7 @@
       <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
       <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
       <button type="button" class="btn-secondary" id="feeDefaultsBtn">⚙️ Fee Defaults</button>
+      <button type="button" class="btn-secondary" id="taxRatesBtn">🗺️ Taxes &amp; Fees</button>
       <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
     </div>
     <table class="data-table">
@@ -506,6 +507,46 @@
         <button type="submit" class="btn-primary">Save Credit Application</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Taxes & Fees Reference Table Modal -->
+<div class="modal" id="taxRatesModal">
+  <div class="modal-content modal-wide">
+    <h2>Taxes &amp; Fees</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      Set up tax rates once per State / County / City combination -- deals auto-calculate against this table based on the customer's address, instead of a formula guessing at it. State + County (no city) acts as that county's default when no city-specific record exists.
+    </p>
+
+    <table class="data-table" style="margin-bottom:16px;">
+      <thead>
+        <tr><th>State</th><th>County</th><th>City</th><th>State %</th><th>County %</th><th>City %</th><th>Combined</th><th></th></tr>
+      </thead>
+      <tbody id="taxRatesTableBody"></tbody>
+    </table>
+
+    <div class="ca-section-title">Add / Edit Rate</div>
+    <form id="taxRateForm">
+      <input type="hidden" id="taxRateId" />
+      <div class="form-grid form-grid-3">
+        <label>State <input type="text" maxlength="2" id="taxRateState" placeholder="CA" required /></label>
+        <label>County <input type="text" id="taxRateCounty" placeholder="Los Angeles (blank = state default)" /></label>
+        <label>City <input type="text" id="taxRateCity" placeholder="optional" /></label>
+      </div>
+      <div class="form-grid form-grid-3">
+        <label>State Tax Rate (%) <input type="number" step="0.001" id="taxRateStateRate" /></label>
+        <label>County Tax Rate (%) <input type="number" step="0.001" id="taxRateCountyRate" /></label>
+        <label>City Tax Rate (%) <input type="number" step="0.001" id="taxRateCityRate" /></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="clearTaxRateFormBtn">Clear</button>
+        <button type="submit" class="btn-primary">Save Rate</button>
+      </div>
+    </form>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeTaxRatesBtn">Close</button>
+    </div>
   </div>
 </div>
 

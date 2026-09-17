@@ -1152,7 +1152,14 @@ document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click'
 
 document.getElementById('autoCalcFeesBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('autoCalcFeesStatus');
-  const state = document.getElementById('dealState').value;
+  const dealStateField = document.getElementById('dealState');
+  const primaryStateField = document.getElementById('primaryState');
+  // The customer's address (and its state) lives on the Credit Application
+  // tab -- that's the live source of truth. The Desking tab's own State
+  // field is only a fallback for a deal with no customer/address on file
+  // yet, and gets kept in sync below so both fields always agree.
+  const state = (primaryStateField && primaryStateField.value) ? primaryStateField.value : (dealStateField ? dealStateField.value : '');
+  if (dealStateField && state) dealStateField.value = state;
   const carId = document.getElementById('dealAssignedCarId').value;
   const price = document.getElementById('dealVehiclePrice').value;
   const car = cars.find(c => c.id === carId);
@@ -1165,8 +1172,10 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
   // whatever's actually on screen right now.
   const zipField = document.getElementById('primaryZip');
   const countyField = document.getElementById('primaryCounty');
+  const cityField = document.getElementById('primaryCity');
   const zip = zipField ? zipField.value : '';
   const county = countyField ? countyField.value : '';
+  const city = cityField ? cityField.value : '';
 
   if (!price) {
     statusEl.innerHTML = `<div class="send-text-status-error">Enter a vehicle price first.</div>`;
@@ -1183,7 +1192,7 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
     const res = await fetch(`${API}/fees/calculate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, zip, price, vehicleYear, county })
+      body: JSON.stringify({ state, zip, price, vehicleYear, county, city })
     });
     const result = await res.json();
 
@@ -1201,7 +1210,8 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
       ? 'trade-in reduces taxable amount'
       : 'full price is taxable, trade-in does not reduce it';
     const countyNote = result.county ? `${result.county} County` : 'statewide base rate -- county not recognized';
-    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}). Estimate only -- verify against your state's current DMV schedule.</div>`;
+    const sourceNote = result.rateSource && !result.rateSource.startsWith('no match') ? ` [rate: ${result.rateSource}]` : ' [no matching Taxes & Fees record -- add one via 🗺️ Taxes & Fees]';
+    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}).${sourceNote} Estimate only -- verify against your state's current DMV schedule.</div>`;
   } catch (err) {
     statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
   }
@@ -1264,6 +1274,19 @@ function selectOptionsHtml(options, selected) {
 // Builds the full field set for ONE applicant (primary or co-applicant).
 // Using one function for both means the two forms can never drift out
 // of sync with each other.
+// Keeps the Desking tab's State field in sync with the primary applicant's
+// address on the Credit Application tab -- the address is the actual
+// source of truth for which state's tax/DMV rules apply, so the two
+// fields shouldn't be able to silently disagree with each other.
+window.syncDealStateFromCreditApp = function(prefix) {
+  if (prefix !== 'primary') return; // co-applicant's state doesn't drive the deal's state
+  const dealStateField = document.getElementById('dealState');
+  const primaryStateField = document.getElementById('primaryState');
+  if (dealStateField && primaryStateField && primaryStateField.value) {
+    dealStateField.value = primaryStateField.value;
+  }
+};
+
 // Called when a ZIP field changes in the credit application -- looks up
 // the county from the customer's ZIP (and whatever state is currently
 // typed in) so the sales rep doesn't have to know or type it themselves.
@@ -1314,7 +1337,7 @@ function applicantFieldsHtml(prefix, title) {
       <label>Address 2 <input type="text" id="${prefix}Address2" /></label>
       <div class="form-grid form-grid-3">
         <label>City <input type="text" id="${prefix}City" /></label>
-        <label>State <input type="text" maxlength="2" id="${prefix}State" placeholder="CA" /></label>
+        <label>State <input type="text" maxlength="2" id="${prefix}State" placeholder="CA" onchange="syncDealStateFromCreditApp('${prefix}')" /></label>
         <label>Zip <input type="text" id="${prefix}Zip" onchange="autoFillCounty('${prefix}')" /></label>
       </div>
       <div class="form-grid form-grid-3">
@@ -1917,6 +1940,98 @@ document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
   } catch (err) {
     box.innerHTML = `<div class="ai-snapshot-box">Could not reach the AI assistant. Is the server running?</div>`;
   }
+});
+
+// ---------- Taxes & Fees (reference table admin screen) ----------
+
+const taxRatesModal = document.getElementById('taxRatesModal');
+let cachedTaxRates = [];
+
+async function loadAndRenderTaxRates() {
+  const res = await fetch(`${API}/tax-rates`);
+  cachedTaxRates = await res.json();
+
+  document.getElementById('taxRatesTableBody').innerHTML = cachedTaxRates.map(r => {
+    const combined = (r.stateTaxRate + r.countyTaxRate + r.cityTaxRate).toFixed(3);
+    return `
+      <tr>
+        <td>${r.state}</td>
+        <td>${r.county || '-- default --'}</td>
+        <td>${r.city || '-- all cities --'}</td>
+        <td>${r.stateTaxRate}%</td>
+        <td>${r.countyTaxRate}%</td>
+        <td>${r.cityTaxRate}%</td>
+        <td><strong>${combined}%</strong></td>
+        <td class="row-actions">
+          <button onclick="editTaxRate('${r.id}')">Edit</button>
+          <button class="delete" onclick="deleteTaxRate('${r.id}')">Delete</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+document.getElementById('taxRatesBtn').addEventListener('click', async () => {
+  await loadAndRenderTaxRates();
+  taxRatesModal.classList.add('active');
+});
+
+document.getElementById('closeTaxRatesBtn').addEventListener('click', () => {
+  taxRatesModal.classList.remove('active');
+});
+
+document.getElementById('clearTaxRateFormBtn').addEventListener('click', () => {
+  document.getElementById('taxRateForm').reset();
+  document.getElementById('taxRateId').value = '';
+});
+
+window.editTaxRate = function(id) {
+  const rate = cachedTaxRates.find(r => r.id === id);
+  if (!rate) return;
+  document.getElementById('taxRateId').value = rate.id;
+  document.getElementById('taxRateState').value = rate.state;
+  document.getElementById('taxRateCounty').value = rate.county;
+  document.getElementById('taxRateCity').value = rate.city;
+  document.getElementById('taxRateStateRate').value = rate.stateTaxRate;
+  document.getElementById('taxRateCountyRate').value = rate.countyTaxRate;
+  document.getElementById('taxRateCityRate').value = rate.cityTaxRate;
+};
+
+window.deleteTaxRate = async function(id) {
+  if (!confirm('Delete this tax rate record?')) return;
+  await fetch(`${API}/tax-rates/${id}`, { method: 'DELETE' });
+  await loadAndRenderTaxRates();
+};
+
+document.getElementById('taxRateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('taxRateId').value;
+  const payload = {
+    state: document.getElementById('taxRateState').value,
+    county: document.getElementById('taxRateCounty').value,
+    city: document.getElementById('taxRateCity').value,
+    stateTaxRate: document.getElementById('taxRateStateRate').value,
+    countyTaxRate: document.getElementById('taxRateCountyRate').value,
+    cityTaxRate: document.getElementById('taxRateCityRate').value,
+  };
+
+  if (id) {
+    await fetch(`${API}/tax-rates/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } else {
+    await fetch(`${API}/tax-rates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  document.getElementById('taxRateForm').reset();
+  document.getElementById('taxRateId').value = '';
+  await loadAndRenderTaxRates();
 });
 
 // ---------- Fee Defaults (Settings) ----------

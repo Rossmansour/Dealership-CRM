@@ -117,6 +117,106 @@ app.put('/api/settings', (req, res) => {
   res.json(db.settings);
 });
 
+// ---------- Tax Rates reference table (State / County / City) ----------
+//
+// This replaces a hardcoded formula-guess with the way real DMS platforms
+// actually do it: an admin-configurable table a dealer sets up once, with
+// separate State/County/City tax rate line items that sum to the combined
+// rate. Seeded with a handful of real reference points derived from the
+// same published CDTFA/ADOR rates the earlier formula version used, but
+// now every number here is visible and editable, not buried in code.
+
+function seedTaxRates() {
+  return [
+    { id: 'tr-ca-la', state: 'CA', county: 'Los Angeles', city: '', stateTaxRate: 7.25, countyTaxRate: 1.00, cityTaxRate: 1.50 },
+    { id: 'tr-ca-alameda', state: 'CA', county: 'Alameda', city: '', stateTaxRate: 7.25, countyTaxRate: 1.50, cityTaxRate: 1.50 },
+    { id: 'tr-ca-sf', state: 'CA', county: 'San Francisco', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0.875 },
+    { id: 'tr-ca-sanmateo', state: 'CA', county: 'San Mateo', city: '', stateTaxRate: 7.25, countyTaxRate: 1.125, cityTaxRate: 1.00 },
+    { id: 'tr-ca-santaclara', state: 'CA', county: 'Santa Clara', city: '', stateTaxRate: 7.25, countyTaxRate: 1.125, cityTaxRate: 1.00 },
+    { id: 'tr-ca-sandiego', state: 'CA', county: 'San Diego', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0 },
+    { id: 'tr-ca-orange', state: 'CA', county: 'Orange', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0 },
+    { id: 'tr-ca-sacramento', state: 'CA', county: 'Sacramento', city: '', stateTaxRate: 7.25, countyTaxRate: 0.75, cityTaxRate: 0.75 },
+    { id: 'tr-ca-default', state: 'CA', county: '', city: '', stateTaxRate: 7.25, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-maricopa', state: 'AZ', county: 'Maricopa', city: '', stateTaxRate: 5.6, countyTaxRate: 0.70, cityTaxRate: 2.30 },
+    { id: 'tr-az-pima', state: 'AZ', county: 'Pima', city: '', stateTaxRate: 5.6, countyTaxRate: 0.50, cityTaxRate: 2.60 },
+    { id: 'tr-az-default', state: 'AZ', county: '', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+  ];
+}
+
+app.get('/api/tax-rates', (req, res) => {
+  const db = readDB();
+  if (!db.taxRates) db.taxRates = seedTaxRates();
+  const { state } = req.query;
+  let rates = db.taxRates;
+  if (state) rates = rates.filter(r => r.state.toUpperCase() === state.toUpperCase());
+  res.json(rates);
+});
+
+app.post('/api/tax-rates', (req, res) => {
+  const db = readDB();
+  if (!db.taxRates) db.taxRates = seedTaxRates();
+  const { state, county, city, stateTaxRate, countyTaxRate, cityTaxRate } = req.body;
+  if (!state) return res.status(400).json({ error: 'state is required' });
+
+  const newRate = {
+    id: crypto.randomUUID(),
+    state: state.toUpperCase(),
+    county: county || '',
+    city: city || '',
+    stateTaxRate: Number(stateTaxRate) || 0,
+    countyTaxRate: Number(countyTaxRate) || 0,
+    cityTaxRate: Number(cityTaxRate) || 0
+  };
+  db.taxRates.push(newRate);
+  writeDB(db);
+  res.status(201).json(newRate);
+});
+
+app.put('/api/tax-rates/:id', (req, res) => {
+  const db = readDB();
+  if (!db.taxRates) db.taxRates = seedTaxRates();
+  const idx = db.taxRates.findIndex(r => r.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
+
+  db.taxRates[idx] = { ...db.taxRates[idx], ...req.body };
+  writeDB(db);
+  res.json(db.taxRates[idx]);
+});
+
+app.delete('/api/tax-rates/:id', (req, res) => {
+  const db = readDB();
+  if (!db.taxRates) db.taxRates = seedTaxRates();
+  const idx = db.taxRates.findIndex(r => r.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
+
+  db.taxRates.splice(idx, 1);
+  writeDB(db);
+  res.status(204).send();
+});
+
+// Finds the best-matching reference record for a customer's address:
+// exact state+county+city match first, then state+county with no city
+// specified (a county-wide default), then a bare state-level default.
+// Returns null if nothing at all matches that state.
+function findBestTaxRateMatch(db, state, county, city) {
+  if (!db.taxRates) db.taxRates = seedTaxRates();
+  const normalizedState = (state || '').toUpperCase();
+  const normalizedCounty = (county || '').trim();
+  const normalizedCity = (city || '').trim();
+
+  const inState = db.taxRates.filter(r => r.state === normalizedState);
+  if (inState.length === 0) return null;
+
+  const exact = inState.find(r => r.county === normalizedCounty && r.city && r.city === normalizedCity);
+  if (exact) return exact;
+
+  const countyMatch = inState.find(r => r.county === normalizedCounty && !r.city);
+  if (countyMatch) return countyMatch;
+
+  const stateDefault = inState.find(r => !r.county && !r.city);
+  return stateDefault || inState[0];
+}
+
 // ---------- CARS (Inventory) ----------
 
 // GET all cars, with optional ?status= and ?search= filters
@@ -458,28 +558,18 @@ const CA_COUNTY_BY_ZIP_PREFIX = [
   { prefixes: ['926', '927', '928'], county: 'Orange' },
   { prefixes: ['956', '957', '958'], county: 'Sacramento' },
 ];
-const CA_COUNTY_RATES = {
-  'Los Angeles': 9.75, 'Alameda': 10.25, 'San Francisco': 8.625,
-  'San Mateo': 9.375, 'Santa Clara': 9.375, 'San Diego': 7.75,
-  'Orange': 7.75, 'Sacramento': 8.75
-};
 const CA_STATEWIDE_BASE_RATE = 7.25;
 
 const AZ_COUNTY_BY_ZIP_PREFIX = [
   { prefixes: ['850', '851', '852', '853'], county: 'Maricopa' },
   { prefixes: ['855', '856', '857'], county: 'Pima' },
 ];
-const AZ_COUNTY_RATES = { 'Maricopa': 8.6, 'Pima': 8.7 };
 const AZ_STATEWIDE_BASE_RATE = 5.6;
 
 function lookupCounty(zip, table) {
   const prefix = (zip || '').toString().slice(0, 3);
   const match = table.find(entry => entry.prefixes.includes(prefix));
   return match ? match.county : '';
-}
-
-function lookupCombinedRate(county, rateTable, statewideBase) {
-  return (county && rateTable[county] !== undefined) ? rateTable[county] : statewideBase;
 }
 
 app.get('/api/fees/county-lookup', (req, res) => {
@@ -539,14 +629,16 @@ function calculateArizonaFees(price, vehicleYear) {
 // Single entry point: given a state, ZIP, price, and vehicle year, returns
 // the calculated tax rate and DMV-style fees. Anything other than CA/AZ
 // uses California's numbers as the documented fallback.
-function calculateStateFees(state, zip, price, vehicleYear, county) {
+function calculateStateFees(db, state, zip, price, vehicleYear, county, city) {
   const normalizedState = (state || '').trim().toUpperCase();
 
   if (normalizedState === 'AZ') {
     const resolvedCounty = county || lookupCounty(zip, AZ_COUNTY_BY_ZIP_PREFIX);
     const fees = calculateArizonaFees(price, vehicleYear);
+    const rateMatch = findBestTaxRateMatch(db, 'AZ', resolvedCounty, city);
     fees.county = resolvedCounty;
-    fees.taxRate = lookupCombinedRate(resolvedCounty, AZ_COUNTY_RATES, AZ_STATEWIDE_BASE_RATE);
+    fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : AZ_STATEWIDE_BASE_RATE;
+    fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
     fees.stateUsed = 'AZ';
     fees.tradeInReducesTaxableAmount = true; // Arizona credits trade-in value against the taxable amount
     return fees;
@@ -555,18 +647,21 @@ function calculateStateFees(state, zip, price, vehicleYear, county) {
   // CA, or any other/unrecognized state -- California is the documented fallback.
   const resolvedCounty = county || lookupCounty(zip, CA_COUNTY_BY_ZIP_PREFIX);
   const fees = calculateCaliforniaFees(price);
+  const rateMatch = findBestTaxRateMatch(db, 'CA', resolvedCounty, city);
   fees.county = resolvedCounty;
-  fees.taxRate = lookupCombinedRate(resolvedCounty, CA_COUNTY_RATES, CA_STATEWIDE_BASE_RATE);
+  fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : CA_STATEWIDE_BASE_RATE;
+  fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
   fees.stateUsed = (normalizedState === 'CA') ? 'CA' : `CA (fallback -- ${normalizedState || 'no state on file'} not yet built)`;
   fees.tradeInReducesTaxableAmount = false; // California taxes the full price; trade-in does not reduce it
   return fees;
 }
 
 app.post('/api/fees/calculate', (req, res) => {
-  const { state, zip, price, vehicleYear, county } = req.body;
+  const { state, zip, price, vehicleYear, county, city } = req.body;
   if (!price) return res.status(400).json({ error: 'price is required' });
 
-  const result = calculateStateFees(state, zip, Number(price), vehicleYear, county);
+  const db = readDB();
+  const result = calculateStateFees(db, state, zip, Number(price), vehicleYear, county, city);
   res.json(result);
 });
 
