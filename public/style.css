@@ -787,12 +787,29 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   font-weight: 600;
 }
 
-.deal-grid {
+.deal-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
   align-items: start;
   margin-bottom: 20px;
+}
+
+.deal-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.deal-sidebar {
+  position: sticky;
+  top: 20px;
+}
+
+@media (max-width: 900px) {
+  .deal-layout { grid-template-columns: 1fr; }
+  .deal-sidebar { position: static; }
 }
 
 /* Every text/number/date/select/textarea field anywhere on the full deal
@@ -811,6 +828,22 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   font-size: 14px;
   font-family: inherit;
 }
+
+.service-tie-in {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.summary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+.summary-actions button { width: 100%; }
 
 .deal-panel {
   background: var(--surface);

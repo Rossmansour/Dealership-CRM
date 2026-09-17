@@ -880,12 +880,17 @@ window.openDealWorkspace = function(dealId) {
       .map(c => `<option value="${c.id}" data-price="${c.price}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
       .join('');
   carSelect.value = deal.carId || '';
+  updateServiceTieIn(deal.carId);
 
   // Shared fields
   document.getElementById('dealVehiclePrice').value = deal.vehiclePrice;
   document.getElementById('dealRebate').value = deal.rebate;
   document.getElementById('dealTradeInValue').value = deal.tradeInValue;
   document.getElementById('dealTradeInPayoff').value = deal.tradeInPayoff;
+  document.getElementById('dealTradeYear').value = deal.tradeYear || '';
+  document.getElementById('dealTradeMake').value = deal.tradeMake || '';
+  document.getElementById('dealTradeModel').value = deal.tradeModel || '';
+  document.getElementById('dealTradeMileage').value = deal.tradeMileage || '';
   document.getElementById('dealDownPayment').value = deal.downPayment;
   document.getElementById('dealTaxRate').value = deal.taxRate;
   document.getElementById('dealTermMonths').value = deal.termMonths;
@@ -958,17 +963,21 @@ document.getElementById('backToDealsBtn').addEventListener('click', async () => 
 // either way instead of needing two separate sets of fields.
 function updateDealTypePanels(dealType) {
   const isLease = dealType === 'lease';
+  const isCash = dealType === 'cash';
+
   document.getElementById('retailPanel').style.display = isLease ? 'none' : 'block';
-  document.getElementById('leaseCapPanel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('leaseCapReductionPanel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('leaseResidualPanel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('leasePaymentPanel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('msrpField').style.display = isLease ? 'block' : 'none';
+  document.getElementById('leasePanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('msrpLabel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('termLabel').style.display = isCash ? 'none' : 'block';
+  document.getElementById('aprLabel').style.display = isCash ? 'none' : 'block';
 
   document.getElementById('vehiclePriceLabel').firstChild.textContent = isLease ? 'Selling Price ' : 'Vehicle Price ';
   document.getElementById('downPaymentLabel').firstChild.textContent = isLease ? 'Cash Down ' : 'Down Payment ';
 
-  document.getElementById('readoutAmountFinancedRow').style.display = isLease ? 'none' : 'flex';
+  // Cash deals have no financing at all -- there's no monthly payment to
+  // show, just a lump sum due. Retail/lease both show a monthly figure.
+  document.getElementById('readoutAmountFinancedRow').style.display = (isLease || isCash) ? 'none' : 'flex';
+  document.getElementById('paymentHighlightBox').style.display = isCash ? 'none' : 'block';
 }
 
 document.getElementById('dealTypeSelect').addEventListener('change', (e) => {
@@ -981,6 +990,7 @@ document.getElementById('dealTypeSelect').addEventListener('change', (e) => {
 // desking form always had -- there's no live recalculation as you type.
 function renderDealSummary(deal) {
   const isLease = (deal.dealType || 'retail') === 'lease';
+  const isCash = (deal.dealType || 'retail') === 'cash';
 
   if (isLease) {
     document.getElementById('readoutGrossCapCost').textContent = `$${(deal.grossCapCost || 0).toLocaleString()}`;
@@ -990,10 +1000,41 @@ function renderDealSummary(deal) {
     document.getElementById('readoutDueAtSigning').textContent = `$${(deal.dueAtSigning || 0).toLocaleString()}`;
   }
 
-  document.getElementById('readoutAmountFinanced').textContent = `$${(deal.amountFinanced || 0).toLocaleString()}`;
-  document.getElementById('readoutMonthlyPayment').textContent = `$${(deal.monthlyPayment || 0).toLocaleString()}/mo`;
-  document.getElementById('readoutTermLine').textContent = `for ${deal.termMonths} months`;
+  if (isCash) {
+    // No financing at all for a cash deal -- "amount financed" becomes the
+    // one lump sum due, shown via the Total Deal Cost readout instead of
+    // a monthly payment that doesn't apply.
+    document.getElementById('readoutTotalDealCost').previousElementSibling.textContent = 'Total Due';
+  } else {
+    document.getElementById('readoutTotalDealCost').previousElementSibling.textContent = 'Total Deal Cost';
+    document.getElementById('readoutAmountFinanced').textContent = `$${(deal.amountFinanced || 0).toLocaleString()}`;
+    document.getElementById('readoutMonthlyPayment').textContent = `$${(deal.monthlyPayment || 0).toLocaleString()}/mo`;
+    document.getElementById('readoutTermLine').textContent = `for ${deal.termMonths} months`;
+  }
+
   document.getElementById('readoutTotalDealCost').textContent = `$${(deal.totalDealCost || 0).toLocaleString()}`;
+}
+
+// Groundwork for the future Service module: this reads a car's openROs
+// field (an empty array today, since Service doesn't exist yet) so a
+// sales manager can eventually see "this trade/vehicle has an open repair
+// order" right from the deal page. The data seam exists now; the Service
+// module that actually populates it is a separate, later build.
+function updateServiceTieIn(carId) {
+  const container = document.getElementById('serviceTieIn');
+  const textEl = document.getElementById('serviceTieInText');
+  const car = cars.find(c => c.id === carId);
+
+  if (!car) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  const openROs = car.openROs || [];
+  textEl.textContent = openROs.length > 0
+    ? `${openROs.length} open RO${openROs.length > 1 ? 's' : ''}`
+    : 'No open ROs';
 }
 
 // Picking a vehicle auto-fills its price, same convenience as before --
@@ -1004,6 +1045,7 @@ document.getElementById('dealAssignedCarId').addEventListener('change', (e) => {
   if (selected && selected.dataset.price) {
     document.getElementById('dealVehiclePrice').value = selected.dataset.price;
   }
+  updateServiceTieIn(e.target.value);
 });
 
 // Sub-tab switching within the workspace
@@ -1048,6 +1090,10 @@ function buildDeskingPayload() {
     hasTrade: document.getElementById('hasTradeCheckbox').checked,
     tradeInValue: document.getElementById('dealTradeInValue').value,
     tradeInPayoff: document.getElementById('dealTradeInPayoff').value,
+    tradeYear: document.getElementById('dealTradeYear').value,
+    tradeMake: document.getElementById('dealTradeMake').value,
+    tradeModel: document.getElementById('dealTradeModel').value,
+    tradeMileage: document.getElementById('dealTradeMileage').value,
     downPayment: document.getElementById('dealDownPayment').value,
     taxRate: document.getElementById('dealTaxRate').value,
     termMonths: document.getElementById('dealTermMonths').value,
@@ -1099,6 +1145,37 @@ document.getElementById('saveDealBtn').addEventListener('click', async () => {
 
 document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click', () => {
   viewProposal(currentWorkspaceDealId);
+});
+
+// "Duplicate as New Scenario" -- clones the current deal's numbers into a
+// brand new deal (its own Deal #), so a rep can compare e.g. a 36 vs
+// 48-month lease side by side instead of overwriting the only copy.
+// This is a lighter-weight version of true side-by-side scenarios (like
+// "Scenario #2" tabs in a real DMS) -- each alternative just gets its own
+// full deal record rather than living inside one shared deal.
+document.getElementById('duplicateScenarioBtn').addEventListener('click', async () => {
+  const sourceDeal = deals.find(d => d.id === currentWorkspaceDealId);
+  if (!sourceDeal) return;
+
+  const payload = buildDeskingPayload();
+  const createRes = await fetch(`${API}/deals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ leadId: payload.leadId, carId: payload.carId })
+  });
+  const newDeal = await createRes.json();
+
+  // Now push the full set of current numbers onto the fresh deal, so the
+  // "new scenario" starts as an exact copy the rep can then tweak (change
+  // the term, switch retail to lease, etc.) to compare against the original.
+  await fetch(`${API}/deals/${newDeal.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  await loadAll();
+  openDealWorkspace(newDeal.id);
 });
 
 // ---------- Credit Application (dynamic: individual/business + co-applicant) ----------
@@ -1747,6 +1824,46 @@ document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
   } catch (err) {
     box.innerHTML = `<div class="ai-snapshot-box">Could not reach the AI assistant. Is the server running?</div>`;
   }
+});
+
+// ---------- Fee Defaults (Settings) ----------
+
+const feeDefaultsModal = document.getElementById('feeDefaultsModal');
+
+document.getElementById('feeDefaultsBtn').addEventListener('click', async () => {
+  const res = await fetch(`${API}/settings`);
+  const settings = await res.json();
+  document.getElementById('settingsDocFee').value = settings.docFee;
+  document.getElementById('settingsTitleFee').value = settings.titleFee;
+  document.getElementById('settingsRegistrationFee').value = settings.registrationFee;
+  document.getElementById('settingsLicenseFee').value = settings.licenseFee;
+  document.getElementById('settingsDealerFees').value = settings.dealerFees;
+  document.getElementById('settingsAcquisitionFee').value = settings.acquisitionFee;
+  document.getElementById('settingsTaxRate').value = settings.taxRate;
+  feeDefaultsModal.classList.add('active');
+});
+
+document.getElementById('cancelFeeDefaultsBtn').addEventListener('click', () => {
+  feeDefaultsModal.classList.remove('active');
+});
+
+document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = {
+    docFee: document.getElementById('settingsDocFee').value,
+    titleFee: document.getElementById('settingsTitleFee').value,
+    registrationFee: document.getElementById('settingsRegistrationFee').value,
+    licenseFee: document.getElementById('settingsLicenseFee').value,
+    dealerFees: document.getElementById('settingsDealerFees').value,
+    acquisitionFee: document.getElementById('settingsAcquisitionFee').value,
+    taxRate: document.getElementById('settingsTaxRate').value,
+  };
+  await fetch(`${API}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  feeDefaultsModal.classList.remove('active');
 });
 
 // ---------- Init ----------

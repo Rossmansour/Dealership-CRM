@@ -66,17 +66,49 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 function readDB() {
   if (!fs.existsSync(DB_PATH)) {
-    const seed = { cars: [], leads: [], deals: [], nextDealNumber: 1001 };
+    const seed = { cars: [], leads: [], deals: [], nextDealNumber: 1001, settings: defaultFeeSettings() };
     fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2));
     return seed;
   }
   const raw = fs.readFileSync(DB_PATH, 'utf-8');
-  return JSON.parse(raw);
+  const db = JSON.parse(raw);
+  if (!db.settings) db.settings = defaultFeeSettings();
+  return db;
 }
 
 function writeDB(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 }
+
+// Store-level fee defaults. These are the numbers a dealership charges
+// (almost) every customer, so new deals should start with them already
+// filled in instead of a blank/arbitrary number a rep has to remember to
+// enter every single time. Editable via /api/settings -- not yet
+// restricted to admins (that access-control layer is planned but out of
+// scope for this pass; today anyone can edit these).
+function defaultFeeSettings() {
+  return {
+    docFee: 85,
+    titleFee: 75,
+    registrationFee: 50,
+    licenseFee: 0,
+    dealerFees: 0,
+    acquisitionFee: 595,
+    taxRate: 7
+  };
+}
+
+app.get('/api/settings', (req, res) => {
+  const db = readDB();
+  res.json(db.settings);
+});
+
+app.put('/api/settings', (req, res) => {
+  const db = readDB();
+  db.settings = { ...defaultFeeSettings(), ...db.settings, ...req.body };
+  writeDB(db);
+  res.json(db.settings);
+});
 
 // ---------- CARS (Inventory) ----------
 
@@ -132,6 +164,7 @@ app.post('/api/cars', (req, res) => {
     price: Number(price),
     status: status || 'available', // available | pending | sold
     photos: [], // array of paths like /uploads/cars/abc123.jpg
+    openROs: [], // groundwork for the future Service module -- empty until Service exists
     dateAdded: new Date().toISOString(),
     dateSold: null
   };
@@ -562,12 +595,62 @@ function calculateLeaseDeal(input) {
   };
 }
 
+// Cash deals have no financing at all -- whatever's left after trade,
+// rebate, and down payment (plus tax and fees) is simply due in full,
+// with no monthly payment to calculate.
+function calculateCashDeal(input) {
+  const vehiclePrice = Number(input.vehiclePrice) || 0;
+  const tradeInValue = Number(input.tradeInValue) || 0;
+  const tradeInPayoff = Number(input.tradeInPayoff) || 0;
+  const rebate = Number(input.rebate) || 0;
+  const downPayment = Number(input.downPayment) || 0;
+  const taxRate = Number(input.taxRate) || 0;
+  const docFee = Number(input.docFee) || 0;
+  const titleFee = Number(input.titleFee) || 0;
+  const registrationFee = Number(input.registrationFee) || 0;
+  const fi = extractFiProducts(input);
+
+  const netTradeIn = tradeInValue - tradeInPayoff;
+  const taxableAmount = Math.max(vehiclePrice - netTradeIn, 0);
+  const salesTax = taxableAmount * (taxRate / 100);
+  const totalFees = docFee + titleFee + registrationFee +
+    fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
+
+  let totalDue = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees;
+  if (totalDue < 0) totalDue = 0;
+
+  return {
+    dealType: 'cash',
+    vehiclePrice,
+    tradeInValue,
+    tradeInPayoff,
+    netTradeIn,
+    rebate,
+    downPayment,
+    taxRate,
+    taxableAmount,
+    salesTax: round2(salesTax),
+    docFee,
+    titleFee,
+    registrationFee,
+    ...fi,
+    totalFees: round2(totalFees),
+    amountFinanced: round2(totalDue), // same field name as retail for UI consistency; here it's just "amount due"
+    apr: 0,
+    termMonths: 0,
+    monthlyPayment: 0,
+    totalOfPayments: 0,
+    totalDealCost: round2(totalDue + downPayment)
+  };
+}
+
 // Single entry point the routes call -- picks the right calculator based
 // on dealType so nothing outside this function needs to know there are
-// two different math paths.
+// multiple math paths.
 function calculateDeal(input) {
   const dealType = input.dealType || 'retail';
   if (dealType === 'lease') return calculateLeaseDeal(input);
+  if (dealType === 'cash') return calculateCashDeal(input);
   return calculateRetailDeal({ ...input, dealType: 'retail' });
 }
 
@@ -668,12 +751,16 @@ app.post('/api/deals', (req, res) => {
   const { leadId, carId } = req.body;
 
   const car = carId ? db.cars.find(c => c.id === carId) : null;
+  const fees = db.settings || defaultFeeSettings();
   const calculated = calculateDeal({
     vehiclePrice: req.body.vehiclePrice || (car ? car.price : 0),
-    taxRate: req.body.taxRate ?? 7,
-    docFee: req.body.docFee ?? 150,
-    titleFee: req.body.titleFee ?? 75,
-    registrationFee: req.body.registrationFee ?? 50,
+    taxRate: req.body.taxRate ?? fees.taxRate,
+    docFee: req.body.docFee ?? fees.docFee,
+    titleFee: req.body.titleFee ?? fees.titleFee,
+    registrationFee: req.body.registrationFee ?? fees.registrationFee,
+    licenseFee: req.body.licenseFee ?? fees.licenseFee,
+    dealerFees: req.body.dealerFees ?? fees.dealerFees,
+    acquisitionFee: req.body.acquisitionFee ?? fees.acquisitionFee,
     apr: req.body.apr ?? 6.5,
     termMonths: req.body.termMonths ?? 60
   });
@@ -692,6 +779,7 @@ app.post('/api/deals', (req, res) => {
 
   db.nextDealNumber += 1;
   db.deals.push(newDeal);
+  syncCarStatusToDeal(db, newDeal);
   writeDB(db);
   res.status(201).json(newDeal);
 });
@@ -700,6 +788,24 @@ app.post('/api/deals', (req, res) => {
 // Credit app fields are preserved automatically since they're not part
 // of req.body in a normal desking update -- see the dedicated
 // /credit-app route below for updating that section specifically.
+// Vehicle Management tie-in: a deal's progress should be reflected on the
+// actual vehicle record without a sales manager having to update both
+// places by hand. Working a deal on a car takes it off the available
+// list; delivering/closing/finalizing it marks the car sold. Shared by
+// both deal creation and deal updates so the rule only lives in one place.
+function syncCarStatusToDeal(db, deal) {
+  if (!deal.carId) return;
+  const car = db.cars.find(c => c.id === deal.carId);
+  if (!car) return;
+
+  if (['delivered', 'closed', 'finalized'].includes(deal.status) && car.status !== 'sold') {
+    car.status = 'sold';
+    car.dateSold = car.dateSold || new Date().toISOString();
+  } else if (deal.status === 'working' && car.status === 'available') {
+    car.status = 'pending';
+  }
+}
+
 app.put('/api/deals/:id', (req, res) => {
   const db = readDB();
   if (!db.deals) db.deals = [];
@@ -710,6 +816,8 @@ app.put('/api/deals/:id', (req, res) => {
   const calculated = calculateDeal(merged);
 
   db.deals[idx] = { ...merged, ...calculated };
+  syncCarStatusToDeal(db, db.deals[idx]);
+
   writeDB(db);
   res.json(db.deals[idx]);
 });

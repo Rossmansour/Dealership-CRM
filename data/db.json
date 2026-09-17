@@ -13,7 +13,8 @@
       "dateAdded": "2026-08-01T00:00:00.000Z",
       "dateSold": null,
       "photos": [],
-      "stockNumber": "ST-4821"
+      "stockNumber": "ST-4821",
+      "openROs": []
     },
     {
       "id": "c2",
@@ -27,7 +28,8 @@
       "status": "pending",
       "dateAdded": "2026-08-10T00:00:00.000Z",
       "dateSold": null,
-      "stockNumber": "ST-5502"
+      "stockNumber": "ST-5502",
+      "openROs": []
     },
     {
       "id": "c3",
@@ -41,7 +43,8 @@
       "status": "sold",
       "dateAdded": "2026-07-15T00:00:00.000Z",
       "dateSold": "2026-08-05T00:00:00.000Z",
-      "stockNumber": "ST-3390"
+      "stockNumber": "ST-3390",
+      "openROs": []
     }
   ],
   "leads": [
@@ -241,5 +244,14 @@
       "dealType": "retail"
     }
   ],
-  "nextDealNumber": 1002
+  "nextDealNumber": 1002,
+  "settings": {
+    "docFee": 85,
+    "titleFee": 75,
+    "registrationFee": 50,
+    "licenseFee": 0,
+    "dealerFees": 0,
+    "acquisitionFee": 595,
+    "taxRate": 7
+  }
 }
