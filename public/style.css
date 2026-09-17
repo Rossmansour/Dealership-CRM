@@ -190,6 +190,35 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   gap: 10px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.deals-filter-header .deal-search-input {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.deal-date-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.deal-date-label input[type="date"] {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
 }
 
 .panel-header input, .panel-header select {
@@ -254,7 +283,8 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
 .badge.lost { background: var(--red); }
 
 .badge.working { background: #64748b; }
-.badge.credit_submitted { background: var(--amber); }
+.badge.delivered { background: var(--amber); }
+.badge.closed { background: #7c3aed; }
 .badge.approved { background: var(--green); }
 .badge.conditional { background: #7c3aed; }
 .badge.declined { background: var(--red); }

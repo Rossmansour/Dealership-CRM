@@ -150,7 +150,8 @@ function renderCars() {
     const matchesSearch = !search ||
       c.make.toLowerCase().includes(search) ||
       c.model.toLowerCase().includes(search) ||
-      (c.vin || '').toLowerCase().includes(search);
+      (c.vin || '').toLowerCase().includes(search) ||
+      (c.stockNumber || '').toLowerCase().includes(search);
     const matchesStatus = !statusFilter || c.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -166,6 +167,7 @@ function renderCars() {
         <td>${c.make}</td>
         <td>${c.model}</td>
         <td>${c.year}</td>
+        <td>${c.stockNumber || '-'}</td>
         <td>${c.mileage.toLocaleString()}</td>
         <td>$${c.price.toLocaleString()}</td>
         <td><span class="badge ${c.status}">${c.status}</span></td>
@@ -347,6 +349,7 @@ window.editCar = function(id) {
   document.getElementById('carModel').value = car.model;
   document.getElementById('carYear').value = car.year;
   document.getElementById('carVin').value = car.vin;
+  document.getElementById('carStockNumber').value = car.stockNumber || '';
   document.getElementById('carMileage').value = car.mileage;
   document.getElementById('carCost').value = car.cost;
   document.getElementById('carPrice').value = car.price;
@@ -435,6 +438,7 @@ document.getElementById('carForm').addEventListener('submit', async (e) => {
     model: document.getElementById('carModel').value,
     year: document.getElementById('carYear').value,
     vin: document.getElementById('carVin').value,
+    stockNumber: document.getElementById('carStockNumber').value,
     mileage: document.getElementById('carMileage').value,
     cost: document.getElementById('carCost').value,
     price: document.getElementById('carPrice').value,
@@ -729,16 +733,63 @@ document.getElementById('closeProfileBtn').addEventListener('click', () => {
 // ---------- Deals (Deal #, Desking, Credit App, Proposals) ----------
 
 const DEAL_STATUS_LABELS = {
-  working: 'Working', credit_submitted: 'Credit Submitted', approved: 'Approved',
-  conditional: 'Conditional', declined: 'Declined', finalized: 'Finalized'
+  working: 'Stored / Working', delivered: 'Delivered', closed: 'Closed', finalized: 'Finalized'
 };
 const CREDIT_STATUS_LABELS = {
   not_submitted: 'Not Submitted', pending: 'Pending', approved: 'Approved',
   conditional: 'Conditional', declined: 'Declined'
 };
 
+// Search matches across name (first/last/partial), company name (leads reuse
+// the same `name` field for business leads), VIN, stock #, deal #, phone,
+// and email -- all with one search box, since that's how a salesperson
+// actually looks something up ("was it Ro... something, or the Camry VIN?").
+function dealMatchesSearch(deal, lead, car, searchTerm) {
+  if (!searchTerm) return true;
+  const term = searchTerm.toLowerCase().trim();
+
+  // Phone gets matched on digits only, so "887-2201", "8872201", and
+  // "(555) 887-2201" all find the same customer regardless of formatting.
+  const digitsOnly = (s) => (s || '').replace(/\D/g, '');
+  const termDigits = digitsOnly(term);
+
+  const haystacks = [
+    lead ? lead.name : '',
+    lead ? lead.email : '',
+    car ? car.vin : '',
+    car ? car.stockNumber : '',
+    `d-${deal.dealNumber}`,
+    String(deal.dealNumber)
+  ].map(s => (s || '').toLowerCase());
+
+  const textMatch = haystacks.some(h => h.includes(term));
+  const phoneMatch = termDigits.length > 0 && digitsOnly(lead ? lead.phone : '').includes(termDigits);
+
+  return textMatch || phoneMatch;
+}
+
+function dealMatchesDateRange(deal, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  const created = new Date(deal.dateCreated);
+  const createdDateOnly = new Date(created.getFullYear(), created.getMonth(), created.getDate());
+
+  if (dateFrom && createdDateOnly < new Date(dateFrom + 'T00:00:00')) return false;
+  if (dateTo && createdDateOnly > new Date(dateTo + 'T00:00:00')) return false;
+  return true;
+}
+
 function renderDeals() {
-  document.getElementById('dealTableBody').innerHTML = deals.map(d => {
+  const searchTerm = document.getElementById('dealSearchInput').value;
+  const dateFrom = document.getElementById('dealDateFrom').value;
+  const dateTo = document.getElementById('dealDateTo').value;
+
+  const filtered = deals.filter(d => {
+    const lead = leads.find(l => l.id === d.leadId);
+    const car = cars.find(c => c.id === d.carId);
+    return dealMatchesSearch(d, lead, car, searchTerm) && dealMatchesDateRange(d, dateFrom, dateTo);
+  });
+
+  document.getElementById('dealTableBody').innerHTML = filtered.map(d => {
     const lead = leads.find(l => l.id === d.leadId);
     const car = cars.find(c => c.id === d.carId);
     const customerName = lead ? lead.name : 'Unknown';
@@ -761,6 +812,16 @@ function renderDeals() {
     `;
   }).join('');
 }
+
+document.getElementById('dealSearchInput').addEventListener('input', renderDeals);
+document.getElementById('dealDateFrom').addEventListener('change', renderDeals);
+document.getElementById('dealDateTo').addEventListener('change', renderDeals);
+document.getElementById('clearDealFiltersBtn').addEventListener('click', () => {
+  document.getElementById('dealSearchInput').value = '';
+  document.getElementById('dealDateFrom').value = '';
+  document.getElementById('dealDateTo').value = '';
+  renderDeals();
+});
 
 // ---------- New Deal (quick create -> generates Deal #) ----------
 

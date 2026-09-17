@@ -46,6 +46,12 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
 - **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
 
+**Deal Search & Filtering (Sales & F&I)**
+- One search box matches across customer name (partial, first-name-only works -- "Ro" finds "Ross Mansour"), company name (for business leads), VIN, stock #, deal #, phone (formatting-independent -- "8872201" matches "555-887-2201"), and email
+- Date range filter using native browser calendar pickers (From / To)
+- Deal status is now a 4-stage pipeline matching real dealership terminology: **Stored/Working \u2192 Delivered \u2192 Closed \u2192 Finalized**
+- Vehicles now carry a **stock number** in addition to VIN, searchable from both Inventory and Deals
+
 ## Module structure
 
 This app is organized as a DMS (Dealer Management System) with a left sidebar, similar in spirit to platforms like Tekion or DriveCentric. Hover over the sidebar to see full labels; click a module to switch into it:
@@ -104,6 +110,7 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 - **"Individual vs Business" lives on both the lead and the credit application, not just one place.** A lead's type is a CRM-level fact about who the prospect is; the application type is a financing decision that could reasonably differ (e.g., a sole proprietor buying under their own name instead of the business's). Tying them together would have been simpler but less accurate to how dealerships actually operate.
 - **Heading text uses a separate color variable from background navy**, even though both start from the same navy color in light mode. A color chosen for a background (dark navy on white) doesn't automatically work as text on a dark surface -- reusing it directly made dashboard numbers nearly invisible in dark mode. Splitting them into `--navy` (backgrounds) and `--heading` (text) fixed the contrast without a special case for every dark-mode override.
 - **The communication log is a list of timestamped entries, not a single notes field.** A single text box gets overwritten -- the fact that a customer was called on Monday and texted on Wednesday is lost the moment someone edits it. A real sales process needs the history, not just the latest state.
+- **Deal search is one box, not seven.** A salesperson trying to find a deal doesn't know in advance whether they remember the customer's name, the VIN, or the phone number -- they just remember *something*. One search field that checks all of it is faster than making them pick the right field first.
 - **Every AI call goes through one function, not scattered `fetch` calls.** Both the chat assistant and the suggested-reply feature call the same `callAI()` function in `server.js`. That's the only place that knows Gemini's specific request format -- swapping providers, or adding a fallback if one provider goes down, means changing one function instead of hunting through the codebase.
 - **SSNs are redacted before anything reaches the AI provider, but income, employer, and deal status are not.** A blanket "redact everything sensitive" approach would make the assistant useless for its actual job (answering questions about deals). The redaction list is deliberately narrow: strip what could enable identity theft, keep what's needed to be useful.
 - **Sending a real text is a separate action from logging one manually.** They look similar in the UI but do very different things -- one dials out to a real phone, the other just records history. Folding them into a single form would risk someone accidentally sending a real SMS while just trying to log a call they made from their cell phone.

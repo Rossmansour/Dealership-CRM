@@ -12,7 +12,8 @@
       "status": "available",
       "dateAdded": "2026-08-01T00:00:00.000Z",
       "dateSold": null,
-      "photos": []
+      "photos": [],
+      "stockNumber": "ST-4821"
     },
     {
       "id": "c2",
@@ -25,7 +26,8 @@
       "price": 21500,
       "status": "pending",
       "dateAdded": "2026-08-10T00:00:00.000Z",
-      "dateSold": null
+      "dateSold": null,
+      "stockNumber": "ST-5502"
     },
     {
       "id": "c3",
@@ -38,7 +40,8 @@
       "price": 26500,
       "status": "sold",
       "dateAdded": "2026-07-15T00:00:00.000Z",
-      "dateSold": "2026-08-05T00:00:00.000Z"
+      "dateSold": "2026-08-05T00:00:00.000Z",
+      "stockNumber": "ST-3390"
     }
   ],
   "leads": [
@@ -101,7 +104,7 @@
       "dealNumber": 1001,
       "leadId": "l2",
       "carId": "c2",
-      "status": "credit_submitted",
+      "status": "working",
       "hasTrade": true,
       "vehiclePrice": 21500,
       "tradeInValue": 4000,

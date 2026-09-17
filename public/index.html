@@ -72,7 +72,7 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th>Photo</th><th>Make</th><th>Model</th><th>Year</th><th>Mileage</th>
+          <th>Photo</th><th>Make</th><th>Model</th><th>Year</th><th>Stock #</th><th>Mileage</th>
           <th>Price</th><th>Status</th><th>Days Listed</th><th></th>
         </tr>
       </thead>
@@ -115,7 +115,11 @@
 
   <!-- DEALS -->
   <section id="deals" class="tab-panel">
-    <div class="panel-header">
+    <div class="panel-header deals-filter-header">
+      <input type="text" id="dealSearchInput" placeholder="Search name, VIN, stock #, deal #, phone, email, company..." class="deal-search-input" />
+      <label class="deal-date-label">From <input type="date" id="dealDateFrom" /></label>
+      <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
+      <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
       <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
     </div>
     <table class="data-table">
@@ -177,6 +181,7 @@
       <label>Model <input type="text" id="carModel" required /></label>
       <label>Year <input type="number" id="carYear" required /></label>
       <label>VIN <input type="text" id="carVin" /></label>
+      <label>Stock # <input type="text" id="carStockNumber" /></label>
       <label>Mileage <input type="number" id="carMileage" /></label>
       <label>Cost (what you paid) <input type="number" id="carCost" /></label>
       <label>Asking Price <input type="number" id="carPrice" required /></label>
@@ -333,11 +338,9 @@
     <div class="workspace-header">
       <h2 id="workspaceTitle">Deal #1001</h2>
       <select id="dealStatusSelect">
-        <option value="working">Working</option>
-        <option value="credit_submitted">Credit Submitted</option>
-        <option value="approved">Approved</option>
-        <option value="conditional">Conditional</option>
-        <option value="declined">Declined</option>
+        <option value="working">Stored / Working</option>
+        <option value="delivered">Delivered</option>
+        <option value="closed">Closed</option>
         <option value="finalized">Finalized</option>
       </select>
     </div>

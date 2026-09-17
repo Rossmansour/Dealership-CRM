@@ -114,7 +114,7 @@ app.get('/api/cars/:id', (req, res) => {
 // POST a new car
 app.post('/api/cars', (req, res) => {
   const db = readDB();
-  const { make, model, year, vin, mileage, cost, price, status } = req.body;
+  const { make, model, year, vin, stockNumber, mileage, cost, price, status } = req.body;
 
   if (!make || !model || !year || !price) {
     return res.status(400).json({ error: 'make, model, year, and price are required' });
@@ -126,6 +126,7 @@ app.post('/api/cars', (req, res) => {
     model,
     year: Number(year),
     vin: vin || '',
+    stockNumber: stockNumber || '',
     mileage: Number(mileage) || 0,
     cost: Number(cost) || 0,
     price: Number(price),
