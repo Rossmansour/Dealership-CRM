@@ -657,8 +657,29 @@ app.get('/api/fees/county-lookup', (req, res) => {
 // Transportation Improvement Fee, title $28, and the Vehicle License Fee
 // (0.65% of the vehicle's value) mapped onto our "License Fee" field,
 // since VLF literally *is* California's vehicle license fee.
+// California's Vehicle License Fee is NOT 0.65% of the raw price -- by
+// statute (Rev. & Tax. Code section 10753.2(b)) a vehicle is placed into a
+// $200-wide valuation bracket and taxed on the BRACKET'S MIDPOINT, not the
+// exact price. This rounds a price into that bracket before applying the
+// VLF rate.
+//
+// VLF is also always calculated at "year 1" (100% of value) for a sale
+// like this one, not the vehicle's actual age -- CA law resets the VLF
+// depreciation clock to year one every time a vehicle changes ownership
+// (section 10753.2(c)), and a dealership sale IS an ownership transfer.
+// A car's age only matters for VLF on a *renewal*, which isn't what this
+// calculator is pricing.
+function vlfValuationBracketMidpoint(price) {
+  if (price < 50) return 25;
+  if (price < 200) return 125;
+  const bracketStart = Math.floor(price / 200) * 200;
+  return bracketStart + 100; // midpoint of a $200-wide bracket
+}
+
 function calculateCaliforniaFees(price) {
-  const vlf = price * 0.0065;
+  const vlfValue = vlfValuationBracketMidpoint(price);
+  const vlf = vlfValue * 0.0065;
+
   let tif;
   if (price < 5000) tif = 28;
   else if (price < 25000) tif = 56;
@@ -666,29 +687,32 @@ function calculateCaliforniaFees(price) {
   else if (price < 60000) tif = 168;
   else tif = 224;
 
+  // $74 base registration + $34 CHP fee (Veh. Code sections 9250.8,
+  // 9250.13) + $3 Alternative Fuel/Technology surcharge (Veh. Code
+  // section 9250.1, a recurring charge on every registration that's
+  // easy to miss in simplified fee breakdowns) + the value-tiered TIF.
   return {
     taxRate: null, // filled in by caller from the ZIP lookup
-    registrationFee: round2(74 + 29 + tif),
+    registrationFee: round2(74 + 34 + 3 + tif),
     titleFee: 28,
     licenseFee: round2(vlf)
   };
 }
 
-// Arizona: Vehicle License Tax (VLT) is 60% of the vehicle's value in
-// year one, depreciating 16.25% per year after that, taxed at $2.80 per
-// $100 for a new vehicle or $2.89 per $100 once it's a renewal/used
-// vehicle -- genuinely age-dependent, calculated here from the vehicle's
-// model year, not just a flat guess.
-function calculateArizonaFees(price, vehicleYear) {
-  const currentYear = new Date().getFullYear();
-  const age = Math.max(currentYear - (Number(vehicleYear) || currentYear), 0);
-
-  let assessedValue = price * 0.60;
-  for (let i = 0; i < age; i++) {
-    assessedValue *= 0.8375; // 16.25% annual depreciation
-  }
-  const vltRate = age === 0 ? 2.80 : 2.89;
-  const vlt = (assessedValue / 100) * vltRate;
+// Arizona's Vehicle License Tax rate split ($2.80 vs $2.89 per $100) is
+// NOT "new car vs. used car" -- Arizona's own tax documentation (JLBC Tax
+// Handbook) is explicit that $2.80 applies during a vehicle's first 12
+// months of REGISTRATION, and $2.89 applies to every renewal after that,
+// "regardless of whether the car itself is new or used." A dealership
+// sale is always a fresh registration for the buyer -- whether the car
+// itself is factory-new or a 10-year-old trade-in someone else owned --
+// so every sale calculated here uses the first-year rate and the full
+// 60%-of-price assessed value, with no age-based depreciation applied.
+// A vehicle's age only matters for VLT on a *renewal*, which isn't what
+// this calculator is pricing. There's also a statutory $10 minimum.
+function calculateArizonaFees(price) {
+  const assessedValue = price * 0.60;
+  const vlt = Math.max((assessedValue / 100) * 2.80, 10);
 
   return {
     taxRate: null,
@@ -706,7 +730,7 @@ function calculateStateFees(db, state, zip, price, vehicleYear, county, city) {
 
   if (normalizedState === 'AZ') {
     const resolvedCounty = county || lookupCounty(zip, AZ_COUNTY_BY_ZIP_PREFIX);
-    const fees = calculateArizonaFees(price, vehicleYear);
+    const fees = calculateArizonaFees(price);
     const rateMatch = findBestTaxRateMatch(db, 'AZ', resolvedCounty, city);
     fees.county = resolvedCounty;
     fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : AZ_STATEWIDE_BASE_RATE;
