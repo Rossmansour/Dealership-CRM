@@ -47,6 +47,7 @@
     <button class="tab-btn" data-tab="deals" data-module="sales-fi">Deals</button>
     <button class="tab-btn" data-tab="service" data-module="service">Service</button>
     <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
+    <button id="adminMenuBtn" type="button">⚙️ Admin</button>
   </nav>
 </header>
 
@@ -127,8 +128,6 @@
       <label class="deal-date-label">From <input type="date" id="dealDateFrom" /></label>
       <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
       <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
-      <button type="button" class="btn-secondary" id="feeDefaultsBtn">⚙️ Fee Defaults</button>
-      <button type="button" class="btn-secondary" id="taxRatesBtn">🗺️ Taxes &amp; Fees</button>
       <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
     </div>
     <table class="data-table">
@@ -546,6 +545,23 @@
 
     <div class="modal-actions">
       <button type="button" class="btn-secondary" id="closeTaxRatesBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Menu (entry point, kept separate from the sales-facing modules) -->
+<div class="modal" id="adminMenuModal">
+  <div class="modal-content">
+    <h2>Admin</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      Configuration for how deals calculate -- not part of the day-to-day sales workflow. Role-based access (so only admins can reach this) is planned but not enforced yet.
+    </p>
+    <div class="admin-menu-list">
+      <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
+      <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeAdminMenuBtn">Close</button>
     </div>
   </div>
 </div>

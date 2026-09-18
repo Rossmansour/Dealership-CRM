@@ -64,6 +64,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- Tiny JSON "database" helpers ----------
 
+// Bumping this forces every existing db.json (including ones already
+// deployed) to pick up a fresh seedTaxRates() on next read, rather than
+// treating "some array already exists" as "nothing to do." This is what
+// closes the actual bug: a stale, partially-seeded taxRates array from an
+// earlier version silently persisted forever because the old check only
+// asked "is it missing?", not "is it current?".
+const TAX_RATES_SEED_VERSION = 2;
+
 function readDB() {
   if (!fs.existsSync(DB_PATH)) {
     const seed = { cars: [], leads: [], deals: [], nextDealNumber: 1001, settings: defaultFeeSettings() };
@@ -73,6 +81,11 @@ function readDB() {
   const raw = fs.readFileSync(DB_PATH, 'utf-8');
   const db = JSON.parse(raw);
   if (!db.settings) db.settings = defaultFeeSettings();
+  if (!db.taxRates || db.taxRatesVersion !== TAX_RATES_SEED_VERSION) {
+    db.taxRates = seedTaxRates();
+    db.taxRatesVersion = TAX_RATES_SEED_VERSION;
+    writeDB(db); // persist the migration immediately, not just in memory
+  }
   return db;
 }
 
@@ -128,24 +141,87 @@ app.put('/api/settings', (req, res) => {
 
 function seedTaxRates() {
   return [
-    { id: 'tr-ca-la', state: 'CA', county: 'Los Angeles', city: '', stateTaxRate: 7.25, countyTaxRate: 1.00, cityTaxRate: 1.50 },
-    { id: 'tr-ca-alameda', state: 'CA', county: 'Alameda', city: '', stateTaxRate: 7.25, countyTaxRate: 1.50, cityTaxRate: 1.50 },
-    { id: 'tr-ca-sf', state: 'CA', county: 'San Francisco', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0.875 },
-    { id: 'tr-ca-sanmateo', state: 'CA', county: 'San Mateo', city: '', stateTaxRate: 7.25, countyTaxRate: 1.125, cityTaxRate: 1.00 },
-    { id: 'tr-ca-santaclara', state: 'CA', county: 'Santa Clara', city: '', stateTaxRate: 7.25, countyTaxRate: 1.125, cityTaxRate: 1.00 },
-    { id: 'tr-ca-sandiego', state: 'CA', county: 'San Diego', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0 },
-    { id: 'tr-ca-orange', state: 'CA', county: 'Orange', city: '', stateTaxRate: 7.25, countyTaxRate: 0.50, cityTaxRate: 0 },
-    { id: 'tr-ca-sacramento', state: 'CA', county: 'Sacramento', city: '', stateTaxRate: 7.25, countyTaxRate: 0.75, cityTaxRate: 0.75 },
+    { id: 'tr-ca-alameda', state: 'CA', county: 'Alameda', city: '', stateTaxRate: 7.25, countyTaxRate: 3.0, cityTaxRate: 0 },
+    { id: 'tr-ca-alpine', state: 'CA', county: 'Alpine', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-amador', state: 'CA', county: 'Amador', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-butte', state: 'CA', county: 'Butte', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-calaveras', state: 'CA', county: 'Calaveras', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-colusa', state: 'CA', county: 'Colusa', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-contracosta', state: 'CA', county: 'Contra Costa', city: '', stateTaxRate: 7.25, countyTaxRate: 1.5, cityTaxRate: 0 },
+    { id: 'tr-ca-delnorte', state: 'CA', county: 'Del Norte', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-eldorado', state: 'CA', county: 'El Dorado', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-fresno', state: 'CA', county: 'Fresno', city: '', stateTaxRate: 7.25, countyTaxRate: 0.725, cityTaxRate: 0 },
+    { id: 'tr-ca-glenn', state: 'CA', county: 'Glenn', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-humboldt', state: 'CA', county: 'Humboldt', city: '', stateTaxRate: 7.25, countyTaxRate: 1.5, cityTaxRate: 0 },
+    { id: 'tr-ca-imperial', state: 'CA', county: 'Imperial', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-inyo', state: 'CA', county: 'Inyo', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-kern', state: 'CA', county: 'Kern', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-kings', state: 'CA', county: 'Kings', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-lake', state: 'CA', county: 'Lake', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-lassen', state: 'CA', county: 'Lassen', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-losangeles', state: 'CA', county: 'Los Angeles', city: '', stateTaxRate: 7.25, countyTaxRate: 2.5, cityTaxRate: 0 },
+    { id: 'tr-ca-madera', state: 'CA', county: 'Madera', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-marin', state: 'CA', county: 'Marin', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-mariposa', state: 'CA', county: 'Mariposa', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-mendocino', state: 'CA', county: 'Mendocino', city: '', stateTaxRate: 7.25, countyTaxRate: 0.625, cityTaxRate: 0 },
+    { id: 'tr-ca-merced', state: 'CA', county: 'Merced', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-modoc', state: 'CA', county: 'Modoc', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-mono', state: 'CA', county: 'Mono', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-monterey', state: 'CA', county: 'Monterey', city: '', stateTaxRate: 7.25, countyTaxRate: 1.5, cityTaxRate: 0 },
+    { id: 'tr-ca-napa', state: 'CA', county: 'Napa', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-nevada', state: 'CA', county: 'Nevada', city: '', stateTaxRate: 7.25, countyTaxRate: 0.25, cityTaxRate: 0 },
+    { id: 'tr-ca-orange', state: 'CA', county: 'Orange', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-placer', state: 'CA', county: 'Placer', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-plumas', state: 'CA', county: 'Plumas', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-riverside', state: 'CA', county: 'Riverside', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-sacramento', state: 'CA', county: 'Sacramento', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-sanbenito', state: 'CA', county: 'San Benito', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
+    { id: 'tr-ca-sanbernardino', state: 'CA', county: 'San Bernardino', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-sandiego', state: 'CA', county: 'San Diego', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-sanfrancisco', state: 'CA', county: 'San Francisco', city: '', stateTaxRate: 7.25, countyTaxRate: 1.375, cityTaxRate: 0 },
+    { id: 'tr-ca-sanjoaquin', state: 'CA', county: 'San Joaquin', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-sanluisobispo', state: 'CA', county: 'San Luis Obispo', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-sanmateo', state: 'CA', county: 'San Mateo', city: '', stateTaxRate: 7.25, countyTaxRate: 2.125, cityTaxRate: 0 },
+    { id: 'tr-ca-santabarbara', state: 'CA', county: 'Santa Barbara', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-santaclara', state: 'CA', county: 'Santa Clara', city: '', stateTaxRate: 7.25, countyTaxRate: 2.5, cityTaxRate: 0 },
+    { id: 'tr-ca-santacruz', state: 'CA', county: 'Santa Cruz', city: '', stateTaxRate: 7.25, countyTaxRate: 2.25, cityTaxRate: 0 },
+    { id: 'tr-ca-shasta', state: 'CA', county: 'Shasta', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-sierra', state: 'CA', county: 'Sierra', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-siskiyou', state: 'CA', county: 'Siskiyou', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-solano', state: 'CA', county: 'Solano', city: '', stateTaxRate: 7.25, countyTaxRate: 0.125, cityTaxRate: 0 },
+    { id: 'tr-ca-sonoma', state: 'CA', county: 'Sonoma', city: '', stateTaxRate: 7.25, countyTaxRate: 2.0, cityTaxRate: 0 },
+    { id: 'tr-ca-stanislaus', state: 'CA', county: 'Stanislaus', city: '', stateTaxRate: 7.25, countyTaxRate: 0.625, cityTaxRate: 0 },
+    { id: 'tr-ca-sutter', state: 'CA', county: 'Sutter', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-tehama', state: 'CA', county: 'Tehama', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-trinity', state: 'CA', county: 'Trinity', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-tulare', state: 'CA', county: 'Tulare', city: '', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-ca-tuolumne', state: 'CA', county: 'Tuolumne', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-ventura', state: 'CA', county: 'Ventura', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-yolo', state: 'CA', county: 'Yolo', city: '', stateTaxRate: 7.25, countyTaxRate: 0.0, cityTaxRate: 0 },
+    { id: 'tr-ca-yuba', state: 'CA', county: 'Yuba', city: '', stateTaxRate: 7.25, countyTaxRate: 1.0, cityTaxRate: 0 },
     { id: 'tr-ca-default', state: 'CA', county: '', city: '', stateTaxRate: 7.25, countyTaxRate: 0, cityTaxRate: 0 },
-    { id: 'tr-az-maricopa', state: 'AZ', county: 'Maricopa', city: '', stateTaxRate: 5.6, countyTaxRate: 0.70, cityTaxRate: 2.30 },
-    { id: 'tr-az-pima', state: 'AZ', county: 'Pima', city: '', stateTaxRate: 5.6, countyTaxRate: 0.50, cityTaxRate: 2.60 },
+    { id: 'tr-az-apache', state: 'AZ', county: 'Apache', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-cochise', state: 'AZ', county: 'Cochise', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-coconino', state: 'AZ', county: 'Coconino', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-gila', state: 'AZ', county: 'Gila', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-graham', state: 'AZ', county: 'Graham', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-greenlee', state: 'AZ', county: 'Greenlee', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-lapaz', state: 'AZ', county: 'La Paz', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-maricopa', state: 'AZ', county: 'Maricopa', city: '', stateTaxRate: 5.6, countyTaxRate: 0.7, cityTaxRate: 0 },
+    { id: 'tr-az-mohave', state: 'AZ', county: 'Mohave', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-navajo', state: 'AZ', county: 'Navajo', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-pima', state: 'AZ', county: 'Pima', city: '', stateTaxRate: 5.6, countyTaxRate: 0.5, cityTaxRate: 0 },
+    { id: 'tr-az-pinal', state: 'AZ', county: 'Pinal', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-santacruz', state: 'AZ', county: 'Santa Cruz', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-yavapai', state: 'AZ', county: 'Yavapai', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-az-yuma', state: 'AZ', county: 'Yuma', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
     { id: 'tr-az-default', state: 'AZ', county: '', city: '', stateTaxRate: 5.6, countyTaxRate: 0, cityTaxRate: 0 },
+    { id: 'tr-ca-monterey-city', state: 'CA', county: 'Monterey', city: 'Monterey', stateTaxRate: 7.25, countyTaxRate: 0.5, cityTaxRate: 1.5 },
   ];
 }
 
 app.get('/api/tax-rates', (req, res) => {
   const db = readDB();
-  if (!db.taxRates) db.taxRates = seedTaxRates();
   const { state } = req.query;
   let rates = db.taxRates;
   if (state) rates = rates.filter(r => r.state.toUpperCase() === state.toUpperCase());
@@ -154,7 +230,6 @@ app.get('/api/tax-rates', (req, res) => {
 
 app.post('/api/tax-rates', (req, res) => {
   const db = readDB();
-  if (!db.taxRates) db.taxRates = seedTaxRates();
   const { state, county, city, stateTaxRate, countyTaxRate, cityTaxRate } = req.body;
   if (!state) return res.status(400).json({ error: 'state is required' });
 
@@ -174,7 +249,6 @@ app.post('/api/tax-rates', (req, res) => {
 
 app.put('/api/tax-rates/:id', (req, res) => {
   const db = readDB();
-  if (!db.taxRates) db.taxRates = seedTaxRates();
   const idx = db.taxRates.findIndex(r => r.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
 
@@ -185,7 +259,6 @@ app.put('/api/tax-rates/:id', (req, res) => {
 
 app.delete('/api/tax-rates/:id', (req, res) => {
   const db = readDB();
-  if (!db.taxRates) db.taxRates = seedTaxRates();
   const idx = db.taxRates.findIndex(r => r.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
 
@@ -199,7 +272,6 @@ app.delete('/api/tax-rates/:id', (req, res) => {
 // specified (a county-wide default), then a bare state-level default.
 // Returns null if nothing at all matches that state.
 function findBestTaxRateMatch(db, state, county, city) {
-  if (!db.taxRates) db.taxRates = seedTaxRates();
   const normalizedState = (state || '').toUpperCase();
   const normalizedCounty = (county || '').trim();
   const normalizedCity = (city || '').trim();

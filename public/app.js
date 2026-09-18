@@ -1152,6 +1152,14 @@ document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click'
 
 document.getElementById('autoCalcFeesBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('autoCalcFeesStatus');
+
+  // Save the Credit Application first, silently. This guarantees whatever
+  // address was just typed in is actually persisted before anything reads
+  // it -- removing the dependency on remembering a separate "Save Credit
+  // Application" click, which is an easy step to skip and previously meant
+  // a freshly-typed address could be lost the moment the page reloaded.
+  await saveCreditAppForm();
+
   const dealStateField = document.getElementById('dealState');
   const primaryStateField = document.getElementById('primaryState');
   // The customer's address (and its state) lives on the Credit Application
@@ -1634,9 +1642,7 @@ function wireApplicantToggles(prefix) {
 }
 
 // Credit application form: save separately from desking numbers
-document.getElementById('creditAppForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-
+async function saveCreditAppForm() {
   const payload = {
     applicantType: document.getElementById('caApplicantType').value,
     businessName: document.getElementById('caBusinessName').value,
@@ -1656,7 +1662,11 @@ document.getElementById('creditAppForm').addEventListener('submit', async (e) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+}
 
+document.getElementById('creditAppForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await saveCreditAppForm();
   await loadAll();
   // Stay on the page (it's full-page now, not a modal) -- just quietly
   // re-render so any computed fields reflect the save.
@@ -1971,8 +1981,21 @@ async function loadAndRenderTaxRates() {
   }).join('');
 }
 
-document.getElementById('taxRatesBtn').addEventListener('click', async () => {
+// ---------- Admin menu (entry point, separate from sales workflow) ----------
+
+const adminMenuModal = document.getElementById('adminMenuModal');
+
+document.getElementById('adminMenuBtn').addEventListener('click', () => {
+  adminMenuModal.classList.add('active');
+});
+
+document.getElementById('closeAdminMenuBtn').addEventListener('click', () => {
+  adminMenuModal.classList.remove('active');
+});
+
+document.getElementById('adminTaxRatesBtn').addEventListener('click', async () => {
   await loadAndRenderTaxRates();
+  adminMenuModal.classList.remove('active');
   taxRatesModal.classList.add('active');
 });
 
@@ -2038,7 +2061,7 @@ document.getElementById('taxRateForm').addEventListener('submit', async (e) => {
 
 const feeDefaultsModal = document.getElementById('feeDefaultsModal');
 
-document.getElementById('feeDefaultsBtn').addEventListener('click', async () => {
+document.getElementById('adminFeeDefaultsBtn').addEventListener('click', async () => {
   const res = await fetch(`${API}/settings`);
   const settings = await res.json();
   appSettings = settings;
@@ -2052,6 +2075,7 @@ document.getElementById('feeDefaultsBtn').addEventListener('click', async () => 
   document.getElementById('settingsDmvFeeMethod').value = settings.dmvFeeMethod || 'flat';
   document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
   document.getElementById('dmvPercentageField').style.display = (settings.dmvFeeMethod === 'percentage') ? 'block' : 'none';
+  adminMenuModal.classList.remove('active');
   feeDefaultsModal.classList.add('active');
 });
 

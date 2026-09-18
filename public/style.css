@@ -883,6 +883,14 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
 .deal-summary-panel { border: 2px solid var(--blue); }
 .summary-hint { font-size: 11px; font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: 0; }
 
+.admin-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.admin-menu-item { text-align: left; }
+
 /* ---------- Send Text box ---------- */
 
 .send-text-box {

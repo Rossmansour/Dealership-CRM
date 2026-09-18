@@ -138,25 +138,28 @@
         "annualRevenue": 0,
         "applicant": {
           "firstName": "Devon",
-          "middleInitial": "R",
+          "middleInitial": "",
           "lastName": "Price",
           "suffix": "",
-          "ssn": "123-45-4821",
-          "dob": "1991-04-12",
-          "address1": "142 Maple St",
+          "ssn": "",
+          "dob": "",
+          "address1": "123 Main St",
           "address2": "",
-          "zip": "62701",
-          "phone": "555-887-2201",
-          "homeDisclosure": true,
-          "mobileDisclosure": true,
-          "email": "devon.price@email.com",
+          "city": "Los Angeles",
+          "state": "CA",
+          "county": "Los Angeles",
+          "zip": "90001",
+          "phone": "",
+          "homeDisclosure": false,
+          "mobileDisclosure": false,
+          "email": "",
           "emailNotProvided": false,
-          "licenseState": "IL",
-          "licenseNumber": "P4821663",
+          "licenseState": "",
+          "licenseNumber": "",
           "housingStatus": "rent",
-          "yrsAtAddress": "3",
-          "mosAtAddress": "0",
-          "housingPayment": 1200,
+          "yrsAtAddress": "",
+          "mosAtAddress": "",
+          "housingPayment": 0,
           "hasPreviousAddress": false,
           "previousAddress": {
             "address1": "",
@@ -166,12 +169,12 @@
             "mosAtAddress": ""
           },
           "employmentStatus": "employed",
-          "employer": "Springfield Logistics",
-          "yrsAtEmployer": "4",
-          "mosAtEmployer": "0",
-          "businessPhone": "555-410-2200",
-          "occupation": "Warehouse Supervisor",
-          "salary": 4800,
+          "employer": "",
+          "yrsAtEmployer": "",
+          "mosAtEmployer": "",
+          "businessPhone": "",
+          "occupation": "",
+          "salary": 0,
           "expectedSalary": 0,
           "payFrequency": "biweekly",
           "otherMonthlyIncome": 0,
@@ -196,6 +199,9 @@
           "dob": "",
           "address1": "",
           "address2": "",
+          "city": "",
+          "state": "",
+          "county": "",
           "zip": "",
           "phone": "",
           "homeDisclosure": false,
@@ -237,7 +243,7 @@
             "businessPhone": ""
           }
         },
-        "status": "pending",
+        "status": "not_submitted",
         "dateSubmitted": "2026-08-23T00:00:00.000Z"
       },
       "dateCreated": "2026-08-23T00:00:00.000Z",
@@ -256,57 +262,264 @@
   },
   "taxRates": [
     {
-      "id": "tr-ca-la",
-      "state": "CA",
-      "county": "Los Angeles",
-      "city": "",
-      "stateTaxRate": 7.25,
-      "countyTaxRate": 1,
-      "cityTaxRate": 1.5
-    },
-    {
       "id": "tr-ca-alameda",
       "state": "CA",
       "county": "Alameda",
       "city": "",
       "stateTaxRate": 7.25,
+      "countyTaxRate": 3,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-alpine",
+      "state": "CA",
+      "county": "Alpine",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-amador",
+      "state": "CA",
+      "county": "Amador",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-butte",
+      "state": "CA",
+      "county": "Butte",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-calaveras",
+      "state": "CA",
+      "county": "Calaveras",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-colusa",
+      "state": "CA",
+      "county": "Colusa",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-contracosta",
+      "state": "CA",
+      "county": "Contra Costa",
+      "city": "",
+      "stateTaxRate": 7.25,
       "countyTaxRate": 1.5,
-      "cityTaxRate": 1.5
+      "cityTaxRate": 0
     },
     {
-      "id": "tr-ca-sf",
+      "id": "tr-ca-delnorte",
       "state": "CA",
-      "county": "San Francisco",
+      "county": "Del Norte",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-eldorado",
+      "state": "CA",
+      "county": "El Dorado",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-fresno",
+      "state": "CA",
+      "county": "Fresno",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.725,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-glenn",
+      "state": "CA",
+      "county": "Glenn",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-humboldt",
+      "state": "CA",
+      "county": "Humboldt",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-imperial",
+      "state": "CA",
+      "county": "Imperial",
       "city": "",
       "stateTaxRate": 7.25,
       "countyTaxRate": 0.5,
-      "cityTaxRate": 0.875
+      "cityTaxRate": 0
     },
     {
-      "id": "tr-ca-sanmateo",
+      "id": "tr-ca-inyo",
       "state": "CA",
-      "county": "San Mateo",
-      "city": "",
-      "stateTaxRate": 7.25,
-      "countyTaxRate": 1.125,
-      "cityTaxRate": 1
-    },
-    {
-      "id": "tr-ca-santaclara",
-      "state": "CA",
-      "county": "Santa Clara",
-      "city": "",
-      "stateTaxRate": 7.25,
-      "countyTaxRate": 1.125,
-      "cityTaxRate": 1
-    },
-    {
-      "id": "tr-ca-sandiego",
-      "state": "CA",
-      "county": "San Diego",
+      "county": "Inyo",
       "city": "",
       "stateTaxRate": 7.25,
       "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-kern",
+      "state": "CA",
+      "county": "Kern",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-kings",
+      "state": "CA",
+      "county": "Kings",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-lake",
+      "state": "CA",
+      "county": "Lake",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-lassen",
+      "state": "CA",
+      "county": "Lassen",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-losangeles",
+      "state": "CA",
+      "county": "Los Angeles",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 2.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-madera",
+      "state": "CA",
+      "county": "Madera",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-marin",
+      "state": "CA",
+      "county": "Marin",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-mariposa",
+      "state": "CA",
+      "county": "Mariposa",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-mendocino",
+      "state": "CA",
+      "county": "Mendocino",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.625,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-merced",
+      "state": "CA",
+      "county": "Merced",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-modoc",
+      "state": "CA",
+      "county": "Modoc",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-mono",
+      "state": "CA",
+      "county": "Mono",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-monterey",
+      "state": "CA",
+      "county": "Monterey",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-napa",
+      "state": "CA",
+      "county": "Napa",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-nevada",
+      "state": "CA",
+      "county": "Nevada",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.25,
       "cityTaxRate": 0
     },
     {
@@ -319,13 +532,256 @@
       "cityTaxRate": 0
     },
     {
+      "id": "tr-ca-placer",
+      "state": "CA",
+      "county": "Placer",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-plumas",
+      "state": "CA",
+      "county": "Plumas",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-riverside",
+      "state": "CA",
+      "county": "Riverside",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
       "id": "tr-ca-sacramento",
       "state": "CA",
       "county": "Sacramento",
       "city": "",
       "stateTaxRate": 7.25,
-      "countyTaxRate": 0.75,
-      "cityTaxRate": 0.75
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanbenito",
+      "state": "CA",
+      "county": "San Benito",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanbernardino",
+      "state": "CA",
+      "county": "San Bernardino",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sandiego",
+      "state": "CA",
+      "county": "San Diego",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanfrancisco",
+      "state": "CA",
+      "county": "San Francisco",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1.375,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanjoaquin",
+      "state": "CA",
+      "county": "San Joaquin",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanluisobispo",
+      "state": "CA",
+      "county": "San Luis Obispo",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sanmateo",
+      "state": "CA",
+      "county": "San Mateo",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 2.125,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-santabarbara",
+      "state": "CA",
+      "county": "Santa Barbara",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-santaclara",
+      "state": "CA",
+      "county": "Santa Clara",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 2.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-santacruz",
+      "state": "CA",
+      "county": "Santa Cruz",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 2.25,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-shasta",
+      "state": "CA",
+      "county": "Shasta",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sierra",
+      "state": "CA",
+      "county": "Sierra",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-siskiyou",
+      "state": "CA",
+      "county": "Siskiyou",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-solano",
+      "state": "CA",
+      "county": "Solano",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.125,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sonoma",
+      "state": "CA",
+      "county": "Sonoma",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 2,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-stanislaus",
+      "state": "CA",
+      "county": "Stanislaus",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.625,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-sutter",
+      "state": "CA",
+      "county": "Sutter",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-tehama",
+      "state": "CA",
+      "county": "Tehama",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-trinity",
+      "state": "CA",
+      "county": "Trinity",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-tulare",
+      "state": "CA",
+      "county": "Tulare",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0.5,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-tuolumne",
+      "state": "CA",
+      "county": "Tuolumne",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-ventura",
+      "state": "CA",
+      "county": "Ventura",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-yolo",
+      "state": "CA",
+      "county": "Yolo",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-ca-yuba",
+      "state": "CA",
+      "county": "Yuba",
+      "city": "",
+      "stateTaxRate": 7.25,
+      "countyTaxRate": 1,
+      "cityTaxRate": 0
     },
     {
       "id": "tr-ca-default",
@@ -337,13 +793,94 @@
       "cityTaxRate": 0
     },
     {
+      "id": "tr-az-apache",
+      "state": "AZ",
+      "county": "Apache",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-cochise",
+      "state": "AZ",
+      "county": "Cochise",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-coconino",
+      "state": "AZ",
+      "county": "Coconino",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-gila",
+      "state": "AZ",
+      "county": "Gila",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-graham",
+      "state": "AZ",
+      "county": "Graham",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-greenlee",
+      "state": "AZ",
+      "county": "Greenlee",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-lapaz",
+      "state": "AZ",
+      "county": "La Paz",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
       "id": "tr-az-maricopa",
       "state": "AZ",
       "county": "Maricopa",
       "city": "",
       "stateTaxRate": 5.6,
       "countyTaxRate": 0.7,
-      "cityTaxRate": 2.3
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-mohave",
+      "state": "AZ",
+      "county": "Mohave",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-navajo",
+      "state": "AZ",
+      "county": "Navajo",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
     },
     {
       "id": "tr-az-pima",
@@ -352,7 +889,43 @@
       "city": "",
       "stateTaxRate": 5.6,
       "countyTaxRate": 0.5,
-      "cityTaxRate": 2.6
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-pinal",
+      "state": "AZ",
+      "county": "Pinal",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-santacruz",
+      "state": "AZ",
+      "county": "Santa Cruz",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-yavapai",
+      "state": "AZ",
+      "county": "Yavapai",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
+    },
+    {
+      "id": "tr-az-yuma",
+      "state": "AZ",
+      "county": "Yuma",
+      "city": "",
+      "stateTaxRate": 5.6,
+      "countyTaxRate": 0,
+      "cityTaxRate": 0
     },
     {
       "id": "tr-az-default",
@@ -364,7 +937,7 @@
       "cityTaxRate": 0
     },
     {
-      "id": "ff8bfd22-1877-43f6-b269-43887d9fdc1b",
+      "id": "tr-ca-monterey-city",
       "state": "CA",
       "county": "Monterey",
       "city": "Monterey",
@@ -372,5 +945,6 @@
       "countyTaxRate": 0.5,
       "cityTaxRate": 1.5
     }
-  ]
+  ],
+  "taxRatesVersion": 2
 }
