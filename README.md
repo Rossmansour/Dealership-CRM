@@ -106,7 +106,7 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 **Vehicle Photos & Picture Texts**
 - Upload photos to any car in inventory (Edit Car → Photos section) -- shown as a thumbnail in the Inventory table
 - From a lead's profile, the **Send Text** box lets you attach one of their interested vehicle's photos, sending a real **MMS** (picture text) instead of plain SMS
-- ⚠️ **Photos live on the server's disk, same as `db.json`** -- on a host with an ephemeral filesystem (Render's free tier), uploaded photos disappear on every restart/redeploy, exactly like the rest of the data. Fine for a demo, not for real production use without switching to real file storage (e.g. S3, Cloudinary).
+- ⚠️ **Photos still live on the server's disk** -- on a host with an ephemeral filesystem (Render's free tier), uploaded photos disappear on every restart/redeploy. All other data is in Postgres and survives redeploys; photos need to move to real file storage (e.g. S3, Cloudinary) before production use.
 
 **Real SMS (Twilio)**
 - A dedicated "Send Text" flow on each lead's profile that sends an actual SMS via Twilio, not just a logged note -- the send and the log entry happen together automatically
@@ -174,7 +174,7 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 ## Tech stack
 
 - **Backend:** Node.js + Express, REST API
-- **Storage:** JSON file (kept intentionally simple — no database setup required to run this)
+- **Storage:** PostgreSQL (`db.js`). Every record belongs to a dealership, so one install can serve multiple stores.
 - **Frontend:** Vanilla HTML/CSS/JavaScript, no framework
 
 ## Setting up the AI features
@@ -205,6 +205,25 @@ The "Send Text" feature on a lead's profile needs a Twilio account to actually s
 
 **Trial account limitations** (not bugs): Twilio trial accounts can only text phone numbers you've manually verified in the Twilio console first, and every message gets a "Sent from your Twilio trial account" prefix. Both go away once you upgrade to a paid account.
 
+## Setting up the database
+
+The app stores everything in PostgreSQL and won't start without a `DATABASE_URL`.
+
+**On Render**
+1. In the Render dashboard, click **New → Postgres** and create a database (pick the same region as your web service).
+2. Open the new database and copy its **Internal Database URL**.
+3. Open your web service → **Environment** → add `DATABASE_URL` and paste the URL. Save; Render redeploys automatically.
+
+**Locally**, put a connection string in your `.env` file:
+```
+DATABASE_URL=postgres://user:password@localhost:5432/dealership_crm
+```
+If you want to point your local copy at the Render database instead, use its **External Database URL** and add `?sslmode=require` to the end.
+
+**What happens on first start:** the server creates its tables, creates a default dealership, and copies in everything from `data/db.json` (cars, leads, deals, tax rates, settings). That import only ever happens once, into an empty database -- it can't duplicate or overwrite data. After that, `data/db.json` is no longer used.
+
+**Database changes over time** are listed in the `MIGRATIONS` array in `db.js` and applied automatically on startup, each exactly once.
+
 ## Running it locally
 
 ```bash
@@ -212,7 +231,15 @@ npm install
 npm start
 ```
 
-Then open **http://localhost:3000** in your browser. Sample data is pre-loaded so you can see it working immediately.
+Then open **http://localhost:3000** in your browser. Sample data is loaded on the first start so you can see it working immediately.
+
+## Running the tests
+
+The tests run against a real Postgres database, which they **wipe first** -- use a separate throwaway database, never your real one:
+
+```bash
+TEST_DATABASE_URL=postgres://user:password@localhost:5432/dealership_crm_test npm test
+```
 
 ## What I'd add next
 
@@ -220,7 +247,6 @@ Then open **http://localhost:3000** in your browser. Sample data is pre-loaded s
 - Photo uploads per vehicle
 - Email/SMS reminders for leads that have gone quiet
 - Multi-user support with basic auth (for a shop with more than one salesperson)
-- Swap the JSON file for a real database (SQLite or Postgres) if usage grew beyond a single dealership
 - CSV export for tax/accounting purposes
 
 ## Project structure
@@ -228,8 +254,10 @@ Then open **http://localhost:3000** in your browser. Sample data is pre-loaded s
 ```
 car-crm/
 ├── server.js          # Express API (cars, leads, deals, credit apps, AI endpoints)
-├── .env.example         # Template for your Gemini API key (copy to .env)
-├── data/db.json        # JSON data store (seeded with sample data)
+├── db.js              # Postgres connection, migrations, and record storage
+├── .env.example       # Template for your settings and keys (copy to .env)
+├── data/db.json       # Sample data, imported once on first start
+├── test/              # API tests (run against a throwaway Postgres database)
 ├── public/
 │   ├── index.html       # App shell + modals
 │   ├── style.css        # Styling

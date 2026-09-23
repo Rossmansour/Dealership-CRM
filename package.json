@@ -4,12 +4,17 @@
   "description": "Lightweight inventory and CRM tool for a small used-car dealership",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^4.19.2",
     "multer": "^2.3.0",
+    "pg": "^8.23.0",
     "twilio": "^6.1.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
