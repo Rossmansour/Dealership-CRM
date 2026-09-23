@@ -140,7 +140,7 @@ nav { display: flex; gap: 8px; }
 
 .tab-btn.active { background: var(--blue); border-color: var(--blue); }
 
-#themeToggleBtn {
+#themeToggleBtn, #adminMenuBtn, #userMenuBtn, #signOutBtn {
   background: transparent;
   border: 1px solid rgba(255,255,255,0.3);
   color: white;
@@ -150,7 +150,8 @@ nav { display: flex; gap: 8px; }
   font-size: 14px;
   margin-left: 8px;
 }
-#themeToggleBtn:hover { background: rgba(255,255,255,0.1); }
+#themeToggleBtn:hover, #adminMenuBtn:hover, #userMenuBtn:hover, #signOutBtn:hover { background: rgba(255,255,255,0.1); }
+#adminMenuBtn, #userMenuBtn, #signOutBtn { margin-left: 0; }
 
 main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
 
@@ -1159,3 +1160,14 @@ main { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
   }
   .no-print { display: none !important; }
 }
+
+/* ---------- Users & Roles ---------- */
+.user-inactive td { color: var(--text-muted); }
+.user-role-select { min-width: 150px; width: auto; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+
+/* Buttons for actions the signed-in user's role can't do (see applyPermissionsToUI) */
+body.cannot-editInventory #addCarBtn,
+body.cannot-editInventory #carTableBody .row-actions,
+body.cannot-deleteRecords #leadTableBody .delete,
+body.cannot-deleteRecords #dealTableBody .delete,
+body.cannot-deleteRecords .activity-delete { display: none; }

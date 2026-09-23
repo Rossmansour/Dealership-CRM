@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const store = require('./db');
+const auth = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,7 +62,16 @@ const upload = multer({
   }
 });
 
+// Render (and most hosts) sit behind a proxy -- this lets Express see the
+// real https scheme and client IP, needed for secure cookies and for the
+// failed-login lockout.
+app.set('trust proxy', 1);
+
 app.use(express.json());
+
+// The app page itself requires signing in; the login page, styles, and
+// car photos stay public (Twilio needs to fetch photos to send MMS).
+app.get(['/', '/index.html'], auth.requireLoginForPage);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- Request plumbing ----------
@@ -74,14 +84,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 // current?".
 const TAX_RATES_SEED_VERSION = 2;
 
-// Which dealership each request acts for. Until logins exist, every
-// request uses the single default dealership created by bootstrap();
-// once users sign in, this will come from the logged-in user instead.
+// Every /api route except signing in requires a signed-in user, and acts
+// for that user's dealership (req.dealershipId).
+app.use('/api', auth.requireLogin);
+app.use('/api', auth.router);
+
+// Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
+const allow = auth.requirePermission;
+
+// The dealership that data/db.json is imported into and that the first
+// admin account is created in.
 let defaultDealershipId = null;
-app.use('/api', (req, res, next) => {
-  req.dealershipId = defaultDealershipId;
-  next();
-});
 
 // Express 4 doesn't catch errors thrown from async handlers on its own --
 // this forwards them to the JSON error handler at the bottom of the file
@@ -122,7 +135,7 @@ app.get('/api/settings', wrap(async (req, res) => {
   res.json(await getSettings(store.pool, req.dealershipId));
 }));
 
-app.put('/api/settings', wrap(async (req, res) => {
+app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
   const settings = await store.tx(async q => {
     const current = await getSettings(q, req.dealershipId);
     return store.saveSettings(q, req.dealershipId, { ...current, ...req.body });
@@ -227,7 +240,7 @@ app.get('/api/tax-rates', wrap(async (req, res) => {
   res.json(rates);
 }));
 
-app.post('/api/tax-rates', wrap(async (req, res) => {
+app.post('/api/tax-rates', allow('editSettings'), wrap(async (req, res) => {
   const { state, county, city, stateTaxRate, countyTaxRate, cityTaxRate } = req.body;
   if (!state) return res.status(400).json({ error: 'state is required' });
 
@@ -244,7 +257,7 @@ app.post('/api/tax-rates', wrap(async (req, res) => {
   res.status(201).json(newRate);
 }));
 
-app.put('/api/tax-rates/:id', wrap(async (req, res) => {
+app.put('/api/tax-rates/:id', allow('editSettings'), wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const rate = await store.get(q, 'tax_rates', req.dealershipId, req.params.id, { forUpdate: true });
     if (!rate) return null;
@@ -254,7 +267,7 @@ app.put('/api/tax-rates/:id', wrap(async (req, res) => {
   res.json(updated);
 }));
 
-app.delete('/api/tax-rates/:id', wrap(async (req, res) => {
+app.delete('/api/tax-rates/:id', allow('editSettings'), wrap(async (req, res) => {
   const deleted = await store.remove(store.pool, 'tax_rates', req.dealershipId, req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Tax rate not found' });
   res.status(204).send();
@@ -314,7 +327,7 @@ app.get('/api/cars/:id', wrap(async (req, res) => {
 }));
 
 // POST a new car
-app.post('/api/cars', wrap(async (req, res) => {
+app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
   const { make, model, year, vin, stockNumber, mileage, cost, price, status } = req.body;
 
   if (!make || !model || !year || !price) {
@@ -343,7 +356,7 @@ app.post('/api/cars', wrap(async (req, res) => {
 }));
 
 // PUT (update) an existing car
-app.put('/api/cars/:id', wrap(async (req, res) => {
+app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
@@ -362,7 +375,7 @@ app.put('/api/cars/:id', wrap(async (req, res) => {
 }));
 
 // DELETE a car
-app.delete('/api/cars/:id', wrap(async (req, res) => {
+app.delete('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
   const deleted = await store.remove(store.pool, 'cars', req.dealershipId, req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Car not found' });
   res.status(204).send();
@@ -371,7 +384,7 @@ app.delete('/api/cars/:id', wrap(async (req, res) => {
 // ---------- Car photos ----------
 
 // Upload one or more photos for a car. Field name must be "photos".
-app.post('/api/cars/:id/photos', upload.array('photos', 8), wrap(async (req, res) => {
+app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 8), wrap(async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No photos were uploaded.' });
   }
@@ -388,7 +401,7 @@ app.post('/api/cars/:id/photos', upload.array('photos', 8), wrap(async (req, res
 }));
 
 // Delete one photo from a car (removes both the DB reference and the file on disk).
-app.delete('/api/cars/:id/photos', wrap(async (req, res) => {
+app.delete('/api/cars/:id/photos', allow('editInventory'), wrap(async (req, res) => {
   const { photoPath } = req.body;
   if (!photoPath) return res.status(400).json({ error: 'photoPath is required' });
 
@@ -457,7 +470,7 @@ app.put('/api/leads/:id', wrap(async (req, res) => {
   res.json(updated);
 }));
 
-app.delete('/api/leads/:id', wrap(async (req, res) => {
+app.delete('/api/leads/:id', allow('deleteRecords'), wrap(async (req, res) => {
   const deleted = await store.remove(store.pool, 'leads', req.dealershipId, req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Lead not found' });
   res.status(204).send();
@@ -492,7 +505,7 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   res.status(201).json(activity);
 }));
 
-app.delete('/api/leads/:id/activities/:activityId', wrap(async (req, res) => {
+app.delete('/api/leads/:id/activities/:activityId', allow('deleteRecords'), wrap(async (req, res) => {
   const found = await store.tx(async q => {
     const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
     if (!lead) return false;
@@ -1202,7 +1215,7 @@ app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
   res.json(updated);
 }));
 
-app.delete('/api/deals/:id', wrap(async (req, res) => {
+app.delete('/api/deals/:id', allow('deleteRecords'), wrap(async (req, res) => {
   const deleted = await store.remove(store.pool, 'deals', req.dealershipId, req.params.id);
   if (!deleted) return res.status(404).json({ error: 'Deal not found' });
   res.status(204).send();
@@ -1522,6 +1535,7 @@ async function importLegacyJson(q, dealershipId) {
 // Tests import the app without starting a listener.
 if (require.main === module) {
   bootstrap()
+    .then(() => auth.announceSetupIfNeeded(process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`))
     .then(() => {
       app.listen(PORT, () => {
         console.log(`Car CRM server running at http://localhost:${PORT}`);

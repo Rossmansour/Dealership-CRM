@@ -12,42 +12,27 @@ if (!process.env.TEST_DATABASE_URL) {
   test('API tests (skipped: set TEST_DATABASE_URL to run)', { skip: true }, () => {});
   return;
 }
-process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+const h = require('./helpers');
 
-const store = require('../db');
-const { app, bootstrap } = require('../server');
+let admin;
 
-let server;
-let base;
-
-async function api(method, path, body) {
-  const res = await fetch(`${base}/api${path}`, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const text = await res.text();
-  return { status: res.status, body: text ? JSON.parse(text) : null };
-}
+// Every call in this file is made as a signed-in admin, who can do
+// everything; role limits are tested in auth.test.js.
+const api = (method, path, body) => h.api(method, path, body, admin.cookie);
 
 before(async () => {
-  await store.pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  await bootstrap();
-  server = app.listen(0);
-  base = `http://localhost:${server.address().port}`;
+  await h.startServer();
+  admin = await h.createUser('admin');
 });
 
-after(async () => {
-  server.close();
-  await store.pool.end();
-});
+after(() => h.stopServer());
 
 test('first startup imports data/db.json, and restarting does not import it twice', async () => {
   const legacy = require('../data/db.json');
   const cars = (await api('GET', '/cars')).body;
   assert.deepStrictEqual(cars, legacy.cars);
 
-  await bootstrap();
+  await h.bootstrap(); // same as a server restart
   assert.strictEqual((await api('GET', '/cars')).body.length, legacy.cars.length);
   assert.strictEqual((await api('GET', '/leads')).body.length, legacy.leads.length);
 });
