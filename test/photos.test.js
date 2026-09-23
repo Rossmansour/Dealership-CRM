@@ -207,3 +207,47 @@ test('without Cloudinary set up, photos are saved on the server disk', async () 
     process.env.CLOUDINARY_URL = saved;
   }
 });
+
+test('CLOUDINARY_URL is accepted however it was pasted', () => {
+  const saved = process.env.CLOUDINARY_URL;
+  try {
+    for (const pasted of [
+      `CLOUDINARY_URL=cloudinary://${API_KEY}:${API_SECRET}@${CLOUD}`,
+      `"cloudinary://${API_KEY}:${API_SECRET}@${CLOUD}"`,
+      `  cloudinary://${API_KEY}:${API_SECRET}@${CLOUD}  `,
+      `cloudinary://${API_KEY}:${API_SECRET}@${CLOUD}/`
+    ]) {
+      process.env.CLOUDINARY_URL = pasted;
+      assert.deepStrictEqual(
+        { ...photos.cloudinaryConfig(), apiBase: undefined },
+        { apiKey: API_KEY, apiSecret: API_SECRET, cloudName: CLOUD, apiBase: undefined }, pasted);
+      assert.strictEqual(photos.cloudinaryProblem(), null);
+    }
+  } finally {
+    process.env.CLOUDINARY_URL = saved;
+  }
+});
+
+test('a broken CLOUDINARY_URL never takes the app down, and says what is wrong', async () => {
+  const saved = process.env.CLOUDINARY_URL;
+  try {
+    const car = await newCar();
+    for (const [pasted, expected] of [
+      [`cloudinary://${API_KEY}:**********@${CLOUD}`, /hidden \(\*\*\*\*\*\) or placeholder/],
+      ['cloudinary://<your_api_key>:<your_api_secret>@demo', /hidden \(\*\*\*\*\*\) or placeholder/],
+      ['my-cloud-name', /not in the expected format/]
+    ]) {
+      process.env.CLOUDINARY_URL = pasted;
+      assert.doesNotThrow(() => photos.usingCloudinary());
+      assert.match(photos.cloudinaryProblem(), expected);
+
+      const res = await upload(manager, car.id, [jpeg()]);
+      assert.strictEqual(res.status, 503);
+      assert.match(res.body.error, /CLOUDINARY_URL setting/);
+      assert.strictEqual((await as(admin, 'GET', '/cars')).status, 200, 'the rest of the app keeps working');
+    }
+    assert.deepStrictEqual((await as(admin, 'GET', `/cars/${car.id}`)).body.photos, [], 'nothing saved to disk instead');
+  } finally {
+    process.env.CLOUDINARY_URL = saved;
+  }
+});

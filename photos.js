@@ -21,18 +21,44 @@ const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'cars');
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']);
 const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'image/heic': '.heic', 'image/heif': '.heif' };
 
-// Read on each use (not once at startup) so tests can point it elsewhere.
-function cloudinaryConfig() {
-  const url = process.env.CLOUDINARY_URL;
-  if (!url) return null;
-  const match = url.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
-  if (!match) throw new Error('CLOUDINARY_URL should look like cloudinary://API_KEY:API_SECRET@CLOUD_NAME (copy it from the Cloudinary dashboard).');
+// Reads CLOUDINARY_URL and returns { config } when it's usable,
+// { problem } when it's set but can't be used, or {} when it isn't set.
+// Forgiving about how it was pasted (a leading "CLOUDINARY_URL=", quotes,
+// spaces), and never throws -- a bad photo setting must not stop the
+// whole app from starting. Read on each use so tests can point it elsewhere.
+function cloudinarySetup() {
+  const raw = String(process.env.CLOUDINARY_URL || '')
+    .trim()
+    .replace(/^CLOUDINARY_URL\s*=\s*/i, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+  if (!raw) return {};
+
+  const match = raw.match(/^cloudinary:\/\/([^:\s]+):([^@\s]+)@([^\s/]+)\/?$/);
+  if (!match) {
+    return { problem: 'CLOUDINARY_URL is not in the expected format. It should look like cloudinary://API_KEY:API_SECRET@CLOUD_NAME -- copy the "API environment variable" from the Cloudinary dashboard.' };
+  }
+  const [, apiKey, apiSecret, cloudName] = match;
+  if (/^\*+$/.test(apiSecret) || /[<>]/.test(apiKey + apiSecret + cloudName)) {
+    return { problem: 'CLOUDINARY_URL still contains a hidden (*****) or placeholder API secret. On the Cloudinary dashboard, reveal the secret, then copy the value again.' };
+  }
   return {
-    apiKey: match[1],
-    apiSecret: match[2],
-    cloudName: match[3],
-    apiBase: process.env.CLOUDINARY_API_BASE || 'https://api.cloudinary.com/v1_1'
+    config: {
+      apiKey,
+      apiSecret,
+      cloudName,
+      apiBase: process.env.CLOUDINARY_API_BASE || 'https://api.cloudinary.com/v1_1'
+    }
   };
+}
+
+function cloudinaryConfig() {
+  return cloudinarySetup().config || null;
+}
+
+// A message explaining why photo storage can't be used, or null if it's fine.
+function cloudinaryProblem() {
+  return cloudinarySetup().problem || null;
 }
 
 function usingCloudinary() {
@@ -118,6 +144,7 @@ module.exports = {
   UPLOAD_DIR,
   usingCloudinary,
   cloudinaryConfig,
+  cloudinaryProblem,
   savePhoto,
   deletePhoto,
   publicPhotoUrl,

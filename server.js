@@ -463,6 +463,11 @@ app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 
   if (!await store.get(store.pool, 'cars', req.dealershipId, req.params.id)) {
     return res.status(404).json({ error: 'Car not found' });
   }
+  // CLOUDINARY_URL is set but unusable: refuse rather than quietly saving
+  // to a disk that the host wipes.
+  if (photos.cloudinaryProblem()) {
+    return res.status(503).json({ error: "Photo storage isn't set up correctly, so photos can't be uploaded right now. An admin needs to fix the CLOUDINARY_URL setting on the server." });
+  }
 
   // Store the files first (a network call to Cloudinary), then record
   // them on the car in a short transaction.
@@ -1745,9 +1750,13 @@ if (require.main === module) {
     .then(() => auth.announceSetupIfNeeded(process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`))
     .then(() => {
       app.listen(PORT, () => {
-        console.log(photos.usingCloudinary()
-          ? `Car photos: stored in Cloudinary (${photos.cloudinaryConfig().cloudName})`
-          : 'Car photos: stored on this server\'s disk (set CLOUDINARY_URL to keep them across redeploys)');
+        if (photos.cloudinaryProblem()) {
+          console.error(`Car photos: ${photos.cloudinaryProblem()} Photo uploads are turned off until it's fixed.`);
+        } else {
+          console.log(photos.usingCloudinary()
+            ? `Car photos: stored in Cloudinary (${photos.cloudinaryConfig().cloudName})`
+            : 'Car photos: stored on this server\'s disk (set CLOUDINARY_URL to keep them across redeploys)');
+        }
         console.log(`Car CRM server running at http://localhost:${PORT}`);
       });
     })
