@@ -243,7 +243,7 @@ function renderCars() {
   document.getElementById('carTableBody').innerHTML = filtered.map(c => {
     const daysListed = Math.round((new Date() - new Date(c.dateAdded)) / (1000 * 60 * 60 * 24));
     const thumb = (c.photos && c.photos[0])
-      ? html`<img class="inventory-thumb" src="${c.photos[0]}" alt="${c.make} ${c.model}" />`
+      ? html`<img class="inventory-thumb" src="${photoThumb(c.photos[0], 48, 36)}" alt="${c.make} ${c.model}" loading="lazy" />`
       : html`<div class="inventory-thumb-placeholder">🚗</div>`;
     return html`
       <tr>
@@ -409,6 +409,16 @@ function populateLeadCarOptions() {
   select.value = current;
 }
 
+// ---------- Photo thumbnails ----------
+// Photos stored in Cloudinary can be resized on the fly by adding a size
+// to the URL, so lists load small thumbnails instead of full-size photos.
+// (Photos stored on the server's own disk are shown as-is.)
+function photoThumb(url, width, height) {
+  if (!/^https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\//.test(url)) return url;
+  // Double size for sharp results on high-resolution (retina) screens.
+  return url.replace('/image/upload/', `/image/upload/c_fill,w_${width * 2},h_${height * 2},q_auto,f_auto/`);
+}
+
 // ---------- VIN decoder ----------
 // Used by the car form and the deal's trade-in section. Looks the VIN up
 // in NHTSA's database (through our server) and fills in the fields.
@@ -553,7 +563,7 @@ function renderCarPhotoGrid(car) {
   }
   grid.innerHTML = photos.map(p => html`
     <div class="photo-thumb">
-      <img src="${p}" alt="Car photo" />
+      <img src="${photoThumb(p, 160, 160)}" alt="Car photo" loading="lazy" />
       <button type="button" class="photo-delete-btn" onclick="deleteCarPhoto(${js(car.id)}, ${js(p)})">×</button>
     </div>
   `).join('');
@@ -784,7 +794,7 @@ function renderSendTextPhotoPicker(car) {
   container.innerHTML = html`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Attach a photo of the ${car.year} ${car.make} ${car.model} (optional):</div>
     <div class="photo-picker-grid">
-      ${car.photos.map(p => html`<img src="${p}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" />`)}
+      ${car.photos.map(p => html`<img src="${photoThumb(p, 56, 42)}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" loading="lazy" />`)}
     </div>
   `;
 }
