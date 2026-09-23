@@ -1200,6 +1200,33 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 .vin-status .warn { color: var(--amber); }
 .vin-status .err { color: var(--red); }
 .vin-status div + div { margin-top: 3px; }
-.car-details-section { margin: 4px 0 14px; }
-.car-details-section summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
 .inventory-trim { color: var(--text-muted); font-size: 12px; }
+
+/* ---------- Add/Edit Car window: everything on one screen ---------- */
+.modal-content.car-modal { max-width: 1180px; width: 95vw; padding: 20px 24px; }
+.car-modal h2 { margin-bottom: 12px; }
+.car-modal-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; }
+.car-panel-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 8px; }
+.car-modal-main .car-panel-title + .vin-row { margin-top: 0; }
+.car-modal-main .car-grid + .car-panel-title { margin-top: 12px; }
+.car-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 12px; }
+.car-grid-pricing { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.car-modal form label { margin-bottom: 8px; font-size: 12px; }
+.car-modal input, .car-modal select { padding: 6px 8px; margin-top: 3px; }
+.car-modal .vin-status { margin: 2px 0 8px; }
+.car-gross { font-size: 13px; color: var(--text-secondary); min-height: 18px; }
+.car-gross strong { color: var(--text); }
+.car-gross .negative { color: var(--red); }
+.car-modal-photos { border-left: 1px solid var(--border); padding-left: 24px; min-width: 0; }
+.car-photo-count { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.car-modal .photo-grid { grid-template-columns: repeat(3, 1fr); max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+.car-photo-upload { display: flex; gap: 8px; align-items: center; }
+.car-photo-upload input[type=file] { flex: 1; min-width: 0; font-size: 12px; padding: 4px; margin: 0; }
+.car-modal .modal-actions { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+
+@media (max-width: 900px) {
+  .car-modal-layout { grid-template-columns: 1fr; }
+  .car-modal-photos { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+  .car-grid, .car-grid-pricing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.car-modal .vin-row button { margin-bottom: 8px; padding-top: 7px; padding-bottom: 7px; }

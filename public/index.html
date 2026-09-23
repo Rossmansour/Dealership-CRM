@@ -183,54 +183,64 @@
 
 <!-- Car Modal -->
 <div class="modal" id="carModal">
-  <div class="modal-content">
+  <div class="modal-content car-modal">
     <h2 id="carModalTitle">Add Car</h2>
     <form id="carForm">
       <input type="hidden" id="carId" />
       <input type="hidden" id="carDoors" />
-      <div class="vin-row">
-        <label>VIN <input type="text" id="carVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
-        <button type="button" class="btn-secondary" id="decodeCarVinBtn">Decode VIN</button>
-      </div>
-      <div id="carVinStatus" class="vin-status"></div>
-      <div class="form-grid">
-        <label>Year <input type="number" id="carYear" required /></label>
-        <label>Make <input type="text" id="carMake" required /></label>
-        <label>Model <input type="text" id="carModel" required /></label>
-        <label>Trim <input type="text" id="carTrim" /></label>
-      </div>
+      <div class="car-modal-layout">
+        <!-- Left: everything about the vehicle -->
+        <div class="car-modal-main">
+          <div class="car-panel-title">Vehicle</div>
+          <div class="vin-row">
+            <label>VIN <input type="text" id="carVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
+            <button type="button" class="btn-secondary" id="decodeCarVinBtn">Decode VIN</button>
+          </div>
+          <div id="carVinStatus" class="vin-status"></div>
+          <div class="car-grid">
+            <label>Year <input type="number" id="carYear" required /></label>
+            <label>Make <input type="text" id="carMake" required /></label>
+            <label>Model <input type="text" id="carModel" required /></label>
+            <label>Trim <input type="text" id="carTrim" /></label>
+            <label>Body Style <input type="text" id="carBodyStyle" /></label>
+            <label>Drivetrain <input type="text" id="carDrivetrain" /></label>
+            <label>Engine <input type="text" id="carEngine" /></label>
+            <label>Transmission <input type="text" id="carTransmission" /></label>
+            <label>Fuel <input type="text" id="carFuelType" /></label>
+            <label>Exterior Color <input type="text" id="carExteriorColor" /></label>
+            <label>Interior Color <input type="text" id="carInteriorColor" /></label>
+          </div>
 
-      <details class="car-details-section">
-        <summary>Vehicle details (body, engine, colors...)</summary>
-        <div class="form-grid">
-          <label>Body Style <input type="text" id="carBodyStyle" /></label>
-          <label>Drivetrain <input type="text" id="carDrivetrain" /></label>
-          <label>Engine <input type="text" id="carEngine" /></label>
-          <label>Transmission <input type="text" id="carTransmission" /></label>
-          <label>Fuel <input type="text" id="carFuelType" /></label>
-          <label>Exterior Color <input type="text" id="carExteriorColor" /></label>
-          <label>Interior Color <input type="text" id="carInteriorColor" /></label>
+          <div class="car-panel-title">Pricing &amp; Status</div>
+          <div class="car-grid car-grid-pricing">
+            <label>Stock # <input type="text" id="carStockNumber" /></label>
+            <label>Mileage <input type="number" id="carMileage" /></label>
+            <label>Cost (what you paid) <input type="number" id="carCost" /></label>
+            <label>Asking Price <input type="number" id="carPrice" required /></label>
+            <label>Status
+              <select id="carStatus">
+                <option value="available">Available</option>
+                <option value="pending">Pending</option>
+                <option value="sold">Sold</option>
+              </select>
+            </label>
+          </div>
+          <div class="car-gross" id="carGross"></div>
         </div>
-      </details>
 
-      <label>Stock # <input type="text" id="carStockNumber" /></label>
-      <label>Mileage <input type="number" id="carMileage" /></label>
-      <label>Cost (what you paid) <input type="number" id="carCost" /></label>
-      <label>Asking Price <input type="number" id="carPrice" required /></label>
-      <label>Status
-        <select id="carStatus">
-          <option value="available">Available</option>
-          <option value="pending">Pending</option>
-          <option value="sold">Sold</option>
-        </select>
-      </label>
-
-      <div id="carPhotosSection" style="display:none;">
-        <div class="ca-section-title">Photos</div>
-        <div id="carPhotoGrid" class="photo-grid"></div>
-        <label>Add Photos <input type="file" id="carPhotoInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple /></label>
-        <button type="button" class="btn-secondary" id="uploadCarPhotosBtn">Upload</button>
-        <div id="carPhotoUploadStatus"></div>
+        <!-- Right: photos -->
+        <div class="car-modal-photos">
+          <div class="car-panel-title">Photos <span id="carPhotoCount" class="car-photo-count"></span></div>
+          <div id="carPhotosSection">
+            <div id="carPhotoGrid" class="photo-grid"></div>
+            <div class="car-photo-upload">
+              <input type="file" id="carPhotoInput" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple />
+              <button type="button" class="btn-secondary" id="uploadCarPhotosBtn">Upload</button>
+            </div>
+            <div id="carPhotoUploadStatus"></div>
+          </div>
+          <p id="carPhotosNewCarNote" class="no-deals-note">Save the car first, then click Edit to add photos.</p>
+        </div>
       </div>
 
       <div class="modal-actions">
