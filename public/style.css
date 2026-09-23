@@ -1171,3 +1171,21 @@ body.cannot-editInventory #carTableBody .row-actions,
 body.cannot-deleteRecords #leadTableBody .delete,
 body.cannot-deleteRecords #dealTableBody .delete,
 body.cannot-deleteRecords .activity-delete { display: none; }
+
+/* ---------- Audit Log ---------- */
+.modal-xwide { max-width: 1100px; }
+.audit-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.audit-filters select, .audit-filters input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); width: auto; }
+.audit-filters #auditSearch { flex: 1; min-width: 200px; }
+.audit-filters label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin: 0; }
+.audit-table-wrap { max-height: 60vh; overflow: auto; }
+.audit-table td { vertical-align: top; font-size: 13px; }
+.audit-table td:first-child { white-space: nowrap; }
+.audit-action { font-weight: 600; }
+.audit-action.delete, .audit-action.sign_in_failed, .audit-action.delete_activity, .audit-action.remove_photo { color: var(--red); }
+.audit-action.create, .audit-action.add_activity, .audit-action.add_photos { color: var(--green); }
+.audit-change { margin: 2px 0; }
+.audit-change .field { color: var(--text-secondary); }
+.audit-change .old { text-decoration: line-through; color: var(--text-muted); }
+.audit-note { color: var(--text-secondary); }
+.audit-table details pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--surface-alt); padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }

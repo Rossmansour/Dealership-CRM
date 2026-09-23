@@ -5,6 +5,48 @@
 
 const API = '/api';
 
+// ---------- Safe HTML ----------
+// Customer names, notes, VINs, AI replies, etc. are typed by people (or
+// generated from what people typed), so they must never be inserted into
+// the page as raw HTML -- otherwise text like <img onerror=...> in a lead's
+// name would run as code in the browser of whoever views it, with their
+// permissions. Every template that puts data into HTML uses the html`` tag
+// below, which escapes each ${value} automatically. (Templates built only
+// from fixed values in this file, like the credit app's dropdown options,
+// don't need it.) Nested html`` results (and
+// arrays of them) are inserted as-is, since they were already escaped.
+//
+// Values passed to inline click handlers need js() instead, which turns
+// them into a safe JavaScript string: onclick="editCar(${js(c.id)})".
+
+class SafeHtml {
+  constructor(value) { this.value = value; }
+  toString() { return this.value; }
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
+function toHtml(value) {
+  if (value instanceof SafeHtml) return value.value;
+  if (Array.isArray(value)) return value.map(toHtml).join('');
+  if (value === null || value === undefined || value === false) return '';
+  return escapeHtml(value);
+}
+
+function html(strings, ...values) {
+  let out = strings[0];
+  values.forEach((value, i) => { out += toHtml(value) + strings[i + 1]; });
+  return new SafeHtml(out);
+}
+
+function js(value) {
+  return new SafeHtml(escapeHtml(JSON.stringify(value ?? null)));
+}
+
 // ---------- Signed-in user ----------
 // Every API call goes through fetch, so this one wrapper handles the two
 // login-related responses everywhere: a 401 (signed out, or the session
@@ -32,13 +74,14 @@ function userCan(permission) {
 // Hides buttons for things this user's role can't do. The server enforces
 // the same rules regardless -- this just avoids offering dead ends.
 function applyPermissionsToUI() {
-  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers']) {
+  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers', 'viewAuditLog']) {
     document.body.classList.toggle(`cannot-${permission}`, !userCan(permission));
   }
   document.getElementById('currentUserName').textContent = currentUser.name;
   document.getElementById('adminMenuBtn').style.display =
-    (userCan('editSettings') || userCan('manageUsers')) ? '' : 'none';
+    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog')) ? '' : 'none';
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
+  document.getElementById('adminAuditLogBtn').style.display = userCan('viewAuditLog') ? '' : 'none';
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
 }
@@ -172,7 +215,7 @@ function renderStats(stats) {
     { label: 'Lead Conversion Rate', value: `${stats.conversionRate}%` },
     { label: 'Needs Follow-Up', value: followUpCount, warn: followUpCount > 0 },
   ];
-  document.getElementById('statsGrid').innerHTML = cards.map(c => `
+  document.getElementById('statsGrid').innerHTML = cards.map(c => html`
     <div class="stat-card ${c.warn ? 'stat-card-warn' : ''}">
       <div class="label">${c.label}</div>
       <div class="value">${c.value}</div>
@@ -199,9 +242,9 @@ function renderCars() {
   document.getElementById('carTableBody').innerHTML = filtered.map(c => {
     const daysListed = Math.round((new Date() - new Date(c.dateAdded)) / (1000 * 60 * 60 * 24));
     const thumb = (c.photos && c.photos[0])
-      ? `<img class="inventory-thumb" src="${c.photos[0]}" alt="${c.make} ${c.model}" />`
-      : `<div class="inventory-thumb-placeholder">🚗</div>`;
-    return `
+      ? html`<img class="inventory-thumb" src="${c.photos[0]}" alt="${c.make} ${c.model}" />`
+      : html`<div class="inventory-thumb-placeholder">🚗</div>`;
+    return html`
       <tr>
         <td>${thumb}</td>
         <td>${c.make}</td>
@@ -213,8 +256,8 @@ function renderCars() {
         <td><span class="badge ${c.status}">${c.status}</span></td>
         <td>${c.status === 'sold' ? '-' : daysListed}</td>
         <td class="row-actions">
-          <button onclick="editCar('${c.id}')">Edit</button>
-          <button class="delete" onclick="deleteCar('${c.id}')">Delete</button>
+          <button onclick="editCar(${js(c.id)})">Edit</button>
+          <button class="delete" onclick="deleteCar(${js(c.id)})">Delete</button>
         </td>
       </tr>
     `;
@@ -233,10 +276,10 @@ function renderLeads() {
   document.getElementById('leadTableBody').innerHTML = filtered.map(l => {
     const car = cars.find(c => c.id === l.carId);
     const carLabel = car ? `${car.year} ${car.make} ${car.model}` : '-';
-    const followUpFlag = needsFollowUp(l) ? `<span class="followup-badge">Needs Follow-Up</span>` : '';
-    return `
+    const followUpFlag = needsFollowUp(l) ? html`<span class="followup-badge">Needs Follow-Up</span>` : '';
+    return html`
       <tr>
-        <td><button class="deal-number-link" onclick="openLeadProfile('${l.id}')">${l.name}</button></td>
+        <td><button class="deal-number-link" onclick="openLeadProfile(${js(l.id)})">${l.name}</button></td>
         <td><span class="badge ${l.type === 'business' ? 'finalized' : 'working'}">${l.type === 'business' ? 'Business' : 'Individual'}</span></td>
         <td>${l.phone || l.email || '-'}</td>
         <td>${formatSource(l.source)}</td>
@@ -244,8 +287,8 @@ function renderLeads() {
         <td><span class="badge ${l.status}">${l.status}</span>${followUpFlag}</td>
         <td>${l.notes || ''}</td>
         <td class="row-actions">
-          <button onclick="editLead('${l.id}')">Edit</button>
-          <button class="delete" onclick="deleteLead('${l.id}')">Delete</button>
+          <button onclick="editLead(${js(l.id)})">Edit</button>
+          <button class="delete" onclick="deleteLead(${js(l.id)})">Delete</button>
         </td>
       </tr>
     `;
@@ -289,21 +332,21 @@ function renderLeadsKanban() {
 
   board.innerHTML = LEAD_PIPELINE_STAGES.map(stage => {
     const stageLeads = leads.filter(l => l.status === stage.key);
-    return `
+    return html`
       <div class="kanban-column" data-status="${stage.key}">
         <div class="kanban-column-header"><span>${stage.label}</span><span>${stageLeads.length}</span></div>
         <div class="kanban-column-body">
           ${stageLeads.map(l => {
             const car = cars.find(c => c.id === l.carId);
-            const followUpFlag = needsFollowUp(l) ? `<span class="followup-badge">Follow-up</span>` : '';
-            return `
+            const followUpFlag = needsFollowUp(l) ? html`<span class="followup-badge">Follow-up</span>` : '';
+            return html`
               <div class="kanban-card" draggable="true" data-lead-id="${l.id}">
-                <button class="kanban-card-name" onclick="openLeadProfile('${l.id}')">${l.name}</button>
+                <button class="kanban-card-name" onclick="openLeadProfile(${js(l.id)})">${l.name}</button>
                 <div class="kanban-card-meta">${car ? `${car.year} ${car.make} ${car.model}` : 'No vehicle linked'}</div>
                 <div class="kanban-card-meta">${formatSource(l.source)}${followUpFlag}</div>
               </div>
             `;
-          }).join('')}
+          })}
         </div>
       </div>
     `;
@@ -360,7 +403,7 @@ function populateLeadCarOptions() {
   const current = select.value;
   select.innerHTML = '<option value="">-- None --</option>' + cars
     .filter(c => c.status !== 'sold')
-    .map(c => `<option value="${c.id}">${c.year} ${c.make} ${c.model}</option>`)
+    .map(c => html`<option value="${c.id}">${c.year} ${c.make} ${c.model}</option>`)
     .join('');
   select.value = current;
 }
@@ -412,10 +455,10 @@ function renderCarPhotoGrid(car) {
     grid.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">No photos yet.</p>`;
     return;
   }
-  grid.innerHTML = photos.map(p => `
+  grid.innerHTML = photos.map(p => html`
     <div class="photo-thumb">
       <img src="${p}" alt="Car photo" />
-      <button type="button" class="photo-delete-btn" onclick="deleteCarPhoto('${car.id}','${p}')">×</button>
+      <button type="button" class="photo-delete-btn" onclick="deleteCarPhoto(${js(car.id)}, ${js(p)})">×</button>
     </div>
   `).join('');
 }
@@ -438,7 +481,7 @@ document.getElementById('uploadCarPhotosBtn').addEventListener('click', async ()
     const data = await res.json();
 
     if (!res.ok) {
-      statusEl.innerHTML = `<div class="send-text-status-error">${data.error}</div>`;
+      statusEl.innerHTML = html`<div class="send-text-status-error">${data.error}</div>`;
       return;
     }
 
@@ -596,13 +639,13 @@ window.openLeadProfile = function(leadId) {
   currentProfileLeadId = leadId;
 
   document.getElementById('profileName').textContent = lead.name;
-  document.getElementById('profileBadges').innerHTML = `
+  document.getElementById('profileBadges').innerHTML = html`
     <span class="badge ${lead.type === 'business' ? 'finalized' : 'working'}">${lead.type === 'business' ? 'Business' : 'Individual'}</span>
     <span class="badge ${lead.status}">${lead.status}</span>
   `;
 
   const car = cars.find(c => c.id === lead.carId);
-  document.getElementById('profileInfoGrid').innerHTML = `
+  document.getElementById('profileInfoGrid').innerHTML = html`
     <div class="info-item"><div class="label">Phone</div><div class="value">${lead.phone || '-'}</div></div>
     <div class="info-item"><div class="label">Email</div><div class="value">${lead.email || '-'}</div></div>
     <div class="info-item"><div class="label">Source</div><div class="value">${formatSource(lead.source)}</div></div>
@@ -640,10 +683,10 @@ function renderSendTextPhotoPicker(car) {
     return;
   }
 
-  container.innerHTML = `
+  container.innerHTML = html`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Attach a photo of the ${car.year} ${car.make} ${car.model} (optional):</div>
     <div class="photo-picker-grid">
-      ${car.photos.map(p => `<img src="${p}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" />`).join('')}
+      ${car.photos.map(p => html`<img src="${p}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" />`)}
     </div>
   `;
 }
@@ -671,9 +714,9 @@ function renderProfileDeals(lead) {
   } else {
     listEl.innerHTML = relatedDeals.map(d => {
       const car = cars.find(c => c.id === d.carId);
-      return `
+      return html`
         <div class="related-deal-row">
-          <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal('${d.id}')">D-${d.dealNumber}</button> -- ${car ? `${car.year} ${car.make} ${car.model}` : 'Unknown vehicle'}</span>
+          <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal(${js(d.id)})">D-${d.dealNumber}</button> -- ${car ? `${car.year} ${car.make} ${car.model}` : 'Unknown vehicle'}</span>
           <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
         </div>
       `;
@@ -720,13 +763,13 @@ function renderActivityLog(lead) {
     return;
   }
 
-  listEl.innerHTML = activities.map(a => `
+  listEl.innerHTML = activities.map(a => html`
     <div class="activity-entry">
       <div class="activity-icon">${ACTIVITY_ICONS[a.type] || '📝'}</div>
       <div class="activity-body">
         <div class="activity-meta">
           <span>${ACTIVITY_LABELS[a.type] || 'Note'} -- ${new Date(a.date).toLocaleString()}</span>
-          <button class="activity-delete" onclick="deleteActivity('${lead.id}','${a.id}')">Delete</button>
+          <button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>
         </div>
         <div class="activity-text">${a.text}</div>
       </div>
@@ -838,9 +881,9 @@ function renderDeals() {
     const vehicleLabel = car ? `${car.year} ${car.make} ${car.model}` : '-- No vehicle --';
     const date = new Date(d.dateCreated).toLocaleDateString();
     const creditStatus = d.creditApp ? d.creditApp.status : 'not_submitted';
-    return `
+    return html`
       <tr>
-        <td><button class="deal-number-link" onclick="openDealWorkspace('${d.id}')">D-${d.dealNumber}</button></td>
+        <td><button class="deal-number-link" onclick="openDealWorkspace(${js(d.id)})">D-${d.dealNumber}</button></td>
         <td>${customerName}</td>
         <td>${vehicleLabel}</td>
         <td><span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span></td>
@@ -848,7 +891,7 @@ function renderDeals() {
         <td><span class="badge ${creditStatus}">${CREDIT_STATUS_LABELS[creditStatus]}</span></td>
         <td>${date}</td>
         <td class="row-actions">
-          <button class="delete" onclick="deleteDeal('${d.id}')">Delete</button>
+          <button class="delete" onclick="deleteDeal(${js(d.id)})">Delete</button>
         </td>
       </tr>
     `;
@@ -911,13 +954,13 @@ window.openDealWorkspace = function(dealId) {
   // when the deal doesn't have one yet.
   const leadSelect = document.getElementById('dealAssignedLeadId');
   leadSelect.innerHTML = '<option value="">-- No customer assigned yet --</option>' +
-    leads.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+    leads.map(l => html`<option value="${l.id}">${l.name}</option>`).join('');
   leadSelect.value = deal.leadId || '';
 
   const carSelect = document.getElementById('dealAssignedCarId');
   carSelect.innerHTML = '<option value="">-- No vehicle assigned yet --</option>' +
     cars.filter(c => c.status !== 'sold' || c.id === deal.carId)
-      .map(c => `<option value="${c.id}" data-price="${c.price}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
+      .map(c => html`<option value="${c.id}" data-price="${c.price}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
       .join('');
   carSelect.value = deal.carId || '';
   updateServiceTieIn(deal.carId);
@@ -1244,7 +1287,7 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
     const result = await res.json();
 
     if (!res.ok) {
-      statusEl.innerHTML = `<div class="send-text-status-error">${result.error}</div>`;
+      statusEl.innerHTML = html`<div class="send-text-status-error">${result.error}</div>`;
       return;
     }
 
@@ -1258,7 +1301,7 @@ document.getElementById('autoCalcFeesBtn').addEventListener('click', async () =>
       : 'full price is taxable, trade-in does not reduce it';
     const countyNote = result.county ? `${result.county} County` : 'statewide base rate -- county not recognized';
     const sourceNote = result.rateSource && !result.rateSource.startsWith('no match') ? ` [rate: ${result.rateSource}]` : ' [no matching Taxes & Fees record -- add one via 🗺️ Taxes & Fees]';
-    statusEl.innerHTML = `<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}).${sourceNote} Estimate only -- verify against your state's current DMV schedule.</div>`;
+    statusEl.innerHTML = html`<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}).${sourceNote} Estimate only -- verify against your state's current DMV schedule.</div>`;
   } catch (err) {
     statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
   }
@@ -1727,17 +1770,17 @@ window.viewProposal = function(dealId) {
   const date = new Date(deal.dateCreated).toLocaleDateString();
   const isLease = (deal.dealType || 'retail') === 'lease';
 
-  const fiRows = `
+  const fiRows = html`
       <tr><td>Doc Fee</td><td>+$${(deal.docFee || 0).toLocaleString()}</td></tr>
-      ${deal.licenseFee ? `<tr><td>License Fee</td><td>+$${deal.licenseFee.toLocaleString()}</td></tr>` : ''}
-      ${deal.dealerFees ? `<tr><td>Dealer Fees</td><td>+$${deal.dealerFees.toLocaleString()}</td></tr>` : ''}
-      ${deal.gapPremium ? `<tr><td>GAP Premium</td><td>+$${deal.gapPremium.toLocaleString()}</td></tr>` : ''}
-      ${deal.servicePremium ? `<tr><td>Service Contract</td><td>+$${deal.servicePremium.toLocaleString()}</td></tr>` : ''}
-      ${deal.maintenancePremium ? `<tr><td>Maintenance Plan</td><td>+$${deal.maintenancePremium.toLocaleString()}</td></tr>` : ''}
-      ${deal.aftermarketAmount ? `<tr><td>Aftermarket / Accessories</td><td>+$${deal.aftermarketAmount.toLocaleString()}</td></tr>` : ''}
+      ${deal.licenseFee ? html`<tr><td>License Fee</td><td>+$${deal.licenseFee.toLocaleString()}</td></tr>` : ''}
+      ${deal.dealerFees ? html`<tr><td>Dealer Fees</td><td>+$${deal.dealerFees.toLocaleString()}</td></tr>` : ''}
+      ${deal.gapPremium ? html`<tr><td>GAP Premium</td><td>+$${deal.gapPremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.servicePremium ? html`<tr><td>Service Contract</td><td>+$${deal.servicePremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.maintenancePremium ? html`<tr><td>Maintenance Plan</td><td>+$${deal.maintenancePremium.toLocaleString()}</td></tr>` : ''}
+      ${deal.aftermarketAmount ? html`<tr><td>Aftermarket / Accessories</td><td>+$${deal.aftermarketAmount.toLocaleString()}</td></tr>` : ''}
   `;
 
-  const bodyHtml = isLease ? `
+  const bodyHtml = isLease ? html`
     <table>
       <tr><td>MSRP</td><td>$${(deal.msrp || 0).toLocaleString()}</td></tr>
       <tr><td>Selling Price</td><td>$${deal.vehiclePrice.toLocaleString()}</td></tr>
@@ -1749,7 +1792,7 @@ window.viewProposal = function(dealId) {
       <tr><td>Cash Down</td><td>-$${deal.downPayment.toLocaleString()}</td></tr>
       <tr><td>Rebate</td><td>-$${deal.rebate.toLocaleString()}</td></tr>
       <tr><td>Net Trade Equity</td><td>-$${(deal.netTradeIn || 0).toLocaleString()}</td></tr>
-      ${deal.cashBack ? `<tr><td>Cash Back to Customer</td><td>+$${deal.cashBack.toLocaleString()}</td></tr>` : ''}
+      ${deal.cashBack ? html`<tr><td>Cash Back to Customer</td><td>+$${deal.cashBack.toLocaleString()}</td></tr>` : ''}
       <tr class="total-row"><td>Net Cap Cost</td><td>$${(deal.netCapCost || 0).toLocaleString()}</td></tr>
     </table>
     <table>
@@ -1773,7 +1816,7 @@ window.viewProposal = function(dealId) {
       Sales tax is calculated on the monthly payment, per the most common state tax treatment for
       leases; some states instead tax cap cost reduction upfront. Final terms are subject to credit approval.
     </p>
-  ` : `
+  ` : html`
     <table>
       <tr><td>Vehicle Price</td><td>$${deal.vehiclePrice.toLocaleString()}</td></tr>
       <tr><td>Trade-In Value</td><td>-$${deal.tradeInValue.toLocaleString()}</td></tr>
@@ -1804,7 +1847,7 @@ window.viewProposal = function(dealId) {
     </p>
   `;
 
-  document.getElementById('proposalContent').innerHTML = `
+  document.getElementById('proposalContent').innerHTML = html`
     <h2>Deal Proposal${isLease ? ' -- Lease' : ''}</h2>
     <div class="proposal-meta">
       <span><strong>Customer:</strong> ${customerName}</span>
@@ -1897,11 +1940,11 @@ document.getElementById('aiSuggestReplyBtn').addEventListener('click', async () 
     const data = await res.json();
 
     if (!res.ok) {
-      box.innerHTML = `<div class="ai-suggestion-box">Couldn't generate a suggestion: ${data.error}</div>`;
+      box.innerHTML = html`<div class="ai-suggestion-box">Couldn't generate a suggestion: ${data.error}</div>`;
       return;
     }
 
-    box.innerHTML = `
+    box.innerHTML = html`
       <div class="ai-suggestion-box">
         <strong>Suggested reply:</strong>
         <textarea id="aiSuggestionText">${data.suggestion}</textarea>
@@ -1951,7 +1994,7 @@ document.getElementById('sendTextBtn').addEventListener('click', async () => {
     const data = await res.json();
 
     if (!res.ok) {
-      statusEl.innerHTML = `<div class="send-text-status-error">Couldn't send: ${data.error}</div>`;
+      statusEl.innerHTML = html`<div class="send-text-status-error">Couldn't send: ${data.error}</div>`;
       return;
     }
 
@@ -1981,11 +2024,11 @@ document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
     const data = await res.json();
 
     if (!res.ok) {
-      box.innerHTML = `<div class="ai-snapshot-box">Couldn't generate a snapshot: ${data.error}</div>`;
+      box.innerHTML = html`<div class="ai-snapshot-box">Couldn't generate a snapshot: ${data.error}</div>`;
       return;
     }
 
-    box.innerHTML = `<div class="ai-snapshot-box"><strong>🔍 Snapshot</strong><p>${data.snapshot}</p></div>`;
+    box.innerHTML = html`<div class="ai-snapshot-box"><strong>🔍 Snapshot</strong><p>${data.snapshot}</p></div>`;
   } catch (err) {
     box.innerHTML = `<div class="ai-snapshot-box">Could not reach the AI assistant. Is the server running?</div>`;
   }
@@ -2002,7 +2045,7 @@ async function loadAndRenderTaxRates() {
 
   document.getElementById('taxRatesTableBody').innerHTML = cachedTaxRates.map(r => {
     const combined = (r.stateTaxRate + r.countyTaxRate + r.cityTaxRate).toFixed(3);
-    return `
+    return html`
       <tr>
         <td>${r.state}</td>
         <td>${r.county || '-- default --'}</td>
@@ -2012,8 +2055,8 @@ async function loadAndRenderTaxRates() {
         <td>${r.cityTaxRate}%</td>
         <td><strong>${combined}%</strong></td>
         <td class="row-actions">
-          <button onclick="editTaxRate('${r.id}')">Edit</button>
-          <button class="delete" onclick="deleteTaxRate('${r.id}')">Delete</button>
+          <button onclick="editTaxRate(${js(r.id)})">Edit</button>
+          <button class="delete" onclick="deleteTaxRate(${js(r.id)})">Delete</button>
         </td>
       </tr>
     `;
@@ -2158,33 +2201,27 @@ const ROLE_OPTIONS = [
   ['admin', 'Admin']
 ];
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, ch => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[ch]);
-}
-
 async function loadAndRenderUsers() {
   const res = await fetch(`${API}/users`);
   if (!res.ok) return;
   const users = await res.json();
   document.getElementById('usersTableBody').innerHTML = users.map(u => {
     const isMe = u.id === currentUser.id;
-    const roleSelect = `
-      <select class="user-role-select" onchange="changeUserRole('${u.id}', this)" ${isMe ? 'disabled title="You can\'t change your own role"' : ''}>
+    const roleSelect = html`
+      <select class="user-role-select" onchange="changeUserRole(${js(u.id)}, this)" ${isMe ? html`disabled title="You can't change your own role"` : ''}>
         ${ROLE_OPTIONS.map(([value, label]) =>
-          `<option value="${value}" ${u.role === value ? 'selected' : ''}>${label}</option>`).join('')}
+          html`<option value="${value}" ${u.role === value ? 'selected' : ''}>${label}</option>`)}
       </select>`;
-    return `
+    return html`
       <tr class="${u.active ? '' : 'user-inactive'}">
-        <td>${escapeHtml(u.name)}${isMe ? ' (you)' : ''}</td>
-        <td>${escapeHtml(u.email)}</td>
+        <td>${u.name}${isMe ? ' (you)' : ''}</td>
+        <td>${u.email}</td>
         <td>${roleSelect}</td>
         <td>${u.active ? 'Active' : 'Deactivated'}</td>
         <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}</td>
         <td class="row-actions">
-          <button onclick="resetUserPassword('${u.id}')">Reset Password</button>
-          ${isMe ? '' : `<button class="${u.active ? 'delete' : ''}" onclick="setUserActive('${u.id}', ${!u.active})">${u.active ? 'Deactivate' : 'Reactivate'}</button>`}
+          <button onclick="resetUserPassword(${js(u.id)})">Reset Password</button>
+          ${isMe ? '' : html`<button class="${u.active ? 'delete' : ''}" onclick="setUserActive(${js(u.id)}, ${js(!u.active)})">${u.active ? 'Deactivate' : 'Reactivate'}</button>`}
         </td>
       </tr>`;
   }).join('');
@@ -2249,6 +2286,111 @@ document.getElementById('addUserForm').addEventListener('submit', async (e) => {
   document.getElementById('addUserForm').reset();
   await loadAndRenderUsers();
 });
+
+// ---------- Audit Log (admins and sales managers) ----------
+
+const auditLogModal = document.getElementById('auditLogModal');
+let auditNextBefore = null;
+
+const AUDIT_ACTION_LABELS = {
+  create: 'Created', update: 'Changed', delete: 'Deleted',
+  add_activity: 'Logged activity', delete_activity: 'Deleted activity', send_text: 'Sent text',
+  add_photos: 'Added photos', remove_photo: 'Removed photo',
+  sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
+  change_password: 'Changed own password', reset_password: 'Password reset by admin'
+};
+const AUDIT_TYPE_LABELS = {
+  car: 'Vehicle', lead: 'Customer', deal: 'Deal', user: 'User', tax_rate: 'Tax rate', settings: 'Fee defaults'
+};
+
+// "creditApp.applicant.firstName" -> "Credit App › Applicant › First Name"
+const FIELD_NAME_OVERRIDES = { ssn: 'SSN', vin: 'VIN', dob: 'Date of Birth', apr: 'APR', ein: 'EIN', businessEIN: 'Business EIN' };
+
+function humanizeFieldPath(path) {
+  return path.split('.').map(part => FIELD_NAME_OVERRIDES[part] || part
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^./, ch => ch.toUpperCase())
+  ).join(' › ');
+}
+
+function formatAuditValue(value) {
+  if (value === null || value === undefined || value === '') return '(blank)';
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function auditChangesHtml(entry) {
+  const changes = entry.changes || {};
+  const parts = [];
+  if (entry.details) parts.push(html`<div class="audit-note">${entry.details}</div>`);
+  for (const [field, change] of Object.entries(changes)) {
+    if (field === 'deletedRecord') {
+      parts.push(html`<details><summary>What was deleted</summary><pre>${JSON.stringify(change.from, null, 2)}</pre></details>`);
+    } else if (change.hidden) {
+      parts.push(html`<div class="audit-change"><span class="field">${humanizeFieldPath(field)}:</span> changed (hidden for privacy)</div>`);
+    } else {
+      parts.push(html`<div class="audit-change"><span class="field">${humanizeFieldPath(field)}:</span>
+        <span class="old">${formatAuditValue(change.from)}</span> → ${formatAuditValue(change.to)}</div>`);
+    }
+  }
+  return parts;
+}
+
+async function loadAuditLog({ append = false } = {}) {
+  const params = new URLSearchParams();
+  const type = document.getElementById('auditTypeFilter').value;
+  const search = document.getElementById('auditSearch').value.trim();
+  const from = document.getElementById('auditFrom').value;
+  const to = document.getElementById('auditTo').value;
+  if (type) params.set('entityType', type);
+  if (search) params.set('search', search);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (append && auditNextBefore) params.set('before', auditNextBefore);
+
+  const res = await fetch(`${API}/audit-log?${params}`);
+  if (!res.ok) return;
+  const { entries, nextBefore } = await res.json();
+  auditNextBefore = nextBefore;
+
+  const rows = entries.map(e => html`
+    <tr>
+      <td>${new Date(e.at).toLocaleString()}</td>
+      <td>${e.userName || '(system)'}</td>
+      <td><span class="audit-action ${e.action}">${AUDIT_ACTION_LABELS[e.action] || e.action}</span></td>
+      <td>${AUDIT_TYPE_LABELS[e.entityType] || e.entityType}${e.label ? html`<br><strong>${e.label}</strong>` : ''}</td>
+      <td>${auditChangesHtml(e)}</td>
+    </tr>
+  `).join('');
+
+  const body = document.getElementById('auditTableBody');
+  body.innerHTML = append ? body.innerHTML + rows : rows;
+  document.getElementById('auditEmpty').style.display = body.children.length ? 'none' : 'block';
+  document.getElementById('auditLoadMoreBtn').style.display = nextBefore ? '' : 'none';
+}
+
+document.getElementById('adminAuditLogBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  auditLogModal.classList.add('active');
+  await loadAuditLog();
+});
+
+document.getElementById('closeAuditLogBtn').addEventListener('click', () => {
+  auditLogModal.classList.remove('active');
+});
+
+document.getElementById('auditLoadMoreBtn').addEventListener('click', () => loadAuditLog({ append: true }));
+
+let auditSearchTimer = null;
+document.getElementById('auditSearch').addEventListener('input', () => {
+  clearTimeout(auditSearchTimer);
+  auditSearchTimer = setTimeout(() => loadAuditLog(), 300);
+});
+for (const id of ['auditTypeFilter', 'auditFrom', 'auditTo']) {
+  document.getElementById(id).addEventListener('change', () => loadAuditLog());
+}
 
 // ---------- My Account / Sign Out ----------
 

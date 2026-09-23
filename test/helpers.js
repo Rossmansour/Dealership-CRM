@@ -4,6 +4,7 @@
 // WARNING: this wipes every table in the TEST_DATABASE_URL database.
 
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+process.env.DATA_ENCRYPTION_KEY = process.env.DATA_ENCRYPTION_KEY || 'test-only-key-0123456789abcdef0123456789';
 
 const store = require('../db');
 const auth = require('../auth');

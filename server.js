@@ -12,6 +12,8 @@ const path = require('path');
 const crypto = require('crypto');
 const store = require('./db');
 const auth = require('./auth');
+const audit = require('./audit');
+const encryption = require('./encryption');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -101,6 +103,23 @@ let defaultDealershipId = null;
 // instead of leaving the request hanging.
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Fields the server manages itself. Edits sent from the browser can't
+// overwrite them -- e.g. a lead's activity history only changes through
+// the activity routes, so it (and its audit trail) can't be rewritten by
+// a general "update lead" request.
+const SERVER_MANAGED_FIELDS = {
+  cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold'],
+  leads: ['id', 'activities', 'dateAdded'],
+  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
+  tax_rates: ['id']
+};
+
+function editableFields(table, body) {
+  const out = { ...(body || {}) };
+  for (const field of SERVER_MANAGED_FIELDS[table]) delete out[field];
+  return out;
+}
+
 async function getSettings(q, dealershipId) {
   const dealership = await store.getDealership(q, dealershipId);
   return { ...defaultFeeSettings(), ...(dealership ? dealership.settings : {}) };
@@ -137,8 +156,11 @@ app.get('/api/settings', wrap(async (req, res) => {
 
 app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
   const settings = await store.tx(async q => {
+    await q.query('SELECT 1 FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
     const current = await getSettings(q, req.dealershipId);
-    return store.saveSettings(q, req.dealershipId, { ...current, ...req.body });
+    const saved = await store.saveSettings(q, req.dealershipId, { ...current, ...req.body });
+    await audit.updated(q, req, 'settings', { ...current, id: 'fee-defaults' }, { ...saved, id: 'fee-defaults' });
+    return saved;
   });
   res.json(settings);
 }));
@@ -253,7 +275,10 @@ app.post('/api/tax-rates', allow('editSettings'), wrap(async (req, res) => {
     countyTaxRate: Number(countyTaxRate) || 0,
     cityTaxRate: Number(cityTaxRate) || 0
   };
-  await store.insert(store.pool, 'tax_rates', req.dealershipId, newRate);
+  await store.tx(async q => {
+    await store.insert(q, 'tax_rates', req.dealershipId, newRate);
+    await audit.created(q, req, 'tax_rate', newRate);
+  });
   res.status(201).json(newRate);
 }));
 
@@ -261,14 +286,20 @@ app.put('/api/tax-rates/:id', allow('editSettings'), wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const rate = await store.get(q, 'tax_rates', req.dealershipId, req.params.id, { forUpdate: true });
     if (!rate) return null;
-    return store.save(q, 'tax_rates', req.dealershipId, rate.id, { ...rate, ...req.body });
+    const saved = await store.save(q, 'tax_rates', req.dealershipId, rate.id, { ...rate, ...editableFields('tax_rates', req.body) });
+    await audit.updated(q, req, 'tax_rate', rate, saved);
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Tax rate not found' });
   res.json(updated);
 }));
 
 app.delete('/api/tax-rates/:id', allow('editSettings'), wrap(async (req, res) => {
-  const deleted = await store.remove(store.pool, 'tax_rates', req.dealershipId, req.params.id);
+  const deleted = await store.tx(async q => {
+    const removed = await store.remove(q, 'tax_rates', req.dealershipId, req.params.id);
+    if (removed) await audit.deleted(q, req, 'tax_rate', removed);
+    return removed;
+  });
   if (!deleted) return res.status(404).json({ error: 'Tax rate not found' });
   res.status(204).send();
 }));
@@ -351,7 +382,10 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
     dateSold: null
   };
 
-  await store.insert(store.pool, 'cars', req.dealershipId, newCar);
+  await store.tx(async q => {
+    await store.insert(q, 'cars', req.dealershipId, newCar);
+    await audit.created(q, req, 'car', newCar);
+  });
   res.status(201).json(newCar);
 }));
 
@@ -361,14 +395,21 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
 
-    const updates = req.body;
+    const updates = editableFields('cars', req.body);
+    // The edit form sends numbers as text; store real numbers, same as
+    // when a car is added (otherwise dashboard totals add up "1" + "2" as "12").
+    for (const field of ['year', 'mileage', 'cost', 'price']) {
+      if (field in updates) updates[field] = Number(updates[field]) || 0;
+    }
 
     // If status is changing to "sold" for the first time, stamp the date.
     if (updates.status === 'sold' && car.status !== 'sold') {
       updates.dateSold = new Date().toISOString();
     }
 
-    return store.save(q, 'cars', req.dealershipId, car.id, { ...car, ...updates });
+    const saved = await store.save(q, 'cars', req.dealershipId, car.id, { ...car, ...updates });
+    await audit.updated(q, req, 'car', car, saved);
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Car not found' });
   res.json(updated);
@@ -376,7 +417,11 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
 
 // DELETE a car
 app.delete('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
-  const deleted = await store.remove(store.pool, 'cars', req.dealershipId, req.params.id);
+  const deleted = await store.tx(async q => {
+    const removed = await store.remove(q, 'cars', req.dealershipId, req.params.id);
+    if (removed) await audit.deleted(q, req, 'car', removed);
+    return removed;
+  });
   if (!deleted) return res.status(404).json({ error: 'Car not found' });
   res.status(204).send();
 }));
@@ -393,8 +438,12 @@ app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
     const newPaths = req.files.map(f => `/uploads/cars/${f.filename}`);
-    car.photos = [...(car.photos || []), ...newPaths];
-    return store.save(q, 'cars', req.dealershipId, car.id, car);
+    const saved = await store.save(q, 'cars', req.dealershipId, car.id, { ...car, photos: [...(car.photos || []), ...newPaths] });
+    await audit.record(q, req, {
+      action: 'add_photos', entityType: 'car', entityId: car.id, label: audit.labelFor('car', car),
+      details: `Added ${newPaths.length} photo${newPaths.length === 1 ? '' : 's'}`
+    });
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Car not found' });
   res.status(201).json({ photos: updated.photos });
@@ -408,8 +457,15 @@ app.delete('/api/cars/:id/photos', allow('editInventory'), wrap(async (req, res)
   const updated = await store.tx(async q => {
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
-    car.photos = (car.photos || []).filter(p => p !== photoPath);
-    return store.save(q, 'cars', req.dealershipId, car.id, car);
+    const saved = await store.save(q, 'cars', req.dealershipId, car.id,
+      { ...car, photos: (car.photos || []).filter(p => p !== photoPath) });
+    if (saved.photos.length !== (car.photos || []).length) {
+      await audit.record(q, req, {
+        action: 'remove_photo', entityType: 'car', entityId: car.id, label: audit.labelFor('car', car),
+        details: `Removed photo ${photoPath}`
+      });
+    }
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Car not found' });
 
@@ -456,7 +512,10 @@ app.post('/api/leads', wrap(async (req, res) => {
     dateAdded: new Date().toISOString()
   };
 
-  await store.insert(store.pool, 'leads', req.dealershipId, newLead);
+  await store.tx(async q => {
+    await store.insert(q, 'leads', req.dealershipId, newLead);
+    await audit.created(q, req, 'lead', newLead);
+  });
   res.status(201).json(newLead);
 }));
 
@@ -464,26 +523,36 @@ app.put('/api/leads/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
     if (!lead) return null;
-    return store.save(q, 'leads', req.dealershipId, lead.id, { ...lead, ...req.body });
+    const saved = await store.save(q, 'leads', req.dealershipId, lead.id, { ...lead, ...editableFields('leads', req.body) });
+    await audit.updated(q, req, 'lead', lead, saved);
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Lead not found' });
   res.json(updated);
 }));
 
 app.delete('/api/leads/:id', allow('deleteRecords'), wrap(async (req, res) => {
-  const deleted = await store.remove(store.pool, 'leads', req.dealershipId, req.params.id);
+  const deleted = await store.tx(async q => {
+    const removed = await store.remove(q, 'leads', req.dealershipId, req.params.id);
+    if (removed) await audit.deleted(q, req, 'lead', removed);
+    return removed;
+  });
   if (!deleted) return res.status(404).json({ error: 'Lead not found' });
   res.status(204).send();
 }));
 
 // Adds an entry to the top of a lead's communication log. Returns false
 // if the lead doesn't exist.
-async function addLeadActivity(dealershipId, leadId, activity) {
+async function addLeadActivity(req, leadId, activity, action = 'add_activity') {
   return store.tx(async q => {
-    const lead = await store.get(q, 'leads', dealershipId, leadId, { forUpdate: true });
+    const lead = await store.get(q, 'leads', req.dealershipId, leadId, { forUpdate: true });
     if (!lead) return false;
     lead.activities = [activity, ...(lead.activities || [])]; // newest first
-    await store.save(q, 'leads', dealershipId, lead.id, lead);
+    await store.save(q, 'leads', req.dealershipId, lead.id, lead);
+    await audit.record(q, req, {
+      action, entityType: 'lead', entityId: lead.id, label: audit.labelFor('lead', lead),
+      details: `${activity.type}: ${activity.text}`
+    });
     return true;
   });
 }
@@ -500,7 +569,7 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
     text,
     date: new Date().toISOString()
   };
-  const found = await addLeadActivity(req.dealershipId, req.params.id, activity);
+  const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
   res.status(201).json(activity);
 }));
@@ -509,8 +578,15 @@ app.delete('/api/leads/:id/activities/:activityId', allow('deleteRecords'), wrap
   const found = await store.tx(async q => {
     const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
     if (!lead) return false;
+    const removed = (lead.activities || []).find(a => a.id === req.params.activityId);
     lead.activities = (lead.activities || []).filter(a => a.id !== req.params.activityId);
     await store.save(q, 'leads', req.dealershipId, lead.id, lead);
+    if (removed) {
+      await audit.record(q, req, {
+        action: 'delete_activity', entityType: 'lead', entityId: lead.id, label: audit.labelFor('lead', lead),
+        details: `${removed.type}: ${removed.text}`
+      });
+    }
     return true;
   });
   if (!found) return res.status(404).json({ error: 'Lead not found' });
@@ -566,7 +642,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       text: logText,
       date: new Date().toISOString()
     };
-    await addLeadActivity(req.dealershipId, lead.id, activity);
+    await addLeadActivity(req, lead.id, activity, 'send_text');
 
     res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
   } catch (err) {
@@ -1110,23 +1186,24 @@ app.post('/api/deals', wrap(async (req, res) => {
       acquisitionFee: req.body.acquisitionFee ?? fees.acquisitionFee,
       apr: req.body.apr ?? 6.5,
       termMonths: req.body.termMonths ?? 60
-  });
+    });
 
-  const deal = {
-    id: crypto.randomUUID(),
-    dealNumber: await store.takeNextDealNumber(q, req.dealershipId),
-    leadId: leadId || null,
-    carId: carId || null,
-    status: 'working', // working | delivered | closed | finalized
-    hasTrade: false,
-    ...calculated,
-    creditApp: defaultCreditApp(),
-    dateCreated: new Date().toISOString()
-  };
+    const deal = {
+      id: crypto.randomUUID(),
+      dealNumber: await store.takeNextDealNumber(q, req.dealershipId),
+      leadId: leadId || null,
+      carId: carId || null,
+      status: 'working', // working | delivered | closed | finalized
+      hasTrade: false,
+      ...calculated,
+      creditApp: defaultCreditApp(),
+      dateCreated: new Date().toISOString()
+    };
 
-  await store.insert(q, 'deals', req.dealershipId, deal);
-  await syncCarStatusToDeal(q, req.dealershipId, deal);
-  return deal;
+    await store.insert(q, 'deals', req.dealershipId, deal);
+    await audit.created(q, req, 'deal', deal);
+    await syncCarStatusToDeal(q, req, deal);
+    return deal;
   });
   res.status(201).json(newDeal);
 }));
@@ -1140,20 +1217,22 @@ app.post('/api/deals', wrap(async (req, res) => {
 // places by hand. Working a deal on a car takes it off the available
 // list; delivering/closing/finalizing it marks the car sold. Shared by
 // both deal creation and deal updates so the rule only lives in one place.
-async function syncCarStatusToDeal(q, dealershipId, deal) {
+async function syncCarStatusToDeal(q, req, deal) {
   if (!deal.carId) return;
-  const car = await store.get(q, 'cars', dealershipId, deal.carId, { forUpdate: true });
+  const car = await store.get(q, 'cars', req.dealershipId, deal.carId, { forUpdate: true });
   if (!car) return;
 
+  const updated = { ...car };
   if (['delivered', 'closed', 'finalized'].includes(deal.status) && car.status !== 'sold') {
-    car.status = 'sold';
-    car.dateSold = car.dateSold || new Date().toISOString();
+    updated.status = 'sold';
+    updated.dateSold = car.dateSold || new Date().toISOString();
   } else if (deal.status === 'working' && car.status === 'available') {
-    car.status = 'pending';
+    updated.status = 'pending';
   } else {
     return;
   }
-  await store.save(q, 'cars', dealershipId, car.id, car);
+  await store.save(q, 'cars', req.dealershipId, car.id, updated);
+  await audit.updated(q, req, 'car', car, updated, `Automatic, from deal D-${deal.dealNumber}`);
 }
 
 app.put('/api/deals/:id', wrap(async (req, res) => {
@@ -1161,12 +1240,14 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
     if (!deal) return null;
 
-    // The deal number is assigned once at creation and never edited.
-    const merged = { ...deal, ...req.body, dealNumber: deal.dealNumber };
+    // The deal number, credit app, and creation date can't be changed
+    // here (the credit app has its own route below).
+    const merged = { ...deal, ...editableFields('deals', req.body) };
     const calculated = calculateDeal(merged);
 
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });
-    await syncCarStatusToDeal(q, req.dealershipId, saved);
+    await audit.updated(q, req, 'deal', deal, saved);
+    await syncCarStatusToDeal(q, req, saved);
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
@@ -1209,16 +1290,31 @@ app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
       updatedCreditApp.dateSubmitted = existing.dateSubmitted || null;
     }
 
-    return store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, creditApp: updatedCreditApp });
+    const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, creditApp: updatedCreditApp });
+    await audit.updated(q, req, 'deal', deal, saved, 'Credit application');
+    return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
   res.json(updated);
 }));
 
 app.delete('/api/deals/:id', allow('deleteRecords'), wrap(async (req, res) => {
-  const deleted = await store.remove(store.pool, 'deals', req.dealershipId, req.params.id);
+  const deleted = await store.tx(async q => {
+    const removed = await store.remove(q, 'deals', req.dealershipId, req.params.id);
+    if (removed) await audit.deleted(q, req, 'deal', removed);
+    return removed;
+  });
   if (!deleted) return res.status(404).json({ error: 'Deal not found' });
   res.status(204).send();
+}));
+
+// ---------- AUDIT LOG ----------
+// Read-only: entries are written by the routes above as changes happen,
+// and there is deliberately no way to edit or delete them.
+
+app.get('/api/audit-log', allow('viewAuditLog'), wrap(async (req, res) => {
+  const { entityType, entityId, userId, from, to, search, before, limit } = req.query;
+  res.json(await audit.list(req.dealershipId, { entityType, entityId, userId, from, to, search, before, limit }));
 }));
 
 // ---------- DASHBOARD STATS ----------
@@ -1318,8 +1414,8 @@ async function callAI(systemInstruction, history, userMessage) {
 // in negotiation" or draft a follow-up text -- so it never sees one.
 function redactApplicant(a) {
   if (!a) return a;
-  const { ssn, ...safe } = a;
-  return { ...safe, ssn: ssn ? '[redacted]' : '' };
+  const { ssn, licenseNumber, ...safe } = a;
+  return { ...safe, ssn: ssn ? '[redacted]' : '', licenseNumber: licenseNumber ? '[redacted]' : '' };
 }
 
 function redactDeal(deal) {
@@ -1355,7 +1451,7 @@ ${JSON.stringify(cars, null, 2)}
 LEADS (customers/prospects):
 ${JSON.stringify(leads, null, 2)}
 
-DEALS (SSNs redacted):
+DEALS (SSNs and license numbers redacted):
 ${JSON.stringify(safeDeals, null, 2)}
 `;
 }
@@ -1441,6 +1537,12 @@ RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
   }
 });
 
+// Unknown API addresses answer in the same { error } JSON shape as
+// everything else, instead of Express's default HTML page.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found.' });
+});
+
 // Any error thrown by a route ends up here as a JSON response, matching
 // the { error } shape every route already uses.
 app.use((err, req, res, next) => {
@@ -1456,7 +1558,12 @@ app.use((err, req, res, next) => {
 // tax rate reference data. On the very first run against an empty
 // database, carries over whatever was in the old data/db.json file.
 async function bootstrap() {
+  // Fails fast with a clear message if the encryption key isn't set,
+  // rather than failing later on the first credit app save.
+  encryption.getKey();
+
   await store.migrate();
+  await encryptStoredSensitiveFields();
 
   await store.tx(async q => {
     // Serializes startup across instances so two servers booting at once
@@ -1485,6 +1592,23 @@ async function bootstrap() {
         [defaultDealershipId, TAX_RATES_SEED_VERSION]);
     }
   });
+}
+
+// Credit apps saved before encryption existed have SSNs and license
+// numbers in plain text. This encrypts them in place; once everything is
+// encrypted it finds nothing to do.
+async function encryptStoredSensitiveFields() {
+  const { rows } = await store.pool.query('SELECT dealership_id, id, data FROM deals');
+  let count = 0;
+  for (const row of rows) {
+    if (!encryption.needsSealing(row.data)) continue;
+    // Only if nobody changed the deal since it was read above.
+    const { rowCount } = await store.pool.query(
+      'UPDATE deals SET data = $3 WHERE dealership_id = $1 AND id = $2 AND data = $4',
+      [row.dealership_id, row.id, encryption.sealDeal(row.data), row.data]);
+    count += rowCount;
+  }
+  if (count) console.log(`Encrypted SSNs/license numbers on ${count} existing deal${count === 1 ? '' : 's'}`);
 }
 
 // One-time carry-over from the old JSON file into Postgres. Only runs if

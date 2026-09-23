@@ -204,6 +204,32 @@ Open it, enter your name, email, and a password (8+ characters), and you're sign
 - Sign-ins last 12 hours. 10 wrong passwords in a row for an account locks it for 15 minutes.
 - Passwords are stored hashed (scrypt) and can't be read back by anyone, including admins.
 
+## Setting up encryption
+
+SSNs and driver's license numbers on credit applications are encrypted before they're saved (AES-256-GCM), so anyone who gets into the database directly (a leaked connection string, a backup) sees scrambled text. Everyone signed in to the app still sees the full numbers.
+
+The key comes from the `DATA_ENCRYPTION_KEY` setting, and the app won't start without it.
+
+**On Render:** web service → **Environment** → **Add Environment Variable**. Key `DATA_ENCRYPTION_KEY`; for the value, click **Generate** (or paste any random value of 32+ characters). Save.
+
+**Locally:** add `DATA_ENCRYPTION_KEY=...` to `.env`. Generate a value with:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+⚠️ **Keep a copy of the key somewhere safe outside Render** (a password manager). If it's lost or changed, existing SSNs and license numbers can never be read again.
+
+SSNs saved before encryption existed are encrypted automatically the first time the server starts with a key.
+
+## Audit log
+
+Every change is recorded: who did it, when, and exactly which fields changed from what to what. That covers vehicles, customers and their activity log, texts sent, deals and credit apps, tax rates, fee defaults, and user accounts, plus sign-ins, failed sign-in attempts, and sign-outs. Deleted records keep a copy in the log.
+
+- View it under **⚙️ Admin → Audit Log** (admins and sales managers). Filter by record type, date range, or search by customer, vehicle, deal number, or staff name.
+- Entries can't be edited or deleted from the app.
+- SSNs, license numbers, and passwords are never written to the log; it only notes that they changed.
+- To protect the history, general edits can't overwrite server-managed fields (a lead's activity log, a deal's number or credit app, a car's photos) -- those only change through their own screens, which log them.
+
 ## Setting up the AI features
 
 The AI Assistant and Suggested Reply button need a free Google Gemini API key to work (everything else in the app works fine without one).
@@ -282,6 +308,8 @@ car-crm/
 ├── server.js          # Express API (cars, leads, deals, credit apps, AI endpoints)
 ├── db.js              # Postgres connection, migrations, and record storage
 ├── auth.js            # Sign-in, sessions, roles/permissions, user management
+├── audit.js           # Audit log: recording changes and reading them back
+├── encryption.js      # Encrypts SSNs and license numbers at rest
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)
