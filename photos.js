@@ -80,10 +80,33 @@ async function cloudinaryRequest(config, action, params, file) {
   form.append('signature', sign(signed, config.apiSecret));
   if (file) form.append('file', new Blob([file.buffer], { type: file.mimetype }), file.originalname || 'photo');
 
-  const res = await fetch(`${config.apiBase}/${config.cloudName}/image/${action}`, { method: 'POST', body: form });
+  let res;
+  try {
+    res = await fetch(`${config.apiBase}/${config.cloudName}/image/${action}`, { method: 'POST', body: form });
+  } catch (err) {
+    throw storageError("Couldn't connect to Cloudinary. Try again in a minute.");
+  }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Photo storage error: ${(body.error && body.error.message) || res.status}`);
+  if (!res.ok) throw storageError((body.error && body.error.message) || `Cloudinary responded ${res.status}`);
   return body;
+}
+
+// Cloudinary's own error messages are terse; add what to actually do
+// about the common setup mistakes. (Its messages never include the
+// API secret, so they're safe to show.)
+const SETUP_HINTS = [
+  [/invalid signature/i, 'The API secret in CLOUDINARY_URL is wrong. Copy the "API environment variable" from the Cloudinary dashboard again, with the secret revealed.'],
+  [/unknown api key/i, 'The API key in CLOUDINARY_URL is wrong. Copy the "API environment variable" from the Cloudinary dashboard again.'],
+  [/cloud.?name|not found/i, 'The cloud name at the end of CLOUDINARY_URL is wrong. Copy the "API environment variable" from the Cloudinary dashboard again.'],
+  [/disabled|suspended|quota|limit/i, 'Check your Cloudinary account (plan limits or account status) on the Cloudinary dashboard.']
+];
+
+function storageError(reason) {
+  const hint = (SETUP_HINTS.find(([pattern]) => pattern.test(reason)) || [])[1];
+  const err = new Error(`Photo storage error: ${reason}`);
+  err.reason = reason;
+  err.hint = hint || null;
+  return err;
 }
 
 // Saves one uploaded photo (a multer memory-storage file) and returns the

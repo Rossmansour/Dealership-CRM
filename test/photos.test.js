@@ -151,7 +151,7 @@ test('if any photo in a batch fails, none are kept', async () => {
   failNextUploads = 1;
   const res = await upload(manager, car.id, [jpeg('ok1.jpg'), jpeg('ok2.jpg'), jpeg('ok3.jpg')]);
   assert.strictEqual(res.status, 502);
-  assert.match(res.body.error, /Couldn't save the photos/);
+  assert.match(res.body.error, /Couldn't save the photos to storage \(Cloudinary says: Temporary failure\)\. Please try again\./);
   assert.strictEqual(stored.size, storedBefore, 'the ones that did upload were removed again');
   assert.deepStrictEqual((await as(admin, 'GET', `/cars/${car.id}`)).body.photos, []);
 });
@@ -247,6 +247,21 @@ test('a broken CLOUDINARY_URL never takes the app down, and says what is wrong',
       assert.strictEqual((await as(admin, 'GET', '/cars')).status, 200, 'the rest of the app keeps working');
     }
     assert.deepStrictEqual((await as(admin, 'GET', `/cars/${car.id}`)).body.photos, [], 'nothing saved to disk instead');
+  } finally {
+    process.env.CLOUDINARY_URL = saved;
+  }
+});
+
+test("Cloudinary's reason for refusing an upload is shown, with what to do about it", async () => {
+  const saved = process.env.CLOUDINARY_URL;
+  try {
+    const car = await newCar();
+    process.env.CLOUDINARY_URL = `cloudinary://${API_KEY}:wrong-secret@${CLOUD}`;
+    const res = await upload(manager, car.id, [jpeg()]);
+    assert.strictEqual(res.status, 502);
+    assert.match(res.body.error, /Cloudinary says: Invalid Signature/);
+    assert.match(res.body.error, /API secret in CLOUDINARY_URL is wrong/);
+    assert.ok(!res.body.error.includes('wrong-secret'), 'the secret itself is never shown');
   } finally {
     process.env.CLOUDINARY_URL = saved;
   }

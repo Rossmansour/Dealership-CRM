@@ -479,7 +479,10 @@ app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 
     // All or nothing: don't leave half a batch stored but not on the car.
     await Promise.all(newPaths.map(photos.deletePhoto));
     console.error('Photo upload failed:', failure.reason);
-    return res.status(502).json({ error: "Couldn't save the photos to storage. Please try again." });
+    const { reason, hint } = failure.reason || {};
+    return res.status(502).json({
+      error: `Couldn't save the photos to storage${reason ? ` (Cloudinary says: ${reason})` : ''}.${hint ? ' ' + hint : ' Please try again.'}`
+    });
   }
 
   const updated = await store.tx(async q => {
