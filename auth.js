@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const express = require('express');
 const store = require('./db');
+const audit = require('./audit');
 
 const SESSION_COOKIE = 'crm_session';
 const SESSION_HOURS = 12; // roughly one working day, then sign in again
@@ -33,7 +34,8 @@ const PERMISSIONS = {
   editInventory: ['admin', 'sales_manager'],   // add/edit/delete cars and photos
   deleteRecords: ['admin', 'sales_manager'],   // delete leads, deals, activity log entries
   editSettings: ['admin'],                     // fee defaults and tax rate tables
-  manageUsers: ['admin']
+  manageUsers: ['admin'],
+  viewAuditLog: ['admin', 'sales_manager']
 };
 
 function can(user, permission) {
@@ -235,6 +237,10 @@ const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const normalizeEmail = email => String(email || '').trim().toLowerCase();
 
+// Audit-log actor for a user who isn't (or isn't yet) req.user.
+const actorFor = (user, req) => ({ dealershipId: user.dealership_id, userId: user.id, userName: user.name, ip: req.ip });
+const userEntity = user => ({ entityType: 'user', entityId: user.id, label: audit.labelFor('user', user) });
+
 router.post('/auth/login', wrap(async (req, res) => {
   const { email, password } = req.body || {};
   const attemptKey = `${req.ip}|${normalizeEmail(email)}`;
@@ -247,6 +253,14 @@ router.post('/auth/login', wrap(async (req, res) => {
   const ok = user && user.active && await verifyPassword(String(password || ''), user.password_hash);
   if (!ok) {
     recordFailedLogin(attemptKey);
+    // Failed attempts on a real account are logged for that account's
+    // dealership. Unknown emails have no dealership to log them under.
+    if (user) {
+      await audit.record(store.pool, actorFor(user, req), {
+        action: 'sign_in_failed', ...userEntity(user),
+        details: user.active ? 'Wrong password' : 'Account is deactivated'
+      });
+    }
     // Same message whether the email exists or not, so it can't be used
     // to discover who has an account.
     return res.status(401).json({ error: 'Incorrect email or password.' });
@@ -254,12 +268,15 @@ router.post('/auth/login', wrap(async (req, res) => {
 
   failedLogins.delete(attemptKey);
   await startSession(req, res, user.id);
+  await audit.record(store.pool, actorFor(user, req), { action: 'sign_in', ...userEntity(user) });
   res.json(publicUser(user));
 }));
 
 router.post('/auth/logout', wrap(async (req, res) => {
   const token = readCookie(req, SESSION_COOKIE);
+  const user = await userFromRequest(req);
   if (token) await store.pool.query('DELETE FROM sessions WHERE token_hash = $1', [sha256(token)]);
+  if (user) await audit.record(store.pool, actorFor(user, req), { action: 'sign_out', ...userEntity(user) });
   setSessionCookie(req, res, '', 0);
   res.status(204).send();
 }));
@@ -289,6 +306,9 @@ router.post('/auth/setup', wrap(async (req, res) => {
        VALUES ($1, $2, $3, 'admin', $4) RETURNING *`,
       [dealerships[0].id, String(name).trim(), normalizeEmail(email), await hashPassword(password)]
     );
+    await audit.record(q, actorFor(rows[0], req), {
+      action: 'create', ...userEntity(rows[0]), details: 'First admin account, created with the setup link'
+    });
     return rows[0];
   });
   if (!user) return res.status(409).json({ error: 'An admin account already exists. Please sign in.' });
@@ -316,6 +336,7 @@ router.post('/auth/change-password', wrap(async (req, res) => {
   const token = readCookie(req, SESSION_COOKIE);
   await store.pool.query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2',
     [req.user.id, sha256(token)]);
+  await audit.record(store.pool, req, { action: 'change_password', ...userEntity(req.user) });
   res.status(204).send();
 }));
 
@@ -336,13 +357,18 @@ router.post('/users', requirePermission('manageUsers'), wrap(async (req, res) =>
   const problem = passwordProblem(password);
   if (problem) return res.status(400).json({ error: problem });
 
+  const passwordHash = await hashPassword(password);
   try {
-    const { rows } = await store.pool.query(
-      `INSERT INTO users (dealership_id, name, email, role, password_hash)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.dealershipId, String(name).trim(), normalizeEmail(email), role, await hashPassword(password)]
-    );
-    res.status(201).json(publicUser(rows[0]));
+    const user = await store.tx(async q => {
+      const { rows } = await q.query(
+        `INSERT INTO users (dealership_id, name, email, role, password_hash)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [req.dealershipId, String(name).trim(), normalizeEmail(email), role, passwordHash]
+      );
+      await audit.record(q, req, { action: 'create', ...userEntity(rows[0]), details: `Role: ${ROLES[role]}` });
+      return rows[0];
+    });
+    res.status(201).json(publicUser(user));
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Someone already has an account with that email.' });
     throw err;
@@ -393,6 +419,19 @@ router.put('/users/:id', requirePermission('manageUsers'), wrap(async (req, res)
     // Deactivating someone or resetting their password signs them out.
     if (!next.active || passwordHash) {
       await q.query('DELETE FROM sessions WHERE user_id = $1', [user.id]);
+    }
+
+    const changes = audit.diff(
+      { name: user.name, role: ROLES[user.role], active: user.active },
+      { name: next.name, role: ROLES[next.role], active: next.active }
+    );
+    if (passwordHash) changes.password = { from: '(hidden)', to: '(hidden)', hidden: true };
+    if (Object.keys(changes).length) {
+      await audit.record(q, req, {
+        action: passwordHash && Object.keys(changes).length === 1 ? 'reset_password' : 'update',
+        ...userEntity(updated[0]),
+        changes
+      });
     }
     return { user: updated[0] };
   });

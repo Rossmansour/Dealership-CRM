@@ -74,13 +74,14 @@ function userCan(permission) {
 // Hides buttons for things this user's role can't do. The server enforces
 // the same rules regardless -- this just avoids offering dead ends.
 function applyPermissionsToUI() {
-  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers']) {
+  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers', 'viewAuditLog']) {
     document.body.classList.toggle(`cannot-${permission}`, !userCan(permission));
   }
   document.getElementById('currentUserName').textContent = currentUser.name;
   document.getElementById('adminMenuBtn').style.display =
-    (userCan('editSettings') || userCan('manageUsers')) ? '' : 'none';
+    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog')) ? '' : 'none';
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
+  document.getElementById('adminAuditLogBtn').style.display = userCan('viewAuditLog') ? '' : 'none';
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
 }
@@ -2285,6 +2286,111 @@ document.getElementById('addUserForm').addEventListener('submit', async (e) => {
   document.getElementById('addUserForm').reset();
   await loadAndRenderUsers();
 });
+
+// ---------- Audit Log (admins and sales managers) ----------
+
+const auditLogModal = document.getElementById('auditLogModal');
+let auditNextBefore = null;
+
+const AUDIT_ACTION_LABELS = {
+  create: 'Created', update: 'Changed', delete: 'Deleted',
+  add_activity: 'Logged activity', delete_activity: 'Deleted activity', send_text: 'Sent text',
+  add_photos: 'Added photos', remove_photo: 'Removed photo',
+  sign_in: 'Signed in', sign_in_failed: 'Failed sign-in', sign_out: 'Signed out',
+  change_password: 'Changed own password', reset_password: 'Password reset by admin'
+};
+const AUDIT_TYPE_LABELS = {
+  car: 'Vehicle', lead: 'Customer', deal: 'Deal', user: 'User', tax_rate: 'Tax rate', settings: 'Fee defaults'
+};
+
+// "creditApp.applicant.firstName" -> "Credit App › Applicant › First Name"
+const FIELD_NAME_OVERRIDES = { ssn: 'SSN', vin: 'VIN', dob: 'Date of Birth', apr: 'APR', ein: 'EIN', businessEIN: 'Business EIN' };
+
+function humanizeFieldPath(path) {
+  return path.split('.').map(part => FIELD_NAME_OVERRIDES[part] || part
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/^./, ch => ch.toUpperCase())
+  ).join(' › ');
+}
+
+function formatAuditValue(value) {
+  if (value === null || value === undefined || value === '') return '(blank)';
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function auditChangesHtml(entry) {
+  const changes = entry.changes || {};
+  const parts = [];
+  if (entry.details) parts.push(html`<div class="audit-note">${entry.details}</div>`);
+  for (const [field, change] of Object.entries(changes)) {
+    if (field === 'deletedRecord') {
+      parts.push(html`<details><summary>What was deleted</summary><pre>${JSON.stringify(change.from, null, 2)}</pre></details>`);
+    } else if (change.hidden) {
+      parts.push(html`<div class="audit-change"><span class="field">${humanizeFieldPath(field)}:</span> changed (hidden for privacy)</div>`);
+    } else {
+      parts.push(html`<div class="audit-change"><span class="field">${humanizeFieldPath(field)}:</span>
+        <span class="old">${formatAuditValue(change.from)}</span> → ${formatAuditValue(change.to)}</div>`);
+    }
+  }
+  return parts;
+}
+
+async function loadAuditLog({ append = false } = {}) {
+  const params = new URLSearchParams();
+  const type = document.getElementById('auditTypeFilter').value;
+  const search = document.getElementById('auditSearch').value.trim();
+  const from = document.getElementById('auditFrom').value;
+  const to = document.getElementById('auditTo').value;
+  if (type) params.set('entityType', type);
+  if (search) params.set('search', search);
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (append && auditNextBefore) params.set('before', auditNextBefore);
+
+  const res = await fetch(`${API}/audit-log?${params}`);
+  if (!res.ok) return;
+  const { entries, nextBefore } = await res.json();
+  auditNextBefore = nextBefore;
+
+  const rows = entries.map(e => html`
+    <tr>
+      <td>${new Date(e.at).toLocaleString()}</td>
+      <td>${e.userName || '(system)'}</td>
+      <td><span class="audit-action ${e.action}">${AUDIT_ACTION_LABELS[e.action] || e.action}</span></td>
+      <td>${AUDIT_TYPE_LABELS[e.entityType] || e.entityType}${e.label ? html`<br><strong>${e.label}</strong>` : ''}</td>
+      <td>${auditChangesHtml(e)}</td>
+    </tr>
+  `).join('');
+
+  const body = document.getElementById('auditTableBody');
+  body.innerHTML = append ? body.innerHTML + rows : rows;
+  document.getElementById('auditEmpty').style.display = body.children.length ? 'none' : 'block';
+  document.getElementById('auditLoadMoreBtn').style.display = nextBefore ? '' : 'none';
+}
+
+document.getElementById('adminAuditLogBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  auditLogModal.classList.add('active');
+  await loadAuditLog();
+});
+
+document.getElementById('closeAuditLogBtn').addEventListener('click', () => {
+  auditLogModal.classList.remove('active');
+});
+
+document.getElementById('auditLoadMoreBtn').addEventListener('click', () => loadAuditLog({ append: true }));
+
+let auditSearchTimer = null;
+document.getElementById('auditSearch').addEventListener('input', () => {
+  clearTimeout(auditSearchTimer);
+  auditSearchTimer = setTimeout(() => loadAuditLog(), 300);
+});
+for (const id of ['auditTypeFilter', 'auditFrom', 'auditTo']) {
+  document.getElementById(id).addEventListener('change', () => loadAuditLog());
+}
 
 // ---------- My Account / Sign Out ----------
 

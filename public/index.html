@@ -556,10 +556,11 @@
   <div class="modal-content">
     <h2>Admin</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
-      Store configuration and staff accounts -- not part of the day-to-day sales workflow. Only admins can open this.
+      Store configuration, staff accounts, and the audit log -- not part of the day-to-day sales workflow.
     </p>
     <div class="admin-menu-list">
       <button type="button" class="btn-secondary admin-menu-item" id="adminUsersBtn">👤 Users &amp; Roles</button>
+      <button type="button" class="btn-secondary admin-menu-item" id="adminAuditLogBtn">📜 Audit Log</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
     </div>
@@ -604,6 +605,43 @@
         <button type="submit" class="btn-primary">Add User</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Audit Log Modal (admins and sales managers) -->
+<div class="modal" id="auditLogModal">
+  <div class="modal-content modal-xwide">
+    <h2>Audit Log</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      Every change, who made it, and when. Entries can't be edited or deleted. SSNs, license numbers, and passwords are never shown here -- only that they changed.
+    </p>
+    <div class="audit-filters">
+      <select id="auditTypeFilter">
+        <option value="">All records</option>
+        <option value="lead">Customers</option>
+        <option value="deal">Deals</option>
+        <option value="car">Vehicles</option>
+        <option value="user">Users &amp; sign-ins</option>
+        <option value="tax_rate">Tax rates</option>
+        <option value="settings">Fee defaults</option>
+      </select>
+      <input type="text" id="auditSearch" placeholder="Search record, person, or details..." />
+      <label>From <input type="date" id="auditFrom" /></label>
+      <label>To <input type="date" id="auditTo" /></label>
+    </div>
+    <div class="audit-table-wrap">
+      <table class="data-table audit-table">
+        <thead>
+          <tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th>Details</th></tr>
+        </thead>
+        <tbody id="auditTableBody"></tbody>
+      </table>
+    </div>
+    <p id="auditEmpty" class="no-deals-note" style="display:none;">No entries match these filters.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeAuditLogBtn">Close</button>
+      <button type="button" class="btn-secondary" id="auditLoadMoreBtn" style="display:none;">Load older entries</button>
+    </div>
   </div>
 </div>
 

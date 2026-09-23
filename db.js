@@ -13,6 +13,7 @@
 // reporting needs them.
 
 const { Pool } = require('pg');
+const { sealDeal, openDeal } = require('./encryption');
 
 if (!process.env.DATABASE_URL) {
   console.error(
@@ -106,6 +107,24 @@ const MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE INDEX sessions_user_id_idx ON sessions (user_id);
+  `,
+  `
+  CREATE TABLE audit_log (
+    id bigserial PRIMARY KEY,
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    user_name text,
+    action text NOT NULL,
+    entity_type text NOT NULL,
+    entity_id text,
+    entity_label text,
+    changes jsonb,
+    details text,
+    ip text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX audit_log_dealership_idx ON audit_log (dealership_id, id DESC);
+  CREATE INDEX audit_log_entity_idx ON audit_log (dealership_id, entity_type, entity_id);
   `
 ];
 
@@ -169,13 +188,19 @@ function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);
 }
 
+// Deals carry the credit application, whose SSN and license number are
+// encrypted on the way into the database and decrypted on the way out.
+// Doing it here means no route can forget to.
+const toStored = (table, record) => (table === 'deals' ? sealDeal(record) : record);
+const fromStored = (table, record) => (table === 'deals' ? openDeal(record) : record);
+
 async function list(q, table, dealershipId) {
   checkTable(table);
   const { rows } = await q.query(
     `SELECT data FROM ${table} WHERE dealership_id = $1 ORDER BY seq`,
     [dealershipId]
   );
-  return rows.map(r => r.data);
+  return rows.map(r => fromStored(table, r.data));
 }
 
 // Pass { forUpdate: true } inside tx() to lock the row until the
@@ -186,7 +211,7 @@ async function get(q, table, dealershipId, id, { forUpdate = false } = {}) {
     `SELECT data FROM ${table} WHERE dealership_id = $1 AND id = $2${forUpdate ? ' FOR UPDATE' : ''}`,
     [dealershipId, id]
   );
-  return rows[0] ? rows[0].data : null;
+  return rows[0] ? fromStored(table, rows[0].data) : null;
 }
 
 async function insert(q, table, dealershipId, record) {
@@ -194,12 +219,12 @@ async function insert(q, table, dealershipId, record) {
   if (table === 'deals') {
     await q.query(
       'INSERT INTO deals (dealership_id, id, deal_number, data) VALUES ($1, $2, $3, $4)',
-      [dealershipId, record.id, record.dealNumber, record]
+      [dealershipId, record.id, record.dealNumber, toStored(table, record)]
     );
   } else {
     await q.query(
       `INSERT INTO ${table} (dealership_id, id, data) VALUES ($1, $2, $3)`,
-      [dealershipId, record.id, record]
+      [dealershipId, record.id, toStored(table, record)]
     );
   }
   return record;
@@ -212,19 +237,19 @@ async function save(q, table, dealershipId, id, record) {
   const data = { ...record, id };
   await q.query(
     `UPDATE ${table} SET data = $3, updated_at = now() WHERE dealership_id = $1 AND id = $2`,
-    [dealershipId, id, data]
+    [dealershipId, id, toStored(table, data)]
   );
   return data;
 }
 
-// Returns true if a row was deleted, false if it didn't exist.
+// Returns the deleted record, or null if it didn't exist.
 async function remove(q, table, dealershipId, id) {
   checkTable(table);
-  const { rowCount } = await q.query(
-    `DELETE FROM ${table} WHERE dealership_id = $1 AND id = $2`,
+  const { rows } = await q.query(
+    `DELETE FROM ${table} WHERE dealership_id = $1 AND id = $2 RETURNING data`,
     [dealershipId, id]
   );
-  return rowCount > 0;
+  return rows[0] ? fromStored(table, rows[0].data) : null;
 }
 
 // ---------- Dealerships ----------
