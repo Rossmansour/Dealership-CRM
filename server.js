@@ -1,8 +1,7 @@
 // server.js
 // Simple Express backend for a Car Dealership Inventory + CRM tool.
-// Data is stored in a JSON file (data/db.json) instead of a real database,
-// which keeps setup dead simple (no install/config needed) while still
-// exercising real REST API patterns (GET/POST/PUT/DELETE).
+// Data lives in Postgres (see db.js). Every record belongs to a
+// dealership, so the same install can serve multiple stores.
 
 require('dotenv').config();
 
@@ -11,10 +10,13 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const store = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'data', 'db.json');
+// Legacy JSON data file. Only read once, on first startup against an
+// empty database, to carry existing data over into Postgres.
+const LEGACY_JSON_PATH = path.join(__dirname, 'data', 'db.json');
 
 // ---------- AI provider config ----------
 // Everything AI-related funnels through the single callAI() function below.
@@ -37,8 +39,8 @@ if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
 // already serves statically -- so a saved file at
 // public/uploads/cars/abc123.jpg is reachable at /uploads/cars/abc123.jpg
 // with zero extra routing. NOTE: on a host with an ephemeral filesystem
-// (like Render's free tier), these files disappear on restart, same as
-// data/db.json -- fine for a demo, not for real production use.
+// (like Render's free tier), these files disappear on restart -- they
+// still need to move to cloud storage (e.g. S3) before real production use.
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'cars');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -62,35 +64,33 @@ const upload = multer({
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ---------- Tiny JSON "database" helpers ----------
+// ---------- Request plumbing ----------
 
-// Bumping this forces every existing db.json (including ones already
-// deployed) to pick up a fresh seedTaxRates() on next read, rather than
-// treating "some array already exists" as "nothing to do." This is what
-// closes the actual bug: a stale, partially-seeded taxRates array from an
-// earlier version silently persisted forever because the old check only
-// asked "is it missing?", not "is it current?".
+// Bumping this re-seeds every dealership's tax rate table from
+// seedTaxRates() on next startup, rather than treating "some rates already
+// exist" as "nothing to do." This is what closes the original bug: a stale,
+// partially-seeded tax table from an earlier version silently persisted
+// forever because the old check only asked "is it missing?", not "is it
+// current?".
 const TAX_RATES_SEED_VERSION = 2;
 
-function readDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    const seed = { cars: [], leads: [], deals: [], nextDealNumber: 1001, settings: defaultFeeSettings() };
-    fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2));
-    return seed;
-  }
-  const raw = fs.readFileSync(DB_PATH, 'utf-8');
-  const db = JSON.parse(raw);
-  if (!db.settings) db.settings = defaultFeeSettings();
-  if (!db.taxRates || db.taxRatesVersion !== TAX_RATES_SEED_VERSION) {
-    db.taxRates = seedTaxRates();
-    db.taxRatesVersion = TAX_RATES_SEED_VERSION;
-    writeDB(db); // persist the migration immediately, not just in memory
-  }
-  return db;
-}
+// Which dealership each request acts for. Until logins exist, every
+// request uses the single default dealership created by bootstrap();
+// once users sign in, this will come from the logged-in user instead.
+let defaultDealershipId = null;
+app.use('/api', (req, res, next) => {
+  req.dealershipId = defaultDealershipId;
+  next();
+});
 
-function writeDB(data) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+// Express 4 doesn't catch errors thrown from async handlers on its own --
+// this forwards them to the JSON error handler at the bottom of the file
+// instead of leaving the request hanging.
+const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+async function getSettings(q, dealershipId) {
+  const dealership = await store.getDealership(q, dealershipId);
+  return { ...defaultFeeSettings(), ...(dealership ? dealership.settings : {}) };
 }
 
 // Store-level fee defaults. These are the numbers a dealership charges
@@ -118,17 +118,17 @@ function defaultFeeSettings() {
   };
 }
 
-app.get('/api/settings', (req, res) => {
-  const db = readDB();
-  res.json(db.settings);
-});
+app.get('/api/settings', wrap(async (req, res) => {
+  res.json(await getSettings(store.pool, req.dealershipId));
+}));
 
-app.put('/api/settings', (req, res) => {
-  const db = readDB();
-  db.settings = { ...defaultFeeSettings(), ...db.settings, ...req.body };
-  writeDB(db);
-  res.json(db.settings);
-});
+app.put('/api/settings', wrap(async (req, res) => {
+  const settings = await store.tx(async q => {
+    const current = await getSettings(q, req.dealershipId);
+    return store.saveSettings(q, req.dealershipId, { ...current, ...req.body });
+  });
+  res.json(settings);
+}));
 
 // ---------- Tax Rates reference table (State / County / City) ----------
 //
@@ -220,16 +220,14 @@ function seedTaxRates() {
   ];
 }
 
-app.get('/api/tax-rates', (req, res) => {
-  const db = readDB();
+app.get('/api/tax-rates', wrap(async (req, res) => {
   const { state } = req.query;
-  let rates = db.taxRates;
+  let rates = await store.list(store.pool, 'tax_rates', req.dealershipId);
   if (state) rates = rates.filter(r => r.state.toUpperCase() === state.toUpperCase());
   res.json(rates);
-});
+}));
 
-app.post('/api/tax-rates', (req, res) => {
-  const db = readDB();
+app.post('/api/tax-rates', wrap(async (req, res) => {
   const { state, county, city, stateTaxRate, countyTaxRate, cityTaxRate } = req.body;
   if (!state) return res.status(400).json({ error: 'state is required' });
 
@@ -242,41 +240,36 @@ app.post('/api/tax-rates', (req, res) => {
     countyTaxRate: Number(countyTaxRate) || 0,
     cityTaxRate: Number(cityTaxRate) || 0
   };
-  db.taxRates.push(newRate);
-  writeDB(db);
+  await store.insert(store.pool, 'tax_rates', req.dealershipId, newRate);
   res.status(201).json(newRate);
-});
+}));
 
-app.put('/api/tax-rates/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.taxRates.findIndex(r => r.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
+app.put('/api/tax-rates/:id', wrap(async (req, res) => {
+  const updated = await store.tx(async q => {
+    const rate = await store.get(q, 'tax_rates', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!rate) return null;
+    return store.save(q, 'tax_rates', req.dealershipId, rate.id, { ...rate, ...req.body });
+  });
+  if (!updated) return res.status(404).json({ error: 'Tax rate not found' });
+  res.json(updated);
+}));
 
-  db.taxRates[idx] = { ...db.taxRates[idx], ...req.body };
-  writeDB(db);
-  res.json(db.taxRates[idx]);
-});
-
-app.delete('/api/tax-rates/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.taxRates.findIndex(r => r.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Tax rate not found' });
-
-  db.taxRates.splice(idx, 1);
-  writeDB(db);
+app.delete('/api/tax-rates/:id', wrap(async (req, res) => {
+  const deleted = await store.remove(store.pool, 'tax_rates', req.dealershipId, req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Tax rate not found' });
   res.status(204).send();
-});
+}));
 
 // Finds the best-matching reference record for a customer's address:
 // exact state+county+city match first, then state+county with no city
 // specified (a county-wide default), then a bare state-level default.
 // Returns null if nothing at all matches that state.
-function findBestTaxRateMatch(db, state, county, city) {
+function findBestTaxRateMatch(taxRates, state, county, city) {
   const normalizedState = (state || '').toUpperCase();
   const normalizedCounty = (county || '').trim();
   const normalizedCity = (city || '').trim();
 
-  const inState = db.taxRates.filter(r => r.state === normalizedState);
+  const inState = taxRates.filter(r => r.state === normalizedState);
   if (inState.length === 0) return null;
 
   const exact = inState.find(r => r.county === normalizedCounty && r.city && r.city === normalizedCity);
@@ -292,9 +285,8 @@ function findBestTaxRateMatch(db, state, county, city) {
 // ---------- CARS (Inventory) ----------
 
 // GET all cars, with optional ?status= and ?search= filters
-app.get('/api/cars', (req, res) => {
-  const db = readDB();
-  let cars = db.cars;
+app.get('/api/cars', wrap(async (req, res) => {
+  let cars = await store.list(store.pool, 'cars', req.dealershipId);
 
   const { status, search } = req.query;
 
@@ -312,19 +304,17 @@ app.get('/api/cars', (req, res) => {
   }
 
   res.json(cars);
-});
+}));
 
 // GET a single car by id
-app.get('/api/cars/:id', (req, res) => {
-  const db = readDB();
-  const car = db.cars.find(c => c.id === req.params.id);
+app.get('/api/cars/:id', wrap(async (req, res) => {
+  const car = await store.get(store.pool, 'cars', req.dealershipId, req.params.id);
   if (!car) return res.status(404).json({ error: 'Car not found' });
   res.json(car);
-});
+}));
 
 // POST a new car
-app.post('/api/cars', (req, res) => {
-  const db = readDB();
+app.post('/api/cars', wrap(async (req, res) => {
   const { make, model, year, vin, stockNumber, mileage, cost, price, status } = req.body;
 
   if (!make || !model || !year || !price) {
@@ -348,71 +338,67 @@ app.post('/api/cars', (req, res) => {
     dateSold: null
   };
 
-  db.cars.push(newCar);
-  writeDB(db);
+  await store.insert(store.pool, 'cars', req.dealershipId, newCar);
   res.status(201).json(newCar);
-});
+}));
 
 // PUT (update) an existing car
-app.put('/api/cars/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.cars.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Car not found' });
+app.put('/api/cars/:id', wrap(async (req, res) => {
+  const updated = await store.tx(async q => {
+    const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!car) return null;
 
-  const updates = req.body;
+    const updates = req.body;
 
-  // If status is changing to "sold" for the first time, stamp the date.
-  if (updates.status === 'sold' && db.cars[idx].status !== 'sold') {
-    updates.dateSold = new Date().toISOString();
-  }
+    // If status is changing to "sold" for the first time, stamp the date.
+    if (updates.status === 'sold' && car.status !== 'sold') {
+      updates.dateSold = new Date().toISOString();
+    }
 
-  db.cars[idx] = { ...db.cars[idx], ...updates };
-  writeDB(db);
-  res.json(db.cars[idx]);
-});
+    return store.save(q, 'cars', req.dealershipId, car.id, { ...car, ...updates });
+  });
+  if (!updated) return res.status(404).json({ error: 'Car not found' });
+  res.json(updated);
+}));
 
 // DELETE a car
-app.delete('/api/cars/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.cars.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Car not found' });
-
-  db.cars.splice(idx, 1);
-  writeDB(db);
+app.delete('/api/cars/:id', wrap(async (req, res) => {
+  const deleted = await store.remove(store.pool, 'cars', req.dealershipId, req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Car not found' });
   res.status(204).send();
-});
+}));
 
 // ---------- Car photos ----------
 
 // Upload one or more photos for a car. Field name must be "photos".
-app.post('/api/cars/:id/photos', upload.array('photos', 8), (req, res) => {
-  const db = readDB();
-  const car = db.cars.find(c => c.id === req.params.id);
-  if (!car) return res.status(404).json({ error: 'Car not found' });
-
+app.post('/api/cars/:id/photos', upload.array('photos', 8), wrap(async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No photos were uploaded.' });
   }
 
-  if (!car.photos) car.photos = [];
-  const newPaths = req.files.map(f => `/uploads/cars/${f.filename}`);
-  car.photos.push(...newPaths);
-
-  writeDB(db);
-  res.status(201).json({ photos: car.photos });
-});
+  const updated = await store.tx(async q => {
+    const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!car) return null;
+    const newPaths = req.files.map(f => `/uploads/cars/${f.filename}`);
+    car.photos = [...(car.photos || []), ...newPaths];
+    return store.save(q, 'cars', req.dealershipId, car.id, car);
+  });
+  if (!updated) return res.status(404).json({ error: 'Car not found' });
+  res.status(201).json({ photos: updated.photos });
+}));
 
 // Delete one photo from a car (removes both the DB reference and the file on disk).
-app.delete('/api/cars/:id/photos', (req, res) => {
-  const db = readDB();
-  const car = db.cars.find(c => c.id === req.params.id);
-  if (!car) return res.status(404).json({ error: 'Car not found' });
-
+app.delete('/api/cars/:id/photos', wrap(async (req, res) => {
   const { photoPath } = req.body;
   if (!photoPath) return res.status(400).json({ error: 'photoPath is required' });
 
-  car.photos = (car.photos || []).filter(p => p !== photoPath);
-  writeDB(db);
+  const updated = await store.tx(async q => {
+    const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!car) return null;
+    car.photos = (car.photos || []).filter(p => p !== photoPath);
+    return store.save(q, 'cars', req.dealershipId, car.id, car);
+  });
+  if (!updated) return res.status(404).json({ error: 'Car not found' });
 
   // Best-effort cleanup of the actual file -- if it's already gone
   // (e.g. wiped by a host restart), that's fine, just move on.
@@ -421,13 +407,12 @@ app.delete('/api/cars/:id/photos', (req, res) => {
   fs.unlink(filePath, () => {});
 
   res.status(204).send();
-});
+}));
 
 // ---------- LEADS (CRM) ----------
 
-app.get('/api/leads', (req, res) => {
-  const db = readDB();
-  let leads = db.leads;
+app.get('/api/leads', wrap(async (req, res) => {
+  let leads = await store.list(store.pool, 'leads', req.dealershipId);
 
   const { status } = req.query;
   if (status) {
@@ -435,10 +420,9 @@ app.get('/api/leads', (req, res) => {
   }
 
   res.json(leads);
-});
+}));
 
-app.post('/api/leads', (req, res) => {
-  const db = readDB();
+app.post('/api/leads', wrap(async (req, res) => {
   const { name, phone, email, carId, notes, status, source, type } = req.body;
 
   if (!name) {
@@ -459,62 +443,66 @@ app.post('/api/leads', (req, res) => {
     dateAdded: new Date().toISOString()
   };
 
-  db.leads.push(newLead);
-  writeDB(db);
+  await store.insert(store.pool, 'leads', req.dealershipId, newLead);
   res.status(201).json(newLead);
-});
+}));
 
-app.put('/api/leads/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.leads.findIndex(l => l.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Lead not found' });
+app.put('/api/leads/:id', wrap(async (req, res) => {
+  const updated = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return null;
+    return store.save(q, 'leads', req.dealershipId, lead.id, { ...lead, ...req.body });
+  });
+  if (!updated) return res.status(404).json({ error: 'Lead not found' });
+  res.json(updated);
+}));
 
-  db.leads[idx] = { ...db.leads[idx], ...req.body };
-  writeDB(db);
-  res.json(db.leads[idx]);
-});
-
-app.delete('/api/leads/:id', (req, res) => {
-  const db = readDB();
-  const idx = db.leads.findIndex(l => l.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Lead not found' });
-
-  db.leads.splice(idx, 1);
-  writeDB(db);
+app.delete('/api/leads/:id', wrap(async (req, res) => {
+  const deleted = await store.remove(store.pool, 'leads', req.dealershipId, req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Lead not found' });
   res.status(204).send();
-});
+}));
+
+// Adds an entry to the top of a lead's communication log. Returns false
+// if the lead doesn't exist.
+async function addLeadActivity(dealershipId, leadId, activity) {
+  return store.tx(async q => {
+    const lead = await store.get(q, 'leads', dealershipId, leadId, { forUpdate: true });
+    if (!lead) return false;
+    lead.activities = [activity, ...(lead.activities || [])]; // newest first
+    await store.save(q, 'leads', dealershipId, lead.id, lead);
+    return true;
+  });
+}
 
 // ---------- Lead activity log (calls, texts, emails, notes) ----------
 
-app.post('/api/leads/:id/activities', (req, res) => {
-  const db = readDB();
-  const lead = db.leads.find(l => l.id === req.params.id);
-  if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
+app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   const { type, text } = req.body;
   if (!text) return res.status(400).json({ error: 'text is required' });
 
-  if (!lead.activities) lead.activities = [];
   const activity = {
     id: crypto.randomUUID(),
     type: type || 'note', // call | text | email | note
     text,
     date: new Date().toISOString()
   };
-  lead.activities.unshift(activity); // newest first
-  writeDB(db);
+  const found = await addLeadActivity(req.dealershipId, req.params.id, activity);
+  if (!found) return res.status(404).json({ error: 'Lead not found' });
   res.status(201).json(activity);
-});
+}));
 
-app.delete('/api/leads/:id/activities/:activityId', (req, res) => {
-  const db = readDB();
-  const lead = db.leads.find(l => l.id === req.params.id);
-  if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-  lead.activities = (lead.activities || []).filter(a => a.id !== req.params.activityId);
-  writeDB(db);
+app.delete('/api/leads/:id/activities/:activityId', wrap(async (req, res) => {
+  const found = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return false;
+    lead.activities = (lead.activities || []).filter(a => a.id !== req.params.activityId);
+    await store.save(q, 'leads', req.dealershipId, lead.id, lead);
+    return true;
+  });
+  if (!found) return res.status(404).json({ error: 'Lead not found' });
   res.status(204).send();
-});
+}));
 
 // ---------- Real SMS sending (Twilio) ----------
 //
@@ -523,15 +511,14 @@ app.delete('/api/leads/:id/activities/:activityId', (req, res) => {
 // real message, so it needs its own explicit action rather than being
 // folded into the general activity log form.
 
-app.post('/api/leads/:id/send-text', async (req, res) => {
+app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
   if (!twilioClient) {
     return res.status(500).json({
       error: 'SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your .env file to enable this feature.'
     });
   }
 
-  const db = readDB();
-  const lead = db.leads.find(l => l.id === req.params.id);
+  const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
 
@@ -557,7 +544,6 @@ app.post('/api/leads/:id/send-text', async (req, res) => {
 
     // Log it in the activity feed automatically so the send is part of
     // the same history as manually-logged calls/texts/notes.
-    if (!lead.activities) lead.activities = [];
     const logText = photoPath
       ? `${text ? text + ' ' : ''}[photo attached] (sent via ${text ? 'MMS' : 'MMS, no caption'})`
       : `${text} (sent via SMS)`;
@@ -567,8 +553,7 @@ app.post('/api/leads/:id/send-text', async (req, res) => {
       text: logText,
       date: new Date().toISOString()
     };
-    lead.activities.unshift(activity);
-    writeDB(db);
+    await addLeadActivity(req.dealershipId, lead.id, activity);
 
     res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
   } catch (err) {
@@ -577,7 +562,7 @@ app.post('/api/leads/:id/send-text', async (req, res) => {
     // pass the real message through so it's actionable, not just "failed".
     res.status(500).json({ error: err.message });
   }
-});
+}));
 
 // ---------- DEALS (Deal Calculator + Proposals) ----------
 //
@@ -725,13 +710,13 @@ function calculateArizonaFees(price) {
 // Single entry point: given a state, ZIP, price, and vehicle year, returns
 // the calculated tax rate and DMV-style fees. Anything other than CA/AZ
 // uses California's numbers as the documented fallback.
-function calculateStateFees(db, state, zip, price, vehicleYear, county, city) {
+function calculateStateFees(taxRates, state, zip, price, vehicleYear, county, city) {
   const normalizedState = (state || '').trim().toUpperCase();
 
   if (normalizedState === 'AZ') {
     const resolvedCounty = county || lookupCounty(zip, AZ_COUNTY_BY_ZIP_PREFIX);
     const fees = calculateArizonaFees(price);
-    const rateMatch = findBestTaxRateMatch(db, 'AZ', resolvedCounty, city);
+    const rateMatch = findBestTaxRateMatch(taxRates, 'AZ', resolvedCounty, city);
     fees.county = resolvedCounty;
     fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : AZ_STATEWIDE_BASE_RATE;
     fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
@@ -743,7 +728,7 @@ function calculateStateFees(db, state, zip, price, vehicleYear, county, city) {
   // CA, or any other/unrecognized state -- California is the documented fallback.
   const resolvedCounty = county || lookupCounty(zip, CA_COUNTY_BY_ZIP_PREFIX);
   const fees = calculateCaliforniaFees(price);
-  const rateMatch = findBestTaxRateMatch(db, 'CA', resolvedCounty, city);
+  const rateMatch = findBestTaxRateMatch(taxRates, 'CA', resolvedCounty, city);
   fees.county = resolvedCounty;
   fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : CA_STATEWIDE_BASE_RATE;
   fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
@@ -752,14 +737,14 @@ function calculateStateFees(db, state, zip, price, vehicleYear, county, city) {
   return fees;
 }
 
-app.post('/api/fees/calculate', (req, res) => {
+app.post('/api/fees/calculate', wrap(async (req, res) => {
   const { state, zip, price, vehicleYear, county, city } = req.body;
   if (!price) return res.status(400).json({ error: 'price is required' });
 
-  const db = readDB();
-  const result = calculateStateFees(db, state, zip, Number(price), vehicleYear, county, city);
+  const taxRates = await store.list(store.pool, 'tax_rates', req.dealershipId);
+  const result = calculateStateFees(taxRates, state, zip, Number(price), vehicleYear, county, city);
   res.json(result);
-});
+}));
 
 function calculateRetailDeal(input) {
   const vehiclePrice = Number(input.vehiclePrice) || 0;
@@ -1077,51 +1062,46 @@ function defaultCreditApp() {
   };
 }
 
-app.get('/api/deals', (req, res) => {
-  const db = readDB();
-  res.json(db.deals || []);
-});
+app.get('/api/deals', wrap(async (req, res) => {
+  res.json(await store.list(store.pool, 'deals', req.dealershipId));
+}));
 
-app.get('/api/deals/:id', (req, res) => {
-  const db = readDB();
-  const deal = (db.deals || []).find(d => d.id === req.params.id);
+app.get('/api/deals/:id', wrap(async (req, res) => {
+  const deal = await store.get(store.pool, 'deals', req.dealershipId, req.params.id);
   if (!deal) return res.status(404).json({ error: 'Deal not found' });
   res.json(deal);
-});
+}));
 
 // POST a new deal: just needs a lead + car to start. This generates the
 // deal number and creates a "working" deal with the vehicle price
 // pre-filled and everything else at sensible defaults -- the sales rep
 // fills in the rest in the desking tool.
-app.post('/api/deals', (req, res) => {
-  const db = readDB();
-  if (!db.deals) db.deals = [];
-  if (!db.nextDealNumber) db.nextDealNumber = 1001;
-
+app.post('/api/deals', wrap(async (req, res) => {
   // Customer and vehicle are both optional at creation -- a deal number
   // can be opened before either is known and filled in later from the
   // Desking tab, matching how a desk sometimes starts a deal before all
   // the paperwork is in hand.
   const { leadId, carId } = req.body;
 
-  const car = carId ? db.cars.find(c => c.id === carId) : null;
-  const fees = db.settings || defaultFeeSettings();
-  const calculated = calculateDeal({
-    vehiclePrice: req.body.vehiclePrice || (car ? car.price : 0),
-    taxRate: req.body.taxRate ?? fees.taxRate,
-    docFee: req.body.docFee ?? fees.docFee,
-    titleFee: req.body.titleFee ?? fees.titleFee,
-    registrationFee: req.body.registrationFee ?? fees.registrationFee,
-    licenseFee: req.body.licenseFee ?? fees.licenseFee,
-    dealerFees: req.body.dealerFees ?? fees.dealerFees,
-    acquisitionFee: req.body.acquisitionFee ?? fees.acquisitionFee,
-    apr: req.body.apr ?? 6.5,
-    termMonths: req.body.termMonths ?? 60
+  const newDeal = await store.tx(async q => {
+    const car = carId ? await store.get(q, 'cars', req.dealershipId, carId) : null;
+    const fees = await getSettings(q, req.dealershipId);
+    const calculated = calculateDeal({
+      vehiclePrice: req.body.vehiclePrice || (car ? car.price : 0),
+      taxRate: req.body.taxRate ?? fees.taxRate,
+      docFee: req.body.docFee ?? fees.docFee,
+      titleFee: req.body.titleFee ?? fees.titleFee,
+      registrationFee: req.body.registrationFee ?? fees.registrationFee,
+      licenseFee: req.body.licenseFee ?? fees.licenseFee,
+      dealerFees: req.body.dealerFees ?? fees.dealerFees,
+      acquisitionFee: req.body.acquisitionFee ?? fees.acquisitionFee,
+      apr: req.body.apr ?? 6.5,
+      termMonths: req.body.termMonths ?? 60
   });
 
-  const newDeal = {
+  const deal = {
     id: crypto.randomUUID(),
-    dealNumber: db.nextDealNumber,
+    dealNumber: await store.takeNextDealNumber(q, req.dealershipId),
     leadId: leadId || null,
     carId: carId || null,
     status: 'working', // working | delivered | closed | finalized
@@ -1131,12 +1111,12 @@ app.post('/api/deals', (req, res) => {
     dateCreated: new Date().toISOString()
   };
 
-  db.nextDealNumber += 1;
-  db.deals.push(newDeal);
-  syncCarStatusToDeal(db, newDeal);
-  writeDB(db);
+  await store.insert(q, 'deals', req.dealershipId, deal);
+  await syncCarStatusToDeal(q, req.dealershipId, deal);
+  return deal;
+  });
   res.status(201).json(newDeal);
-});
+}));
 
 // PUT (update/recalculate) an existing deal's desking numbers or status.
 // Credit app fields are preserved automatically since they're not part
@@ -1147,9 +1127,9 @@ app.post('/api/deals', (req, res) => {
 // places by hand. Working a deal on a car takes it off the available
 // list; delivering/closing/finalizing it marks the car sold. Shared by
 // both deal creation and deal updates so the rule only lives in one place.
-function syncCarStatusToDeal(db, deal) {
+async function syncCarStatusToDeal(q, dealershipId, deal) {
   if (!deal.carId) return;
-  const car = db.cars.find(c => c.id === deal.carId);
+  const car = await store.get(q, 'cars', dealershipId, deal.carId, { forUpdate: true });
   if (!car) return;
 
   if (['delivered', 'closed', 'finalized'].includes(deal.status) && car.status !== 'sold') {
@@ -1157,36 +1137,35 @@ function syncCarStatusToDeal(db, deal) {
     car.dateSold = car.dateSold || new Date().toISOString();
   } else if (deal.status === 'working' && car.status === 'available') {
     car.status = 'pending';
+  } else {
+    return;
   }
+  await store.save(q, 'cars', dealershipId, car.id, car);
 }
 
-app.put('/api/deals/:id', (req, res) => {
-  const db = readDB();
-  if (!db.deals) db.deals = [];
-  const idx = db.deals.findIndex(d => d.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Deal not found' });
+app.put('/api/deals/:id', wrap(async (req, res) => {
+  const updated = await store.tx(async q => {
+    const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!deal) return null;
 
-  const merged = { ...db.deals[idx], ...req.body };
-  const calculated = calculateDeal(merged);
+    // The deal number is assigned once at creation and never edited.
+    const merged = { ...deal, ...req.body, dealNumber: deal.dealNumber };
+    const calculated = calculateDeal(merged);
 
-  db.deals[idx] = { ...merged, ...calculated };
-  syncCarStatusToDeal(db, db.deals[idx]);
-
-  writeDB(db);
-  res.json(db.deals[idx]);
-});
+    const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });
+    await syncCarStatusToDeal(q, req.dealershipId, saved);
+    return saved;
+  });
+  if (!updated) return res.status(404).json({ error: 'Deal not found' });
+  res.json(updated);
+}));
 
 // PUT the credit application section of a deal. The frontend sends the
 // whole creditApp object each time (it's really one form), so this
 // merges it over the defaults rather than doing a shallow patch --
 // that way any field the frontend didn't know about yet still gets a
 // safe default instead of `undefined`.
-app.put('/api/deals/:id/credit-app', (req, res) => {
-  const db = readDB();
-  if (!db.deals) db.deals = [];
-  const idx = db.deals.findIndex(d => d.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Deal not found' });
-
+app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
   const body = req.body || {};
   const defaults = defaultCreditApp();
 
@@ -1205,35 +1184,35 @@ app.put('/api/deals/:id/credit-app', (req, res) => {
     coApplicant: mergeApplicant(body.coApplicant)
   };
 
-  // Stamp the submission date the first time status moves off "not_submitted"
-  const existing = db.deals[idx].creditApp || defaults;
-  if (updatedCreditApp.status !== 'not_submitted' && !existing.dateSubmitted) {
-    updatedCreditApp.dateSubmitted = new Date().toISOString();
-  } else {
-    updatedCreditApp.dateSubmitted = existing.dateSubmitted || null;
-  }
+  const updated = await store.tx(async q => {
+    const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!deal) return null;
 
-  db.deals[idx].creditApp = updatedCreditApp;
-  writeDB(db);
-  res.json(db.deals[idx]);
-});
+    // Stamp the submission date the first time status moves off "not_submitted"
+    const existing = deal.creditApp || defaults;
+    if (updatedCreditApp.status !== 'not_submitted' && !existing.dateSubmitted) {
+      updatedCreditApp.dateSubmitted = new Date().toISOString();
+    } else {
+      updatedCreditApp.dateSubmitted = existing.dateSubmitted || null;
+    }
 
-app.delete('/api/deals/:id', (req, res) => {
-  const db = readDB();
-  if (!db.deals) db.deals = [];
-  const idx = db.deals.findIndex(d => d.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Deal not found' });
+    return store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, creditApp: updatedCreditApp });
+  });
+  if (!updated) return res.status(404).json({ error: 'Deal not found' });
+  res.json(updated);
+}));
 
-  db.deals.splice(idx, 1);
-  writeDB(db);
+app.delete('/api/deals/:id', wrap(async (req, res) => {
+  const deleted = await store.remove(store.pool, 'deals', req.dealershipId, req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Deal not found' });
   res.status(204).send();
-});
+}));
 
 // ---------- DASHBOARD STATS ----------
 
-app.get('/api/stats', (req, res) => {
-  const db = readDB();
-  const { cars, leads } = db;
+app.get('/api/stats', wrap(async (req, res) => {
+  const cars = await store.list(store.pool, 'cars', req.dealershipId);
+  const leads = await store.list(store.pool, 'leads', req.dealershipId);
 
   const available = cars.filter(c => c.status === 'available');
   const sold = cars.filter(c => c.status === 'sold');
@@ -1268,7 +1247,7 @@ app.get('/api/stats', (req, res) => {
     totalLeads: leads.length,
     conversionRate
   });
-});
+}));
 
 // ---------- AI Assistant ----------
 //
@@ -1346,20 +1325,22 @@ function redactDeal(deal) {
 // question. The dataset here is small enough to send in full each time --
 // at real dealership scale you'd summarize or paginate this instead of
 // dumping every record into the prompt.
-function buildDataContext() {
-  const db = readDB();
+async function buildDataContext(dealershipId) {
+  const cars = await store.list(store.pool, 'cars', dealershipId);
+  const leads = await store.list(store.pool, 'leads', dealershipId);
+  const deals = await store.list(store.pool, 'deals', dealershipId);
   const today = new Date().toISOString().split('T')[0];
 
-  const safeDeals = (db.deals || []).map(redactDeal);
+  const safeDeals = deals.map(redactDeal);
 
   return `
 Today's date is ${today}.
 
 CARS (inventory):
-${JSON.stringify(db.cars, null, 2)}
+${JSON.stringify(cars, null, 2)}
 
 LEADS (customers/prospects):
-${JSON.stringify(db.leads, null, 2)}
+${JSON.stringify(leads, null, 2)}
 
 DEALS (SSNs redacted):
 ${JSON.stringify(safeDeals, null, 2)}
@@ -1377,7 +1358,7 @@ If asked to "create a report," format your answer clearly with headings/bullet p
 If the data doesn't contain what's needed to answer, say so plainly instead of guessing.
 Keep answers concise and business-relevant -- this is being used by a salesperson or manager, not a developer.
 
-${buildDataContext()}`;
+${await buildDataContext(req.dealershipId)}`;
 
     const answer = await callAI(systemInstruction, history || [], question);
     res.json({ answer });
@@ -1389,12 +1370,12 @@ ${buildDataContext()}`;
 app.post('/api/ai/suggest-reply', async (req, res) => {
   try {
     const { leadId } = req.body;
-    const db = readDB();
-    const lead = db.leads.find(l => l.id === leadId);
+    const lead = leadId ? await store.get(store.pool, 'leads', req.dealershipId, leadId) : null;
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const car = db.cars.find(c => c.id === lead.carId);
-    const relatedDeals = (db.deals || []).filter(d => d.leadId === leadId).map(redactDeal);
+    const car = lead.carId ? await store.get(store.pool, 'cars', req.dealershipId, lead.carId) : null;
+    const deals = await store.list(store.pool, 'deals', req.dealershipId);
+    const relatedDeals = deals.filter(d => d.leadId === leadId).map(redactDeal);
 
     const systemInstruction = `You are a sales assistant at a used-car dealership, helping a salesperson draft a
 reply or follow-up message to a specific customer. Write ONE short, professional, friendly message
@@ -1421,12 +1402,12 @@ RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
 app.post('/api/ai/lead-snapshot', async (req, res) => {
   try {
     const { leadId } = req.body;
-    const db = readDB();
-    const lead = db.leads.find(l => l.id === leadId);
+    const lead = leadId ? await store.get(store.pool, 'leads', req.dealershipId, leadId) : null;
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const car = db.cars.find(c => c.id === lead.carId);
-    const relatedDeals = (db.deals || []).filter(d => d.leadId === leadId).map(redactDeal);
+    const car = lead.carId ? await store.get(store.pool, 'cars', req.dealershipId, lead.carId) : null;
+    const deals = await store.list(store.pool, 'deals', req.dealershipId);
+    const relatedDeals = deals.filter(d => d.leadId === leadId).map(redactDeal);
     const today = new Date().toISOString().split('T')[0];
 
     const systemInstruction = `You are a sales assistant at a used-car dealership. Summarize this customer's
@@ -1447,6 +1428,109 @@ RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Car CRM server running at http://localhost:${PORT}`);
+// Any error thrown by a route ends up here as a JSON response, matching
+// the { error } shape every route already uses.
+app.use((err, req, res, next) => {
+  console.error(err);
+  if (res.headersSent) return next(err);
+  const status = err instanceof multer.MulterError ? 400 : 500;
+  res.status(status).json({ error: err.message || 'Something went wrong.' });
 });
+
+// ---------- Startup ----------
+
+// Makes sure there is a dealership to act for, and that it has current
+// tax rate reference data. On the very first run against an empty
+// database, carries over whatever was in the old data/db.json file.
+async function bootstrap() {
+  await store.migrate();
+
+  await store.tx(async q => {
+    // Serializes startup across instances so two servers booting at once
+    // can't both create a default dealership or both import the JSON file.
+    await q.query('SELECT pg_advisory_xact_lock(727002)');
+
+    let { rows } = await q.query('SELECT id FROM dealerships ORDER BY created_at LIMIT 1');
+    if (rows.length === 0) {
+      ({ rows } = await q.query(
+        'INSERT INTO dealerships (name, settings) VALUES ($1, $2) RETURNING id',
+        ['My Dealership', defaultFeeSettings()]
+      ));
+      console.log('Created default dealership');
+    }
+    defaultDealershipId = rows[0].id;
+
+    await importLegacyJson(q, defaultDealershipId);
+
+    const dealership = await store.getDealership(q, defaultDealershipId);
+    if (dealership.tax_rates_version !== TAX_RATES_SEED_VERSION) {
+      await q.query('DELETE FROM tax_rates WHERE dealership_id = $1', [defaultDealershipId]);
+      for (const rate of seedTaxRates()) {
+        await store.insert(q, 'tax_rates', defaultDealershipId, rate);
+      }
+      await q.query('UPDATE dealerships SET tax_rates_version = $2 WHERE id = $1',
+        [defaultDealershipId, TAX_RATES_SEED_VERSION]);
+    }
+  });
+}
+
+// One-time carry-over from the old JSON file into Postgres. Only runs if
+// this dealership has never imported and has no records yet, so it can
+// never duplicate or overwrite data that's already in the database.
+async function importLegacyJson(q, dealershipId) {
+  const dealership = await store.getDealership(q, dealershipId);
+  if (dealership.imported_from_json_at) return;
+
+  const markDone = () => q.query(
+    'UPDATE dealerships SET imported_from_json_at = now() WHERE id = $1', [dealershipId]);
+
+  const { rows } = await q.query(
+    `SELECT (SELECT count(*) FROM cars WHERE dealership_id = $1)
+          + (SELECT count(*) FROM leads WHERE dealership_id = $1)
+          + (SELECT count(*) FROM deals WHERE dealership_id = $1) AS n`,
+    [dealershipId]
+  );
+  if (Number(rows[0].n) > 0 || !fs.existsSync(LEGACY_JSON_PATH)) return markDone();
+
+  const legacy = JSON.parse(fs.readFileSync(LEGACY_JSON_PATH, 'utf-8'));
+  for (const car of legacy.cars || []) await store.insert(q, 'cars', dealershipId, car);
+  for (const lead of legacy.leads || []) await store.insert(q, 'leads', dealershipId, lead);
+  for (const deal of legacy.deals || []) await store.insert(q, 'deals', dealershipId, deal);
+
+  // Keep the admin's tax table only if it's already on the current seed
+  // version; otherwise bootstrap() re-seeds it right after this.
+  if (legacy.taxRatesVersion === TAX_RATES_SEED_VERSION && Array.isArray(legacy.taxRates)) {
+    for (const rate of legacy.taxRates) await store.insert(q, 'tax_rates', dealershipId, rate);
+    await q.query('UPDATE dealerships SET tax_rates_version = $2 WHERE id = $1',
+      [dealershipId, TAX_RATES_SEED_VERSION]);
+  }
+
+  const maxDealNumber = Math.max(1000, ...(legacy.deals || []).map(d => Number(d.dealNumber) || 0));
+  await q.query(
+    'UPDATE dealerships SET settings = $2, next_deal_number = $3 WHERE id = $1',
+    [
+      dealershipId,
+      { ...defaultFeeSettings(), ...(legacy.settings || {}) },
+      Math.max(Number(legacy.nextDealNumber) || 1001, maxDealNumber + 1)
+    ]
+  );
+  await markDone();
+  console.log(`Imported ${(legacy.cars || []).length} cars, ${(legacy.leads || []).length} leads, ` +
+    `and ${(legacy.deals || []).length} deals from data/db.json`);
+}
+
+// Tests import the app without starting a listener.
+if (require.main === module) {
+  bootstrap()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Car CRM server running at http://localhost:${PORT}`);
+      });
+    })
+    .catch(err => {
+      console.error('Failed to start:', err);
+      process.exit(1);
+    });
+}
+
+module.exports = { app, bootstrap };
