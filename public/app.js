@@ -4,6 +4,45 @@
 // Plain JS + fetch on purpose -- no framework needed for a project this size.
 
 const API = '/api';
+
+// ---------- Signed-in user ----------
+// Every API call goes through fetch, so this one wrapper handles the two
+// login-related responses everywhere: a 401 (signed out, or the session
+// expired) goes back to the sign-in page, and a 403 (this role isn't
+// allowed to do that) shows the server's explanation.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const res = await nativeFetch(...args);
+  if (res.status === 401) {
+    window.location.href = '/login.html';
+  } else if (res.status === 403) {
+    res.clone().json()
+      .then(body => alert(body.error || "You don't have permission to do that."))
+      .catch(() => alert("You don't have permission to do that."));
+  }
+  return res;
+};
+
+let currentUser = null;
+
+function userCan(permission) {
+  return !!currentUser && currentUser.permissions.includes(permission);
+}
+
+// Hides buttons for things this user's role can't do. The server enforces
+// the same rules regardless -- this just avoids offering dead ends.
+function applyPermissionsToUI() {
+  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers']) {
+    document.body.classList.toggle(`cannot-${permission}`, !userCan(permission));
+  }
+  document.getElementById('currentUserName').textContent = currentUser.name;
+  document.getElementById('adminMenuBtn').style.display =
+    (userCan('editSettings') || userCan('manageUsers')) ? '' : 'none';
+  document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
+  document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
+  document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
+}
+
 let cars = [];
 let appSettings = {};
 let leads = [];
@@ -2109,6 +2148,161 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
   feeDefaultsModal.classList.remove('active');
 });
 
+// ---------- Users & Roles (admins) ----------
+
+const usersModal = document.getElementById('usersModal');
+const ROLE_OPTIONS = [
+  ['salesperson', 'Salesperson'],
+  ['finance', 'F&I Manager'],
+  ['sales_manager', 'Sales Manager'],
+  ['admin', 'Admin']
+];
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
+async function loadAndRenderUsers() {
+  const res = await fetch(`${API}/users`);
+  if (!res.ok) return;
+  const users = await res.json();
+  document.getElementById('usersTableBody').innerHTML = users.map(u => {
+    const isMe = u.id === currentUser.id;
+    const roleSelect = `
+      <select class="user-role-select" onchange="changeUserRole('${u.id}', this)" ${isMe ? 'disabled title="You can\'t change your own role"' : ''}>
+        ${ROLE_OPTIONS.map(([value, label]) =>
+          `<option value="${value}" ${u.role === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>`;
+    return `
+      <tr class="${u.active ? '' : 'user-inactive'}">
+        <td>${escapeHtml(u.name)}${isMe ? ' (you)' : ''}</td>
+        <td>${escapeHtml(u.email)}</td>
+        <td>${roleSelect}</td>
+        <td>${u.active ? 'Active' : 'Deactivated'}</td>
+        <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}</td>
+        <td class="row-actions">
+          <button onclick="resetUserPassword('${u.id}')">Reset Password</button>
+          ${isMe ? '' : `<button class="${u.active ? 'delete' : ''}" onclick="setUserActive('${u.id}', ${!u.active})">${u.active ? 'Deactivate' : 'Reactivate'}</button>`}
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function updateUser(id, changes) {
+  const res = await fetch(`${API}/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes)
+  });
+  if (!res.ok && res.status !== 403) {
+    const body = await res.json().catch(() => ({}));
+    alert(body.error || 'Could not update this user.');
+  }
+  await loadAndRenderUsers();
+  return res.ok;
+}
+
+window.changeUserRole = function(id, select) {
+  updateUser(id, { role: select.value });
+};
+
+window.setUserActive = function(id, active) {
+  if (!active && !confirm('Deactivate this user? They will be signed out and unable to sign in until reactivated.')) return;
+  updateUser(id, { active });
+};
+
+window.resetUserPassword = async function(id) {
+  const password = prompt('New temporary password for this user (at least 8 characters). They will be signed out everywhere.');
+  if (password === null) return;
+  if (await updateUser(id, { password })) alert('Password reset. Give them the new password in person.');
+};
+
+document.getElementById('adminUsersBtn').addEventListener('click', async () => {
+  await loadAndRenderUsers();
+  adminMenuModal.classList.remove('active');
+  usersModal.classList.add('active');
+});
+
+document.getElementById('closeUsersBtn').addEventListener('click', () => {
+  usersModal.classList.remove('active');
+});
+
+document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const res = await fetch(`${API}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: document.getElementById('newUserName').value,
+      email: document.getElementById('newUserEmail').value,
+      role: document.getElementById('newUserRole').value,
+      password: document.getElementById('newUserPassword').value
+    })
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (res.status !== 403) alert(body.error || 'Could not add this user.');
+    return;
+  }
+  document.getElementById('addUserForm').reset();
+  await loadAndRenderUsers();
+});
+
+// ---------- My Account / Sign Out ----------
+
+const accountModal = document.getElementById('accountModal');
+
+document.getElementById('userMenuBtn').addEventListener('click', () => {
+  document.getElementById('accountSummary').textContent =
+    `${currentUser.name} · ${currentUser.email} · ${currentUser.roleLabel}`;
+  accountModal.classList.add('active');
+});
+
+document.getElementById('closeAccountBtn').addEventListener('click', () => {
+  document.getElementById('changePasswordForm').reset();
+  accountModal.classList.remove('active');
+});
+
+document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const newPassword = document.getElementById('newPassword').value;
+  if (newPassword !== document.getElementById('confirmPassword').value) {
+    alert("The new passwords don't match.");
+    return;
+  }
+  const res = await fetch(`${API}/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      currentPassword: document.getElementById('currentPassword').value,
+      newPassword
+    })
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    alert(body.error || 'Could not change your password.');
+    return;
+  }
+  document.getElementById('changePasswordForm').reset();
+  accountModal.classList.remove('active');
+  alert('Password changed. Any other devices you were signed in on have been signed out.');
+});
+
+document.getElementById('signOutBtn').addEventListener('click', async () => {
+  await fetch(`${API}/auth/logout`, { method: 'POST' });
+  window.location.href = '/login.html';
+});
+
 // ---------- Init ----------
 
-loadAll();
+async function init() {
+  const res = await fetch(`${API}/auth/me`);
+  if (!res.ok) return; // the fetch wrapper is already sending them to sign in
+  currentUser = await res.json();
+  applyPermissionsToUI();
+  loadAll();
+}
+
+init();

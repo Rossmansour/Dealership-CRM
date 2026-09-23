@@ -47,7 +47,9 @@
     <button class="tab-btn" data-tab="deals" data-module="sales-fi">Deals</button>
     <button class="tab-btn" data-tab="service" data-module="service">Service</button>
     <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
-    <button id="adminMenuBtn" type="button">⚙️ Admin</button>
+    <button id="adminMenuBtn" type="button" style="display:none;">⚙️ Admin</button>
+    <button id="userMenuBtn" type="button" title="My account">👤 <span id="currentUserName"></span></button>
+    <button id="signOutBtn" type="button">Sign Out</button>
   </nav>
 </header>
 
@@ -554,9 +556,10 @@
   <div class="modal-content">
     <h2>Admin</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
-      Configuration for how deals calculate -- not part of the day-to-day sales workflow. Role-based access (so only admins can reach this) is planned but not enforced yet.
+      Store configuration and staff accounts -- not part of the day-to-day sales workflow. Only admins can open this.
     </p>
     <div class="admin-menu-list">
+      <button type="button" class="btn-secondary admin-menu-item" id="adminUsersBtn">👤 Users &amp; Roles</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
     </div>
@@ -566,12 +569,68 @@
   </div>
 </div>
 
+<!-- Users & Roles Modal (admins only) -->
+<div class="modal" id="usersModal">
+  <div class="modal-content modal-wide">
+    <h2>Users &amp; Roles</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      <strong>Admin:</strong> everything, including users and settings.
+      <strong>Sales Manager:</strong> everything except users and settings.
+      <strong>Salesperson</strong> and <strong>F&amp;I Manager:</strong> leads, deals, and credit apps; can't change inventory or delete records.
+    </p>
+    <table class="data-table">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Sign-In</th><th></th></tr>
+      </thead>
+      <tbody id="usersTableBody"></tbody>
+    </table>
+
+    <div class="ca-section-title">Add a User</div>
+    <form id="addUserForm">
+      <label>Name <input type="text" id="newUserName" required /></label>
+      <label>Email <input type="email" id="newUserEmail" required /></label>
+      <label>Role
+        <select id="newUserRole">
+          <option value="salesperson">Salesperson</option>
+          <option value="finance">F&amp;I Manager</option>
+          <option value="sales_manager">Sales Manager</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+      <label>Temporary Password <input type="text" id="newUserPassword" minlength="8" required autocomplete="off" /></label>
+      <p class="send-text-hint">Give them this password in person; they can change it from 👤 at the top once signed in.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="closeUsersBtn">Close</button>
+        <button type="submit" class="btn-primary">Add User</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- My Account Modal -->
+<div class="modal" id="accountModal">
+  <div class="modal-content">
+    <h2>My Account</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;" id="accountSummary"></p>
+    <form id="changePasswordForm">
+      <div class="ca-section-title">Change Password</div>
+      <label>Current Password <input type="password" id="currentPassword" autocomplete="current-password" required /></label>
+      <label>New Password <input type="password" id="newPassword" autocomplete="new-password" minlength="8" required /></label>
+      <label>Confirm New Password <input type="password" id="confirmPassword" autocomplete="new-password" minlength="8" required /></label>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="closeAccountBtn">Close</button>
+        <button type="submit" class="btn-primary">Change Password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Fee Defaults Settings Modal -->
 <div class="modal" id="feeDefaultsModal">
   <div class="modal-content">
     <h2>Fee Defaults</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
-      These auto-fill on every new deal, so nobody has to re-type them every time. (Admin-only editing is planned but not enforced yet -- anyone can change these for now.)
+      These auto-fill on every new deal, so nobody has to re-type them every time. Only admins can change them.
     </p>
     <form id="feeDefaultsForm">
       <label>Doc Fee <input type="number" id="settingsDocFee" /></label>

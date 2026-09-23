@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign In - Dealership CRM</title>
+<link rel="stylesheet" href="style.css" />
+<script>
+  if (localStorage.getItem('theme') === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
+</script>
+<style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; }
+  .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; width: 100%; max-width: 380px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
+  .login-card h1 { margin: 0 0 4px; font-size: 22px; color: var(--heading); }
+  .login-card .subtitle { margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; }
+  .login-card label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; }
+  .login-card input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 15px; }
+  .login-card button { width: 100%; margin: 8px 0 0; padding: 11px; font-size: 15px; }
+  .login-error { display: none; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+  .login-hint { font-size: 12px; color: var(--text-muted); margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<div class="login-card">
+  <h1>🚗 Dealership CRM</h1>
+  <p class="subtitle" id="loginSubtitle">Sign in to continue</p>
+
+  <div class="login-error" id="loginError"></div>
+
+  <form id="loginForm">
+    <label id="nameField" style="display:none;">Your name
+      <input type="text" id="loginName" autocomplete="name" />
+    </label>
+    <label>Email
+      <input type="email" id="loginEmail" autocomplete="username" required />
+    </label>
+    <label>Password
+      <input type="password" id="loginPassword" autocomplete="current-password" required />
+    </label>
+    <button type="submit" class="btn-primary" id="loginSubmit">Sign In</button>
+  </form>
+
+  <p class="login-hint" id="loginHint">Forgot your password? Ask your dealership's admin to reset it.</p>
+</div>
+
+<script>
+  const setupToken = new URLSearchParams(location.search).get('setup');
+  const errorBox = document.getElementById('loginError');
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.style.display = 'block';
+  }
+
+  // With a setup link, this page creates the very first admin account
+  // instead of signing in.
+  if (setupToken) {
+    document.getElementById('loginSubtitle').textContent = 'Create the first admin account';
+    document.getElementById('nameField').style.display = 'block';
+    document.getElementById('loginName').required = true;
+    document.getElementById('loginPassword').autocomplete = 'new-password';
+    document.getElementById('loginPassword').minLength = 8;
+    document.getElementById('loginSubmit').textContent = 'Create Admin Account';
+    document.getElementById('loginHint').textContent = 'Use at least 8 characters for the password. You can add everyone else from Admin → Users afterwards.';
+  } else {
+    fetch('/api/auth/setup-status').then(r => r.json()).then(s => {
+      if (s.needsSetup) {
+        showError('No accounts exist yet. Open the setup link from the server logs to create the first admin account.');
+      }
+    }).catch(() => {});
+  }
+
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.style.display = 'none';
+    const submit = document.getElementById('loginSubmit');
+    submit.disabled = true;
+
+    const body = {
+      email: document.getElementById('loginEmail').value,
+      password: document.getElementById('loginPassword').value
+    };
+    if (setupToken) {
+      body.token = setupToken;
+      body.name = document.getElementById('loginName').value;
+    }
+
+    try {
+      const res = await fetch(setupToken ? '/api/auth/setup' : '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        location.href = '/';
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      showError(data.error || 'Something went wrong. Please try again.');
+    } catch (err) {
+      showError('Could not reach the server. Check your connection and try again.');
+    }
+    submit.disabled = false;
+  });
+</script>
+</body>
+</html>

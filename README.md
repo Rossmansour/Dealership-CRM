@@ -177,6 +177,33 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 - **Storage:** PostgreSQL (`db.js`). Every record belongs to a dealership, so one install can serve multiple stores.
 - **Frontend:** Vanilla HTML/CSS/JavaScript, no framework
 
+## Users, roles, and signing in
+
+Everyone signs in with their own email and password. Every page and every piece of data requires being signed in, and each user only ever sees their own dealership's data.
+
+| Role | Can do |
+|---|---|
+| **Admin** | Everything, including managing users, fee defaults, and tax rates |
+| **Sales Manager** | Everything except users and settings: inventory, deletes, all leads and deals |
+| **Salesperson** | Leads, deals, and credit apps; can't change inventory or delete records |
+| **F&I Manager** | Same as Salesperson for now (F&I-specific access comes later) |
+
+Who can do what lives in one table, `PERMISSIONS` in `auth.js`.
+
+**Creating the first admin account:** a new install has no users. On startup the server writes a one-time setup link to its logs (on Render: your web service → **Logs**):
+```
+No user accounts exist yet. To create the first admin account, open:
+  https://your-app.onrender.com/login.html?setup=...
+```
+Open it, enter your name, email, and a password (8+ characters), and you're signed in as the admin. Add everyone else from **⚙️ Admin → Users & Roles**. The link only works once; until an admin exists, each restart prints a new one.
+
+**Day to day:**
+- Staff change their own password from the 👤 button at the top.
+- Forgotten passwords: an admin uses **Reset Password** in Users & Roles.
+- When someone leaves, **Deactivate** them. They're signed out immediately and can't sign back in; their history stays.
+- Sign-ins last 12 hours. 10 wrong passwords in a row for an account locks it for 15 minutes.
+- Passwords are stored hashed (scrypt) and can't be read back by anyone, including admins.
+
 ## Setting up the AI features
 
 The AI Assistant and Suggested Reply button need a free Google Gemini API key to work (everything else in the app works fine without one).
@@ -246,7 +273,6 @@ TEST_DATABASE_URL=postgres://user:password@localhost:5432/dealership_crm_test np
 - State-specific tax rule presets, since tax treatment of trade-ins and rebates varies by state
 - Photo uploads per vehicle
 - Email/SMS reminders for leads that have gone quiet
-- Multi-user support with basic auth (for a shop with more than one salesperson)
 - CSV export for tax/accounting purposes
 
 ## Project structure
@@ -255,11 +281,13 @@ TEST_DATABASE_URL=postgres://user:password@localhost:5432/dealership_crm_test np
 car-crm/
 ├── server.js          # Express API (cars, leads, deals, credit apps, AI endpoints)
 ├── db.js              # Postgres connection, migrations, and record storage
+├── auth.js            # Sign-in, sessions, roles/permissions, user management
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)
 ├── public/
 │   ├── index.html       # App shell + modals
+│   ├── login.html       # Sign-in page (also creates the first admin)
 │   ├── style.css        # Styling
 │   └── app.js            # Frontend logic (fetch calls, rendering, forms)
 └── package.json
