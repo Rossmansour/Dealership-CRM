@@ -233,6 +233,7 @@ function renderCars() {
     const matchesSearch = !search ||
       c.make.toLowerCase().includes(search) ||
       c.model.toLowerCase().includes(search) ||
+      (c.trim || '').toLowerCase().includes(search) ||
       (c.vin || '').toLowerCase().includes(search) ||
       (c.stockNumber || '').toLowerCase().includes(search);
     const matchesStatus = !statusFilter || c.status === statusFilter;
@@ -242,13 +243,13 @@ function renderCars() {
   document.getElementById('carTableBody').innerHTML = filtered.map(c => {
     const daysListed = Math.round((new Date() - new Date(c.dateAdded)) / (1000 * 60 * 60 * 24));
     const thumb = (c.photos && c.photos[0])
-      ? html`<img class="inventory-thumb" src="${c.photos[0]}" alt="${c.make} ${c.model}" />`
+      ? html`<img class="inventory-thumb" src="${photoThumb(c.photos[0], 48, 36)}" alt="${c.make} ${c.model}" loading="lazy" />`
       : html`<div class="inventory-thumb-placeholder">🚗</div>`;
     return html`
       <tr>
         <td>${thumb}</td>
         <td>${c.make}</td>
-        <td>${c.model}</td>
+        <td>${c.model}${c.trim ? html` <span class="inventory-trim">${c.trim}</span>` : ''}</td>
         <td>${c.year}</td>
         <td>${c.stockNumber || '-'}</td>
         <td>${c.mileage.toLocaleString()}</td>
@@ -408,6 +409,102 @@ function populateLeadCarOptions() {
   select.value = current;
 }
 
+// ---------- Photo thumbnails ----------
+// Photos stored in Cloudinary can be resized on the fly by adding a size
+// to the URL, so lists load small thumbnails instead of full-size photos.
+// (Photos stored on the server's own disk are shown as-is.)
+function photoThumb(url, width, height) {
+  if (!/^https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\//.test(url)) return url;
+  // Double size for sharp results on high-resolution (retina) screens.
+  return url.replace('/image/upload/', `/image/upload/c_fill,w_${width * 2},h_${height * 2},q_auto,f_auto/`);
+}
+
+// ---------- VIN decoder ----------
+// Used by the car form and the deal's trade-in section. Looks the VIN up
+// in NHTSA's database (through our server) and fills in the fields.
+
+const VIN_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/;
+const cleanVin = value => value.toUpperCase().replace(/[\s-]/g, '');
+
+// [car record field, form input id] for the details the decoder can fill.
+const CAR_DETAIL_INPUTS = [
+  ['trim', 'carTrim'], ['bodyStyle', 'carBodyStyle'], ['drivetrain', 'carDrivetrain'],
+  ['engine', 'carEngine'], ['transmission', 'carTransmission'], ['fuelType', 'carFuelType'],
+  ['exteriorColor', 'carExteriorColor'], ['interiorColor', 'carInteriorColor']
+];
+
+async function decodeVinInto({ inputId, statusId, excludeCarId, fill }) {
+  const input = document.getElementById(inputId);
+  const statusEl = document.getElementById(statusId);
+  const vin = cleanVin(input.value);
+  input.value = vin;
+  if (!VIN_PATTERN.test(vin)) {
+    statusEl.innerHTML = html`<div class="err">A VIN is 17 letters and numbers (never I, O, or Q).</div>`;
+    return;
+  }
+
+  statusEl.innerHTML = html`<div>Looking up VIN...</div>`;
+  try {
+    const query = excludeCarId ? `?excludeCarId=${encodeURIComponent(excludeCarId)}` : '';
+    const res = await fetch(`${API}/vin/${vin}${query}`);
+    const data = await res.json();
+    if (cleanVin(input.value) !== vin) return; // they changed the VIN while we were looking it up
+    if (!res.ok) {
+      statusEl.innerHTML = html`<div class="err">${data.error || 'Could not decode this VIN.'}</div>`;
+      return;
+    }
+
+    fill(data);
+    const summary = [data.year, data.make, data.model, data.trim].filter(Boolean).join(' ');
+    const specs = [data.bodyStyle, data.engine, data.drivetrain].filter(Boolean).join(' · ');
+    statusEl.innerHTML = html`
+      <div class="ok">✓ ${summary}${specs ? html` <span class="audit-note">(${specs})</span>` : ''}</div>
+      ${data.warnings.map(w => html`<div class="warn">⚠️ ${w}</div>`)}
+      ${data.inInventory ? html`<div class="warn">⚠️ This VIN is already in inventory: ${data.inInventory.label} -- ${data.inInventory.status}.</div>` : ''}
+    `;
+  } catch (err) {
+    statusEl.innerHTML = html`<div class="err">Could not reach the server.</div>`;
+  }
+}
+
+function fillCarFormFromVin(data) {
+  const set = (id, value) => { if (value) document.getElementById(id).value = value; };
+  set('carYear', data.year);
+  set('carMake', data.make);
+  set('carModel', data.model);
+  for (const [field, inputId] of CAR_DETAIL_INPUTS) set(inputId, data[field]);
+  set('carDoors', data.doors);
+  if (CAR_DETAIL_INPUTS.some(([field]) => data[field])) document.querySelector('.car-details-section').open = true;
+}
+
+function decodeCarVin() {
+  return decodeVinInto({
+    inputId: 'carVin',
+    statusId: 'carVinStatus',
+    excludeCarId: document.getElementById('carId').value || null,
+    fill: fillCarFormFromVin
+  });
+}
+
+document.getElementById('decodeCarVinBtn').addEventListener('click', decodeCarVin);
+
+// When adding a car, decode as soon as a full VIN is typed or pasted.
+// (When editing, only on the button, so it never overwrites edits.)
+document.getElementById('carVin').addEventListener('input', (e) => {
+  const isNewCar = !document.getElementById('carId').value;
+  if (isNewCar && VIN_PATTERN.test(cleanVin(e.target.value))) decodeCarVin();
+});
+
+document.getElementById('decodeTradeVinBtn').addEventListener('click', () => decodeVinInto({
+  inputId: 'dealTradeVin',
+  statusId: 'dealTradeVinStatus',
+  fill: data => {
+    if (data.year) document.getElementById('dealTradeYear').value = data.year;
+    if (data.make) document.getElementById('dealTradeMake').value = data.make;
+    if (data.model) document.getElementById('dealTradeModel').value = [data.model, data.trim].filter(Boolean).join(' ');
+  }
+}));
+
 // ---------- Car modal ----------
 
 const carModal = document.getElementById('carModal');
@@ -416,6 +513,9 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   document.getElementById('carModalTitle').textContent = 'Add Car';
   document.getElementById('carForm').reset();
   document.getElementById('carId').value = '';
+  document.getElementById('carDoors').value = '';
+  document.getElementById('carVinStatus').innerHTML = '';
+  document.querySelector('.car-details-section').open = false;
   document.getElementById('carPhotosSection').style.display = 'none';
   carModal.classList.add('active');
 });
@@ -431,7 +531,13 @@ window.editCar = function(id) {
   document.getElementById('carMake').value = car.make;
   document.getElementById('carModel').value = car.model;
   document.getElementById('carYear').value = car.year;
-  document.getElementById('carVin').value = car.vin;
+  document.getElementById('carVin').value = car.vin || '';
+  document.getElementById('carVinStatus').innerHTML = '';
+  for (const [field, inputId] of CAR_DETAIL_INPUTS) {
+    document.getElementById(inputId).value = car[field] || '';
+  }
+  document.getElementById('carDoors').value = car.doors || '';
+  document.querySelector('.car-details-section').open = CAR_DETAIL_INPUTS.some(([field]) => car[field]);
   document.getElementById('carStockNumber').value = car.stockNumber || '';
   document.getElementById('carMileage').value = car.mileage;
   document.getElementById('carCost').value = car.cost;
@@ -457,7 +563,7 @@ function renderCarPhotoGrid(car) {
   }
   grid.innerHTML = photos.map(p => html`
     <div class="photo-thumb">
-      <img src="${p}" alt="Car photo" />
+      <img src="${photoThumb(p, 160, 160)}" alt="Car photo" loading="lazy" />
       <button type="button" class="photo-delete-btn" onclick="deleteCarPhoto(${js(car.id)}, ${js(p)})">×</button>
     </div>
   `).join('');
@@ -521,6 +627,8 @@ document.getElementById('carForm').addEventListener('submit', async (e) => {
     model: document.getElementById('carModel').value,
     year: document.getElementById('carYear').value,
     vin: document.getElementById('carVin').value,
+    ...Object.fromEntries(CAR_DETAIL_INPUTS.map(([field, inputId]) => [field, document.getElementById(inputId).value])),
+    doors: document.getElementById('carDoors').value,
     stockNumber: document.getElementById('carStockNumber').value,
     mileage: document.getElementById('carMileage').value,
     cost: document.getElementById('carCost').value,
@@ -686,7 +794,7 @@ function renderSendTextPhotoPicker(car) {
   container.innerHTML = html`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Attach a photo of the ${car.year} ${car.make} ${car.model} (optional):</div>
     <div class="photo-picker-grid">
-      ${car.photos.map(p => html`<img src="${p}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" />`)}
+      ${car.photos.map(p => html`<img src="${photoThumb(p, 56, 42)}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" loading="lazy" />`)}
     </div>
   `;
 }
@@ -970,6 +1078,8 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('dealRebate').value = deal.rebate;
   document.getElementById('dealTradeInValue').value = deal.tradeInValue;
   document.getElementById('dealTradeInPayoff').value = deal.tradeInPayoff;
+  document.getElementById('dealTradeVin').value = deal.tradeVin || '';
+  document.getElementById('dealTradeVinStatus').innerHTML = '';
   document.getElementById('dealTradeYear').value = deal.tradeYear || '';
   document.getElementById('dealTradeMake').value = deal.tradeMake || '';
   document.getElementById('dealTradeModel').value = deal.tradeModel || '';
@@ -1174,6 +1284,7 @@ function buildDeskingPayload() {
     hasTrade: document.getElementById('hasTradeCheckbox').checked,
     tradeInValue: document.getElementById('dealTradeInValue').value,
     tradeInPayoff: document.getElementById('dealTradeInPayoff').value,
+    tradeVin: cleanVin(document.getElementById('dealTradeVin').value),
     tradeYear: document.getElementById('dealTradeYear').value,
     tradeMake: document.getElementById('dealTradeMake').value,
     tradeModel: document.getElementById('dealTradeModel').value,

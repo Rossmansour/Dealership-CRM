@@ -14,6 +14,8 @@ const store = require('./db');
 const auth = require('./auth');
 const audit = require('./audit');
 const encryption = require('./encryption');
+const vinDecoder = require('./vin');
+const photos = require('./photos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,27 +40,17 @@ if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
 }
 
 // ---------- Photo uploads ----------
-// Car photos are saved to disk under public/uploads/cars, which Express
-// already serves statically -- so a saved file at
-// public/uploads/cars/abc123.jpg is reachable at /uploads/cars/abc123.jpg
-// with zero extra routing. NOTE: on a host with an ephemeral filesystem
-// (like Render's free tier), these files disappear on restart -- they
-// still need to move to cloud storage (e.g. S3) before real production use.
-const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'cars');
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
+// Uploads are held in memory just long enough to hand to photos.js, which
+// stores them in Cloudinary (or on local disk when Cloudinary isn't set
+// up). Up to 8 photos of 5MB each per upload.
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname) || '.jpg';
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    }
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per photo
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 8 },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      return cb(new Error('Only image files are allowed.'));
+    if (!photos.ALLOWED_TYPES.has(file.mimetype)) {
+      const err = new Error('Photos must be JPEG, PNG, WebP, GIF, or HEIC images.');
+      err.status = 400;
+      return cb(err);
     }
     cb(null, true);
   }
@@ -326,6 +318,37 @@ function findBestTaxRateMatch(taxRates, state, county, city) {
   return stateDefault || inState[0];
 }
 
+// ---------- VIN decoder ----------
+
+// Decodes a VIN into year/make/model/trim and specs (see vin.js), and says
+// whether that VIN is already in this dealership's inventory so the same
+// car isn't entered twice. Pass ?excludeCarId= when editing that car.
+app.get('/api/vin/:vin', wrap(async (req, res) => {
+  try {
+    const decoded = await vinDecoder.decodeVin(req.params.vin);
+    const cars = await store.list(store.pool, 'cars', req.dealershipId);
+    const match = cars.find(c => vinDecoder.normalizeVin(c.vin) === decoded.vin && c.id !== req.query.excludeCarId);
+    res.json({
+      ...decoded,
+      inInventory: match ? { id: match.id, label: audit.labelFor('car', match), status: match.status } : null
+    });
+  } catch (err) {
+    if (err instanceof vinDecoder.VinError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+}));
+
+// Details that describe the vehicle beyond make/model/year. Most are
+// filled in by the VIN decoder; colors are entered by hand.
+const CAR_DETAIL_FIELDS = ['trim', 'bodyStyle', 'drivetrain', 'engine', 'fuelType', 'transmission', 'exteriorColor', 'interiorColor'];
+
+function carDetails(body) {
+  const details = {};
+  for (const field of CAR_DETAIL_FIELDS) details[field] = String(body[field] ?? '').trim();
+  details.doors = Number(body.doors) || null;
+  return details;
+}
+
 // ---------- CARS (Inventory) ----------
 
 // GET all cars, with optional ?status= and ?search= filters
@@ -370,7 +393,8 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
     make,
     model,
     year: Number(year),
-    vin: vin || '',
+    ...carDetails(req.body),
+    vin: vinDecoder.normalizeVin(vin),
     stockNumber: stockNumber || '',
     mileage: Number(mileage) || 0,
     cost: Number(cost) || 0,
@@ -401,6 +425,8 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     for (const field of ['year', 'mileage', 'cost', 'price']) {
       if (field in updates) updates[field] = Number(updates[field]) || 0;
     }
+    if ('vin' in updates) updates.vin = vinDecoder.normalizeVin(updates.vin);
+    if ('doors' in updates) updates.doors = Number(updates.doors) || null;
 
     // If status is changing to "sold" for the first time, stamp the date.
     if (updates.status === 'sold' && car.status !== 'sold') {
@@ -423,6 +449,7 @@ app.delete('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     return removed;
   });
   if (!deleted) return res.status(404).json({ error: 'Car not found' });
+  await Promise.all((deleted.photos || []).map(photos.deletePhoto));
   res.status(204).send();
 }));
 
@@ -433,11 +460,26 @@ app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No photos were uploaded.' });
   }
+  if (!await store.get(store.pool, 'cars', req.dealershipId, req.params.id)) {
+    return res.status(404).json({ error: 'Car not found' });
+  }
+
+  // Store the files first (a network call to Cloudinary), then record
+  // them on the car in a short transaction.
+  const results = await Promise.allSettled(req.files.map(file =>
+    photos.savePhoto(file, { dealershipId: req.dealershipId, carId: req.params.id })));
+  const newPaths = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const failure = results.find(r => r.status === 'rejected');
+  if (failure) {
+    // All or nothing: don't leave half a batch stored but not on the car.
+    await Promise.all(newPaths.map(photos.deletePhoto));
+    console.error('Photo upload failed:', failure.reason);
+    return res.status(502).json({ error: "Couldn't save the photos to storage. Please try again." });
+  }
 
   const updated = await store.tx(async q => {
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
-    const newPaths = req.files.map(f => `/uploads/cars/${f.filename}`);
     const saved = await store.save(q, 'cars', req.dealershipId, car.id, { ...car, photos: [...(car.photos || []), ...newPaths] });
     await audit.record(q, req, {
       action: 'add_photos', entityType: 'car', entityId: car.id, label: audit.labelFor('car', car),
@@ -445,35 +487,38 @@ app.post('/api/cars/:id/photos', allow('editInventory'), upload.array('photos', 
     });
     return saved;
   });
-  if (!updated) return res.status(404).json({ error: 'Car not found' });
+  if (!updated) {
+    // The car was deleted while the photos were uploading.
+    await Promise.all(newPaths.map(photos.deletePhoto));
+    return res.status(404).json({ error: 'Car not found' });
+  }
   res.status(201).json({ photos: updated.photos });
 }));
 
-// Delete one photo from a car (removes both the DB reference and the file on disk).
+// Delete one photo from a car (removes it from the car and from storage).
 app.delete('/api/cars/:id/photos', allow('editInventory'), wrap(async (req, res) => {
   const { photoPath } = req.body;
   if (!photoPath) return res.status(400).json({ error: 'photoPath is required' });
 
-  const updated = await store.tx(async q => {
+  const result = await store.tx(async q => {
     const car = await store.get(q, 'cars', req.dealershipId, req.params.id, { forUpdate: true });
     if (!car) return null;
-    const saved = await store.save(q, 'cars', req.dealershipId, car.id,
-      { ...car, photos: (car.photos || []).filter(p => p !== photoPath) });
-    if (saved.photos.length !== (car.photos || []).length) {
+    const wasOnCar = (car.photos || []).includes(photoPath);
+    if (wasOnCar) {
+      await store.save(q, 'cars', req.dealershipId, car.id,
+        { ...car, photos: car.photos.filter(p => p !== photoPath) });
       await audit.record(q, req, {
         action: 'remove_photo', entityType: 'car', entityId: car.id, label: audit.labelFor('car', car),
         details: `Removed photo ${photoPath}`
       });
     }
-    return saved;
+    return { wasOnCar };
   });
-  if (!updated) return res.status(404).json({ error: 'Car not found' });
+  if (!result) return res.status(404).json({ error: 'Car not found' });
 
-  // Best-effort cleanup of the actual file -- if it's already gone
-  // (e.g. wiped by a host restart), that's fine, just move on.
-  const filename = path.basename(photoPath);
-  const filePath = path.join(UPLOAD_DIR, filename);
-  fs.unlink(filePath, () => {});
+  // Only delete the stored file if it really belonged to this car, so a
+  // request can't delete some other car's (or dealership's) photo.
+  if (result.wasOnCar) await photos.deletePhoto(photoPath);
 
   res.status(204).send();
 }));
@@ -601,18 +646,26 @@ app.delete('/api/leads/:id/activities/:activityId', allow('deleteRecords'), wrap
 // folded into the general activity log form.
 
 app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
-  if (!twilioClient) {
-    return res.status(500).json({
-      error: 'SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your .env file to enable this feature.'
-    });
-  }
-
   const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
 
   const { text, photoPath } = req.body;
   if (!text && !photoPath) return res.status(400).json({ error: 'text or photoPath is required' });
+
+  // Only this dealership's own car photos can be sent.
+  if (photoPath) {
+    const cars = await store.list(store.pool, 'cars', req.dealershipId);
+    if (!cars.some(c => (c.photos || []).includes(photoPath))) {
+      return res.status(400).json({ error: 'That photo is not on any vehicle in your inventory.' });
+    }
+  }
+
+  if (!twilioClient) {
+    return res.status(500).json({
+      error: 'SMS is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in your .env file to enable this feature.'
+    });
+  }
 
   try {
     const messagePayload = {
@@ -622,11 +675,9 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
     };
 
     // Sending a photo turns this into an MMS -- Twilio needs a full,
-    // publicly-reachable URL for the image, not a relative path, so we
-    // build one from the incoming request's own host.
+    // publicly-reachable URL for the image.
     if (photoPath) {
-      const publicUrl = `${req.protocol}://${req.get('host')}${photoPath}`;
-      messagePayload.mediaUrl = [publicUrl];
+      messagePayload.mediaUrl = [photos.publicPhotoUrl(photoPath, req)];
     }
 
     const message = await twilioClient.messages.create(messagePayload);
@@ -1546,10 +1597,18 @@ app.use('/api', (req, res) => {
 // Any error thrown by a route ends up here as a JSON response, matching
 // the { error } shape every route already uses.
 app.use((err, req, res, next) => {
-  console.error(err);
+  // Mistakes in a request (wrong file type, too large...) aren't server
+  // problems, so only real failures go to the log.
+  if (!(err instanceof multer.MulterError) && !(err.status && err.status < 500)) console.error(err);
   if (res.headersSent) return next(err);
-  const status = err instanceof multer.MulterError ? 400 : 500;
-  res.status(status).json({ error: err.message || 'Something went wrong.' });
+  if (err instanceof multer.MulterError) {
+    const messages = {
+      LIMIT_FILE_SIZE: 'Each photo must be 5 MB or smaller.',
+      LIMIT_FILE_COUNT: 'You can upload up to 8 photos at a time.'
+    };
+    return res.status(400).json({ error: messages[err.code] || err.message });
+  }
+  res.status(err.status || 500).json({ error: err.message || 'Something went wrong.' });
 });
 
 // ---------- Startup ----------
@@ -1564,6 +1623,7 @@ async function bootstrap() {
 
   await store.migrate();
   await encryptStoredSensitiveFields();
+  await fixCarNumbersSavedAsText();
 
   await store.tx(async q => {
     // Serializes startup across instances so two servers booting at once
@@ -1609,6 +1669,29 @@ async function encryptStoredSensitiveFields() {
     count += rowCount;
   }
   if (count) console.log(`Encrypted SSNs/license numbers on ${count} existing deal${count === 1 ? '' : 's'}`);
+}
+
+// Before car edits converted numbers, editing a car saved year, mileage,
+// cost, and price as text, which broke dashboard totals. This converts any
+// such values back to numbers; once none are left it finds nothing to do.
+async function fixCarNumbersSavedAsText() {
+  const { rows } = await store.pool.query(
+    `SELECT dealership_id, id, data FROM cars
+     WHERE jsonb_typeof(data->'year') = 'string' OR jsonb_typeof(data->'mileage') = 'string'
+        OR jsonb_typeof(data->'cost') = 'string' OR jsonb_typeof(data->'price') = 'string'`
+  );
+  let count = 0;
+  for (const row of rows) {
+    const fixed = { ...row.data };
+    for (const field of ['year', 'mileage', 'cost', 'price']) {
+      if (typeof fixed[field] === 'string') fixed[field] = Number(fixed[field]) || 0;
+    }
+    const { rowCount } = await store.pool.query(
+      'UPDATE cars SET data = $3 WHERE dealership_id = $1 AND id = $2 AND data = $4',
+      [row.dealership_id, row.id, fixed, row.data]);
+    count += rowCount;
+  }
+  if (count) console.log(`Fixed numbers saved as text on ${count} car${count === 1 ? '' : 's'}`);
 }
 
 // One-time carry-over from the old JSON file into Postgres. Only runs if
@@ -1662,6 +1745,9 @@ if (require.main === module) {
     .then(() => auth.announceSetupIfNeeded(process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`))
     .then(() => {
       app.listen(PORT, () => {
+        console.log(photos.usingCloudinary()
+          ? `Car photos: stored in Cloudinary (${photos.cloudinaryConfig().cloudName})`
+          : 'Car photos: stored on this server\'s disk (set CLOUDINARY_URL to keep them across redeploys)');
         console.log(`Car CRM server running at http://localhost:${PORT}`);
       });
     })

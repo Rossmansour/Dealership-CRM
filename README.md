@@ -21,6 +21,13 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Search and filter by make, model, VIN, or status
 - Automatic "days listed" tracking to flag cars sitting too long
 
+**VIN Decoder**
+- Type or paste a VIN when adding a car and year, make, model, trim, body style, engine, transmission, drivetrain, fuel, and doors fill in automatically (or press **Decode VIN**)
+- Same **Decode VIN** button on a deal's trade-in section fills the trade's year, make, and model, and the trade VIN is saved with the deal
+- Catches typos before looking anything up (VINs never use I, O, or Q, and the 9th character is a check digit), and warns if the VIN is already in your inventory
+- Uses NHTSA's free vPIC database (the US government's vehicle database) -- no account or API key needed. Results are remembered, so the same VIN isn't looked up twice
+- Exterior and interior color are entered by hand (they aren't part of a VIN)
+
 **Lead Tracking (mini CRM)**
 - Log customer leads and link them to the car they're interested in
 - Track lead status: `new → contacted → negotiating → won/lost`
@@ -106,7 +113,8 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 **Vehicle Photos & Picture Texts**
 - Upload photos to any car in inventory (Edit Car → Photos section) -- shown as a thumbnail in the Inventory table
 - From a lead's profile, the **Send Text** box lets you attach one of their interested vehicle's photos, sending a real **MMS** (picture text) instead of plain SMS
-- ⚠️ **Photos still live on the server's disk** -- on a host with an ephemeral filesystem (Render's free tier), uploaded photos disappear on every restart/redeploy. All other data is in Postgres and survives redeploys; photos need to move to real file storage (e.g. S3, Cloudinary) before production use.
+- Photos are stored in **Cloudinary** (see "Setting up photo storage" below), so they survive redeploys. Lists load small, automatically resized thumbnails; picture texts get a copy resized to stay under carriers' size limits
+- JPEG, PNG, WebP, GIF, or HEIC; up to 8 photos of 5 MB each per upload. Deleting a photo -- or the whole car -- also deletes it from storage
 
 **Real SMS (Twilio)**
 - A dedicated "Send Text" flow on each lead's profile that sends an actual SMS via Twilio, not just a logged note -- the send and the log entry happen together automatically
@@ -230,6 +238,16 @@ Every change is recorded: who did it, when, and exactly which fields changed fro
 - SSNs, license numbers, and passwords are never written to the log; it only notes that they changed.
 - To protect the history, general edits can't overwrite server-managed fields (a lead's activity log, a deal's number or credit app, a car's photos) -- those only change through their own screens, which log them.
 
+## Setting up photo storage
+
+Car photos are stored in [Cloudinary](https://cloudinary.com) (free plan: roughly 25 GB). Without it, photos are saved on the server's own disk -- fine on your computer, but on Render that disk is wiped on every redeploy.
+
+1. Sign up at [cloudinary.com](https://cloudinary.com/users/register_free).
+2. On the Cloudinary dashboard, find **API environment variable** and copy it. It looks like `cloudinary://123456789012345:abcdEFGH...@your-cloud-name`.
+3. On Render: web service → **Environment** → add `CLOUDINARY_URL` and paste it. Save.
+
+The server log says which storage is in use at startup (`Car photos: stored in Cloudinary (...)`). Photos are organized in Cloudinary under `dealerships/<dealership>/cars/<car>/`.
+
 ## Setting up the AI features
 
 The AI Assistant and Suggested Reply button need a free Google Gemini API key to work (everything else in the app works fine without one).
@@ -297,7 +315,6 @@ TEST_DATABASE_URL=postgres://user:password@localhost:5432/dealership_crm_test np
 ## What I'd add next
 
 - State-specific tax rule presets, since tax treatment of trade-ins and rebates varies by state
-- Photo uploads per vehicle
 - Email/SMS reminders for leads that have gone quiet
 - CSV export for tax/accounting purposes
 
@@ -310,6 +327,8 @@ car-crm/
 ├── auth.js            # Sign-in, sessions, roles/permissions, user management
 ├── audit.js           # Audit log: recording changes and reading them back
 ├── encryption.js      # Encrypts SSNs and license numbers at rest
+├── vin.js             # VIN validation and decoding (NHTSA vPIC)
+├── photos.js          # Car photo storage (Cloudinary, or local disk)
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)

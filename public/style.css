@@ -1189,3 +1189,17 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 .audit-change .old { text-decoration: line-through; color: var(--text-muted); }
 .audit-note { color: var(--text-secondary); }
 .audit-table details pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: var(--surface-alt); padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
+
+/* ---------- VIN decoder ---------- */
+.vin-row { display: flex; gap: 8px; align-items: flex-end; }
+.vin-row label { flex: 1; margin-bottom: 0; }
+.vin-row input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.05em; text-transform: uppercase; }
+.vin-row button { margin-bottom: 1px; white-space: nowrap; }
+.vin-status { font-size: 13px; margin: 6px 0 12px; min-height: 4px; }
+.vin-status .ok { color: var(--green); }
+.vin-status .warn { color: var(--amber); }
+.vin-status .err { color: var(--red); }
+.vin-status div + div { margin-top: 3px; }
+.car-details-section { margin: 4px 0 14px; }
+.car-details-section summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.inventory-trim { color: var(--text-muted); font-size: 12px; }
