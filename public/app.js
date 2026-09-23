@@ -474,7 +474,6 @@ function fillCarFormFromVin(data) {
   set('carModel', data.model);
   for (const [field, inputId] of CAR_DETAIL_INPUTS) set(inputId, data[field]);
   set('carDoors', data.doors);
-  if (CAR_DETAIL_INPUTS.some(([field]) => data[field])) document.querySelector('.car-details-section').open = true;
 }
 
 function decodeCarVin() {
@@ -515,8 +514,9 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   document.getElementById('carId').value = '';
   document.getElementById('carDoors').value = '';
   document.getElementById('carVinStatus').innerHTML = '';
-  document.querySelector('.car-details-section').open = false;
-  document.getElementById('carPhotosSection').style.display = 'none';
+  setCarPhotosMode(false);
+  document.getElementById('carPhotoCount').textContent = '';
+  updateCarGross();
   carModal.classList.add('active');
 });
 
@@ -526,7 +526,8 @@ document.getElementById('cancelCarBtn').addEventListener('click', () => {
 
 window.editCar = function(id) {
   const car = cars.find(c => c.id === id);
-  document.getElementById('carModalTitle').textContent = 'Edit Car';
+  document.getElementById('carModalTitle').textContent =
+    `Edit Car -- ${[car.year, car.make, car.model, car.trim].filter(Boolean).join(' ')}`;
   document.getElementById('carId').value = car.id;
   document.getElementById('carMake').value = car.make;
   document.getElementById('carModel').value = car.model;
@@ -537,16 +538,16 @@ window.editCar = function(id) {
     document.getElementById(inputId).value = car[field] || '';
   }
   document.getElementById('carDoors').value = car.doors || '';
-  document.querySelector('.car-details-section').open = CAR_DETAIL_INPUTS.some(([field]) => car[field]);
   document.getElementById('carStockNumber').value = car.stockNumber || '';
   document.getElementById('carMileage').value = car.mileage;
   document.getElementById('carCost').value = car.cost;
   document.getElementById('carPrice').value = car.price;
   document.getElementById('carStatus').value = car.status;
+  updateCarGross();
 
   // Photos can only be attached to a car that already exists (it needs
   // an id to upload against), so this section is Edit-only.
-  document.getElementById('carPhotosSection').style.display = 'block';
+  setCarPhotosMode(true);
   document.getElementById('carPhotoInput').value = '';
   document.getElementById('carPhotoUploadStatus').innerHTML = '';
   renderCarPhotoGrid(car);
@@ -554,9 +555,32 @@ window.editCar = function(id) {
   carModal.classList.add('active');
 };
 
+// Photos need a saved car to attach to, so a new car shows a note instead.
+function setCarPhotosMode(isExistingCar) {
+  document.getElementById('carPhotosSection').style.display = isExistingCar ? 'block' : 'none';
+  document.getElementById('carPhotosNewCarNote').style.display = isExistingCar ? 'none' : 'block';
+}
+
+// Live "gross profit" readout under the pricing row: asking price - cost.
+function updateCarGross() {
+  const price = Number(document.getElementById('carPrice').value);
+  const cost = Number(document.getElementById('carCost').value);
+  const el = document.getElementById('carGross');
+  if (!price || !cost) {
+    el.innerHTML = '';
+    return;
+  }
+  const gross = price - cost;
+  const margin = Math.round((gross / price) * 100);
+  el.innerHTML = html`Gross profit at asking price: <strong class="${gross < 0 ? 'negative' : ''}">${gross < 0 ? '-' : ''}$${Math.abs(gross).toLocaleString()}</strong> (${margin}%)`;
+}
+document.getElementById('carPrice').addEventListener('input', updateCarGross);
+document.getElementById('carCost').addEventListener('input', updateCarGross);
+
 function renderCarPhotoGrid(car) {
   const grid = document.getElementById('carPhotoGrid');
   const photos = car.photos || [];
+  document.getElementById('carPhotoCount').textContent = photos.length ? `(${photos.length})` : '';
   if (photos.length === 0) {
     grid.innerHTML = `<p style="font-size:13px;color:var(--text-muted);">No photos yet.</p>`;
     return;
