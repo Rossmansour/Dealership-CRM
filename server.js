@@ -14,6 +14,7 @@ const store = require('./db');
 const auth = require('./auth');
 const audit = require('./audit');
 const encryption = require('./encryption');
+const vinDecoder = require('./vin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -326,6 +327,37 @@ function findBestTaxRateMatch(taxRates, state, county, city) {
   return stateDefault || inState[0];
 }
 
+// ---------- VIN decoder ----------
+
+// Decodes a VIN into year/make/model/trim and specs (see vin.js), and says
+// whether that VIN is already in this dealership's inventory so the same
+// car isn't entered twice. Pass ?excludeCarId= when editing that car.
+app.get('/api/vin/:vin', wrap(async (req, res) => {
+  try {
+    const decoded = await vinDecoder.decodeVin(req.params.vin);
+    const cars = await store.list(store.pool, 'cars', req.dealershipId);
+    const match = cars.find(c => vinDecoder.normalizeVin(c.vin) === decoded.vin && c.id !== req.query.excludeCarId);
+    res.json({
+      ...decoded,
+      inInventory: match ? { id: match.id, label: audit.labelFor('car', match), status: match.status } : null
+    });
+  } catch (err) {
+    if (err instanceof vinDecoder.VinError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+}));
+
+// Details that describe the vehicle beyond make/model/year. Most are
+// filled in by the VIN decoder; colors are entered by hand.
+const CAR_DETAIL_FIELDS = ['trim', 'bodyStyle', 'drivetrain', 'engine', 'fuelType', 'transmission', 'exteriorColor', 'interiorColor'];
+
+function carDetails(body) {
+  const details = {};
+  for (const field of CAR_DETAIL_FIELDS) details[field] = String(body[field] ?? '').trim();
+  details.doors = Number(body.doors) || null;
+  return details;
+}
+
 // ---------- CARS (Inventory) ----------
 
 // GET all cars, with optional ?status= and ?search= filters
@@ -370,7 +402,8 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
     make,
     model,
     year: Number(year),
-    vin: vin || '',
+    ...carDetails(req.body),
+    vin: vinDecoder.normalizeVin(vin),
     stockNumber: stockNumber || '',
     mileage: Number(mileage) || 0,
     cost: Number(cost) || 0,
@@ -401,6 +434,8 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     for (const field of ['year', 'mileage', 'cost', 'price']) {
       if (field in updates) updates[field] = Number(updates[field]) || 0;
     }
+    if ('vin' in updates) updates.vin = vinDecoder.normalizeVin(updates.vin);
+    if ('doors' in updates) updates.doors = Number(updates.doors) || null;
 
     // If status is changing to "sold" for the first time, stamp the date.
     if (updates.status === 'sold' && car.status !== 'sold') {
@@ -1564,6 +1599,7 @@ async function bootstrap() {
 
   await store.migrate();
   await encryptStoredSensitiveFields();
+  await fixCarNumbersSavedAsText();
 
   await store.tx(async q => {
     // Serializes startup across instances so two servers booting at once
@@ -1609,6 +1645,29 @@ async function encryptStoredSensitiveFields() {
     count += rowCount;
   }
   if (count) console.log(`Encrypted SSNs/license numbers on ${count} existing deal${count === 1 ? '' : 's'}`);
+}
+
+// Before car edits converted numbers, editing a car saved year, mileage,
+// cost, and price as text, which broke dashboard totals. This converts any
+// such values back to numbers; once none are left it finds nothing to do.
+async function fixCarNumbersSavedAsText() {
+  const { rows } = await store.pool.query(
+    `SELECT dealership_id, id, data FROM cars
+     WHERE jsonb_typeof(data->'year') = 'string' OR jsonb_typeof(data->'mileage') = 'string'
+        OR jsonb_typeof(data->'cost') = 'string' OR jsonb_typeof(data->'price') = 'string'`
+  );
+  let count = 0;
+  for (const row of rows) {
+    const fixed = { ...row.data };
+    for (const field of ['year', 'mileage', 'cost', 'price']) {
+      if (typeof fixed[field] === 'string') fixed[field] = Number(fixed[field]) || 0;
+    }
+    const { rowCount } = await store.pool.query(
+      'UPDATE cars SET data = $3 WHERE dealership_id = $1 AND id = $2 AND data = $4',
+      [row.dealership_id, row.id, fixed, row.data]);
+    count += rowCount;
+  }
+  if (count) console.log(`Fixed numbers saved as text on ${count} car${count === 1 ? '' : 's'}`);
 }
 
 // One-time carry-over from the old JSON file into Postgres. Only runs if

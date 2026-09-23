@@ -187,10 +187,32 @@
     <h2 id="carModalTitle">Add Car</h2>
     <form id="carForm">
       <input type="hidden" id="carId" />
-      <label>Make <input type="text" id="carMake" required /></label>
-      <label>Model <input type="text" id="carModel" required /></label>
-      <label>Year <input type="number" id="carYear" required /></label>
-      <label>VIN <input type="text" id="carVin" /></label>
+      <input type="hidden" id="carDoors" />
+      <div class="vin-row">
+        <label>VIN <input type="text" id="carVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
+        <button type="button" class="btn-secondary" id="decodeCarVinBtn">Decode VIN</button>
+      </div>
+      <div id="carVinStatus" class="vin-status"></div>
+      <div class="form-grid">
+        <label>Year <input type="number" id="carYear" required /></label>
+        <label>Make <input type="text" id="carMake" required /></label>
+        <label>Model <input type="text" id="carModel" required /></label>
+        <label>Trim <input type="text" id="carTrim" /></label>
+      </div>
+
+      <details class="car-details-section">
+        <summary>Vehicle details (body, engine, colors...)</summary>
+        <div class="form-grid">
+          <label>Body Style <input type="text" id="carBodyStyle" /></label>
+          <label>Drivetrain <input type="text" id="carDrivetrain" /></label>
+          <label>Engine <input type="text" id="carEngine" /></label>
+          <label>Transmission <input type="text" id="carTransmission" /></label>
+          <label>Fuel <input type="text" id="carFuelType" /></label>
+          <label>Exterior Color <input type="text" id="carExteriorColor" /></label>
+          <label>Interior Color <input type="text" id="carInteriorColor" /></label>
+        </div>
+      </details>
+
       <label>Stock # <input type="text" id="carStockNumber" /></label>
       <label>Mileage <input type="number" id="carMileage" /></label>
       <label>Cost (what you paid) <input type="number" id="carCost" /></label>
@@ -397,6 +419,11 @@
                 <input type="checkbox" id="hasTradeCheckbox" /> Customer has a trade-in
               </label>
               <div class="ca-sub-block" id="tradeFields" style="display:none;">
+                <div class="vin-row">
+                  <label>Trade VIN <input type="text" id="dealTradeVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Optional -- fills year, make, and model" /></label>
+                  <button type="button" class="btn-secondary" id="decodeTradeVinBtn">Decode VIN</button>
+                </div>
+                <div id="dealTradeVinStatus" class="vin-status"></div>
                 <div class="form-grid form-grid-3">
                   <label>Trade Year <input type="number" id="dealTradeYear" /></label>
                   <label>Trade Make <input type="text" id="dealTradeMake" /></label>

@@ -21,6 +21,13 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Search and filter by make, model, VIN, or status
 - Automatic "days listed" tracking to flag cars sitting too long
 
+**VIN Decoder**
+- Type or paste a VIN when adding a car and year, make, model, trim, body style, engine, transmission, drivetrain, fuel, and doors fill in automatically (or press **Decode VIN**)
+- Same **Decode VIN** button on a deal's trade-in section fills the trade's year, make, and model, and the trade VIN is saved with the deal
+- Catches typos before looking anything up (VINs never use I, O, or Q, and the 9th character is a check digit), and warns if the VIN is already in your inventory
+- Uses NHTSA's free vPIC database (the US government's vehicle database) -- no account or API key needed. Results are remembered, so the same VIN isn't looked up twice
+- Exterior and interior color are entered by hand (they aren't part of a VIN)
+
 **Lead Tracking (mini CRM)**
 - Log customer leads and link them to the car they're interested in
 - Track lead status: `new → contacted → negotiating → won/lost`
@@ -310,6 +317,7 @@ car-crm/
 ├── auth.js            # Sign-in, sessions, roles/permissions, user management
 ├── audit.js           # Audit log: recording changes and reading them back
 ├── encryption.js      # Encrypts SSNs and license numbers at rest
+├── vin.js             # VIN validation and decoding (NHTSA vPIC)
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)

@@ -127,3 +127,15 @@ test('stats reflect the database', async () => {
   const cars = (await api('GET', '/cars')).body;
   assert.strictEqual(stats.totalCars, cars.length);
 });
+
+test('car numbers saved as text by older versions are fixed on startup', async () => {
+  const dealership = await h.defaultDealershipId();
+  await h.store.pool.query(
+    `INSERT INTO cars (dealership_id, id, data) VALUES ($1, 'text-numbers', $2)`,
+    [dealership, { id: 'text-numbers', make: 'Old', model: 'Edit', year: '2018', mileage: '52000', cost: '9000', price: '11500', status: 'available' }]
+  );
+  await h.bootstrap();
+  const car = (await api('GET', '/cars/text-numbers')).body;
+  assert.deepStrictEqual([car.year, car.mileage, car.cost, car.price], [2018, 52000, 9000, 11500]);
+  assert.strictEqual(typeof (await api('GET', '/stats')).body.inventoryValue, 'number');
+});
