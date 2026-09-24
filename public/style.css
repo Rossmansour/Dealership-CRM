@@ -1230,3 +1230,19 @@ body.cannot-deleteRecords .activity-delete { display: none; }
   .car-grid, .car-grid-pricing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .car-modal .vin-row button { margin-bottom: 8px; padding-top: 7px; padding-bottom: 7px; }
+
+/* ---------- Key status (from the key machine) ---------- */
+.key-status { font-size: 12px; white-space: nowrap; line-height: 1.5; }
+.key-status div { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.key-status .key-in { color: var(--green); }
+.key-status .key-out { color: var(--text); }
+.key-status .key-overdue, .key-status .key-missing { color: var(--red); font-weight: 600; }
+.key-status .key-none { color: var(--text-muted); }
+
+/* ---------- Integrations ---------- */
+.integration-token-form { display: flex; gap: 8px; margin: 10px 0; }
+.integration-token-form input { flex: 1; margin: 0; }
+.integration-token-form button { margin: 0; }
+.integration-code { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.new-token-box { background: var(--highlight-bg); border: 1px solid var(--blue); border-radius: 8px; padding: 12px; margin-bottom: 8px; font-size: 13px; }
+.new-token-box code { display: block; margin: 6px 0; padding: 8px; background: var(--surface); border-radius: 6px; word-break: break-all; user-select: all; }

@@ -16,6 +16,7 @@ const audit = require('./audit');
 const encryption = require('./encryption');
 const vinDecoder = require('./vin');
 const photos = require('./photos');
+const keys = require('./keys');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1365,6 +1366,66 @@ app.delete('/api/deals/:id', allow('deleteRecords'), wrap(async (req, res) => {
   });
   if (!deleted) return res.status(404).json({ error: 'Deal not found' });
   res.status(204).send();
+}));
+
+// ---------- KEYS (from the key machine) ----------
+
+// Where each car's keys are right now, for the inventory Key column.
+app.get('/api/keys', wrap(async (req, res) => {
+  res.json(await keys.listKeys(req.dealershipId));
+}));
+
+// The key machine (or its connector) sends each check-out / check-in here,
+// authenticated with an integration token instead of a user login:
+//   Authorization: Bearer crm_...
+//   { "action": "check_out", "tagCode": "A-114", "stockNumber": "ST-4821",
+//     "personName": "Sam Sales", "occurredAt": "2026-09-24T14:05:00Z", "eventId": "kt-99812" }
+// See "Key machine integration" in the README for every field.
+app.post('/api/integrations/keys/events', wrap(async (req, res) => {
+  const token = await keys.authenticateToken(req);
+  if (!token) return res.status(401).json({ error: 'Missing or invalid integration token.' });
+  const result = await keys.ingestMachineEvent(token, req.body);
+  res.status(result.status).json(result.body);
+}));
+
+// Admin: tokens that let outside systems (like the key machine) send data in.
+app.get('/api/integrations/tokens', allow('manageIntegrations'), wrap(async (req, res) => {
+  const { rows } = await store.pool.query(
+    `SELECT id, name, created_at, last_used_at FROM integration_tokens
+     WHERE dealership_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC`,
+    [req.dealershipId]
+  );
+  res.json(rows.map(r => ({ id: r.id, name: r.name, createdAt: r.created_at, lastUsedAt: r.last_used_at })));
+}));
+
+// The token itself is only returned here, once. Only a hash is stored.
+app.post('/api/integrations/tokens', allow('manageIntegrations'), wrap(async (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'Give the connection a name, e.g. "KeyTrak".' });
+  const created = await store.tx(q => keys.createToken(q, req, name));
+  res.status(201).json({ id: created.id, name: created.name, createdAt: created.created_at, token: created.token });
+}));
+
+app.delete('/api/integrations/tokens/:id', allow('manageIntegrations'), wrap(async (req, res) => {
+  const revoked = await store.tx(async q => {
+    const { rows } = await q.query(
+      `UPDATE integration_tokens SET revoked_at = now()
+       WHERE dealership_id = $1 AND id::text = $2 AND revoked_at IS NULL RETURNING id, name`,
+      [req.dealershipId, req.params.id]
+    );
+    if (rows[0]) {
+      await audit.record(q, req, { action: 'delete', entityType: 'integration', entityId: rows[0].id, label: rows[0].name, details: 'Integration token revoked' });
+    }
+    return rows[0];
+  });
+  if (!revoked) return res.status(404).json({ error: 'Token not found.' });
+  res.status(204).send();
+}));
+
+// Key events that couldn't be matched to a car (e.g. a stock # that isn't
+// in the CRM's inventory), to help an admin spot setup problems.
+app.get('/api/integrations/keys/unmatched', allow('manageIntegrations'), wrap(async (req, res) => {
+  res.json(await keys.listUnmatched(req.dealershipId));
 }));
 
 // ---------- AUDIT LOG ----------

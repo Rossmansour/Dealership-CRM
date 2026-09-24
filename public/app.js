@@ -74,19 +74,21 @@ function userCan(permission) {
 // Hides buttons for things this user's role can't do. The server enforces
 // the same rules regardless -- this just avoids offering dead ends.
 function applyPermissionsToUI() {
-  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers', 'viewAuditLog']) {
+  for (const permission of ['editInventory', 'deleteRecords', 'editSettings', 'manageUsers', 'viewAuditLog', 'manageIntegrations']) {
     document.body.classList.toggle(`cannot-${permission}`, !userCan(permission));
   }
   document.getElementById('currentUserName').textContent = currentUser.name;
   document.getElementById('adminMenuBtn').style.display =
-    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog')) ? '' : 'none';
+    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog') || userCan('manageIntegrations')) ? '' : 'none';
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
   document.getElementById('adminAuditLogBtn').style.display = userCan('viewAuditLog') ? '' : 'none';
+  document.getElementById('adminIntegrationsBtn').style.display = userCan('manageIntegrations') ? '' : 'none';
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
 }
 
 let cars = [];
+let vehicleKeys = []; // key status from the key machine (see Key column)
 let appSettings = {};
 let leads = [];
 let deals = [];
@@ -165,13 +167,15 @@ setActiveModule('crm');
 // ---------- Data loading ----------
 
 async function loadAll() {
-  const [carsRes, leadsRes, dealsRes, statsRes] = await Promise.all([
+  const [carsRes, leadsRes, dealsRes, statsRes, keysRes] = await Promise.all([
     fetch(`${API}/cars`).then(r => r.json()),
     fetch(`${API}/leads`).then(r => r.json()),
     fetch(`${API}/deals`).then(r => r.json()),
-    fetch(`${API}/stats`).then(r => r.json())
+    fetch(`${API}/stats`).then(r => r.json()),
+    fetch(`${API}/keys`).then(r => r.json())
   ]);
   cars = carsRes;
+  vehicleKeys = Array.isArray(keysRes) ? keysRes : [];
   leads = leadsRes;
   deals = dealsRes;
   renderStats(statsRes);
@@ -255,6 +259,7 @@ function renderCars() {
         <td>${c.mileage.toLocaleString()}</td>
         <td>$${c.price.toLocaleString()}</td>
         <td><span class="badge ${c.status}">${c.status}</span></td>
+        <td class="key-status">${keyStatusHtml(c.id)}</td>
         <td>${c.status === 'sold' ? '-' : daysListed}</td>
         <td class="row-actions">
           <button onclick="editCar(${js(c.id)})">Edit</button>
@@ -408,6 +413,48 @@ function populateLeadCarOptions() {
     .join('');
   select.value = current;
 }
+
+// ---------- Key status (from the key machine) ----------
+// The key machine (KeyTrak etc.) reports check-outs and check-ins; this
+// just shows them. A key out longer than this is highlighted.
+const KEY_OVERDUE_MINUTES = 120;
+
+function formatKeyTime(iso) {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function keyStatusHtml(carId) {
+  const carKeys = vehicleKeys.filter(k => k.carId === carId);
+  if (!carKeys.length) return html`<span class="key-none">—</span>`;
+  const several = carKeys.length > 1;
+  return carKeys.map(k => {
+    const name = several ? `${k.label}: ` : '';
+    if (k.status === 'out') {
+      const minutesOut = (Date.now() - new Date(k.statusSince)) / 60000;
+      const overdue = minutesOut > KEY_OVERDUE_MINUTES;
+      const text = `${name}${k.holderName || 'Out'} · ${formatKeyTime(k.statusSince)}`;
+      return html`<div class="${overdue ? 'key-overdue' : 'key-out'}" title="${text}${overdue ? ' (out longer than 2 hours)' : ''}">🔑 ${text}</div>`;
+    }
+    if (k.status === 'missing') return html`<div class="key-missing">🔑 ${name}Missing</div>`;
+    return html`<div class="key-in">🔑 ${name}In${k.slot ? ` · slot ${k.slot}` : ''}</div>`;
+  });
+}
+
+// Keep key status current without reloading: check every 30 seconds while
+// the page is open in front of someone.
+async function refreshKeys() {
+  if (document.hidden || !currentUser) return;
+  const res = await fetch(`${API}/keys`);
+  if (!res.ok) return;
+  vehicleKeys = await res.json();
+  renderCars();
+}
+setInterval(refreshKeys, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshKeys(); });
 
 // ---------- Photo thumbnails ----------
 // Photos stored in Cloudinary can be resized on the fly by adding a size
@@ -2526,6 +2573,83 @@ document.getElementById('auditSearch').addEventListener('input', () => {
 for (const id of ['auditTypeFilter', 'auditFrom', 'auditTo']) {
   document.getElementById(id).addEventListener('change', () => loadAuditLog());
 }
+
+// ---------- Integrations (admins): key machine connection ----------
+
+const integrationsModal = document.getElementById('integrationsModal');
+const KEY_ACTION_LABELS = { check_out: 'Checked out', check_in: 'Checked in', missing: 'Missing' };
+
+async function loadIntegrations() {
+  document.getElementById('integrationEndpoint').textContent = `${location.origin}/api/integrations/keys/events`;
+
+  const [tokensRes, unmatchedRes] = await Promise.all([
+    fetch(`${API}/integrations/tokens`), fetch(`${API}/integrations/keys/unmatched`)
+  ]);
+  if (!tokensRes.ok || !unmatchedRes.ok) return;
+  const tokens = await tokensRes.json();
+  const unmatched = await unmatchedRes.json();
+
+  document.getElementById('integrationTokensBody').innerHTML = tokens.length
+    ? tokens.map(t => html`
+        <tr>
+          <td>${t.name}</td>
+          <td>${new Date(t.createdAt).toLocaleDateString()}</td>
+          <td>${t.lastUsedAt ? new Date(t.lastUsedAt).toLocaleString() : 'Never'}</td>
+          <td class="row-actions"><button class="delete" onclick="revokeIntegrationToken(${js(t.id)}, ${js(t.name)})">Revoke</button></td>
+        </tr>`).join('')
+    : html`<tr><td colspan="4" class="audit-note">No tokens yet.</td></tr>`;
+
+  document.getElementById('unmatchedKeyEventsBody').innerHTML = unmatched.length
+    ? unmatched.map(u => html`
+        <tr>
+          <td>${new Date(u.receivedAt).toLocaleString()}</td>
+          <td>${KEY_ACTION_LABELS[u.action] || u.action}</td>
+          <td>${[u.stockNumber && `Stock ${u.stockNumber}`, u.vin && `VIN ${u.vin}`, u.tagCode && `Tag ${u.tagCode}`].filter(Boolean).join(' · ')}</td>
+          <td>${u.personName || ''}</td>
+          <td>${u.source}</td>
+        </tr>`).join('')
+    : html`<tr><td colspan="5" class="audit-note">None -- every key event matched a car.</td></tr>`;
+}
+
+document.getElementById('adminIntegrationsBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  document.getElementById('newTokenResult').innerHTML = '';
+  integrationsModal.classList.add('active');
+  await loadIntegrations();
+});
+
+document.getElementById('closeIntegrationsBtn').addEventListener('click', () => {
+  document.getElementById('newTokenResult').innerHTML = ''; // don't leave a token on screen
+  integrationsModal.classList.remove('active');
+});
+
+document.getElementById('newTokenForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const res = await fetch(`${API}/integrations/tokens`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: document.getElementById('newTokenName').value })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (res.status !== 403) alert(data.error || 'Could not create the token.');
+    return;
+  }
+  document.getElementById('newTokenForm').reset();
+  document.getElementById('newTokenResult').innerHTML = html`
+    <div class="new-token-box">
+      <strong>Copy this token now -- it won't be shown again.</strong>
+      <code>${data.token}</code>
+      Give it only to whoever is setting up the ${data.name} connection. Treat it like a password.
+    </div>`;
+  await loadIntegrations();
+});
+
+window.revokeIntegrationToken = async function(id, name) {
+  if (!confirm(`Revoke the "${name}" token? Anything using it will stop sending key updates.`)) return;
+  await fetch(`${API}/integrations/tokens/${id}`, { method: 'DELETE' });
+  await loadIntegrations();
+};
 
 // ---------- My Account / Sign Out ----------
 

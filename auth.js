@@ -35,7 +35,8 @@ const PERMISSIONS = {
   deleteRecords: ['admin', 'sales_manager'],   // delete leads, deals, activity log entries
   editSettings: ['admin'],                     // fee defaults and tax rate tables
   manageUsers: ['admin'],
-  viewAuditLog: ['admin', 'sales_manager']
+  viewAuditLog: ['admin', 'sales_manager'],
+  manageIntegrations: ['admin']               // connect outside systems like the key machine
 };
 
 function can(user, permission) {
@@ -198,7 +199,8 @@ async function announceSetupIfNeeded(baseUrl) {
 // ---------- Middleware ----------
 
 // Routes under /api that work without being signed in.
-const PUBLIC_API_PATHS = new Set(['/auth/login', '/auth/logout', '/auth/setup', '/auth/setup-status']);
+// (The key machine route checks its own integration token instead.)
+const PUBLIC_API_PATHS = new Set(['/auth/login', '/auth/logout', '/auth/setup', '/auth/setup-status', '/integrations/keys/events']);
 
 async function requireLogin(req, res, next) {
   if (PUBLIC_API_PATHS.has(req.path)) return next();
