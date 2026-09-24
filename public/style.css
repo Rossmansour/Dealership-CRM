@@ -1538,3 +1538,7 @@ body.wide-page main { max-width: 1400px; }
   .appraisal-grid .span-3 { grid-column: span 2; }
 }
 #apRecalls p.audit-note { font-size: 12px; margin: 8px 0 0; }
+.recall-vin { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.nhtsa-vin-link { display: inline-block; text-align: center; text-decoration: none; }
+.recall-model-title { font-size: 12px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; }
+.recall-summary.unknown { color: var(--amber); font-weight: 600; }

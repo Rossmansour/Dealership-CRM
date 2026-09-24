@@ -1100,26 +1100,55 @@ function renderProviderSlots() {
 
 // ----- Recalls (live, NHTSA) -----
 
+// Two different questions, answered separately and labeled plainly:
+//  - "Recalls for this model": every recall NHTSA has issued for the
+//    year/make/model (live, free). Some may already be fixed on this car.
+//  - "Open recalls for this VIN": what's still unrepaired on this exact
+//    car. That's the official NHTSA VIN search (one click away) until a
+//    VIN-level data source is connected.
+function nhtsaVinLink(vin) {
+  return VIN_PATTERN.test(vin || '')
+    ? html`<a class="btn-secondary btn-small nhtsa-vin-link" href="https://www.nhtsa.gov/recalls?vin=${encodeURIComponent(vin)}" target="_blank" rel="noopener noreferrer">Check this VIN for open recalls on NHTSA ↗</a>`
+    : html`<span class="audit-note">Enter the VIN to check its open recalls on nhtsa.gov.</span>`;
+}
+
 function renderRecalls() {
   const a = currentAppraisal;
   const el = document.getElementById('apRecalls');
+  const vinSlot = providerList.filter(p => p.key === 'vin_recalls').map(p => providerSlotHtml(p));
+  const vinBlock = html`<div class="recall-vin">${vinSlot}${nhtsaVinLink(a.vin)}</div>`;
+
   if (!a.recalls) {
-    el.innerHTML = html`<p class="audit-note">Recalls are checked automatically once the year, make, and model are in.</p>
-      <button type="button" class="btn-secondary btn-small" onclick="checkRecalls()">Check recalls</button>`;
+    el.innerHTML = html`${vinBlock}
+      <p class="audit-note">Recalls for the model are checked automatically once the year, make, and model are in.</p>
+      <button type="button" class="btn-secondary btn-small" onclick="checkRecalls()">Check model recalls</button>`;
     return;
   }
-  const items = a.recalls.items || [];
+  const r = a.recalls;
+  const items = r.items || [];
+  const vehicle = r.vehicle || [a.year, a.make, a.model].filter(Boolean).join(' ');
+  let summary;
+  if (r.modelFound === false) {
+    summary = html`<div class="recall-summary unknown">NHTSA doesn't list a model matching "${a.model}" for ${a.year} ${a.make}. This does not mean there are no recalls -- check the VIN on NHTSA.</div>`;
+  } else if (items.length) {
+    summary = html`<div class="recall-summary has-recalls">${items.length} recall${items.length === 1 ? '' : 's'} issued for the ${vehicle}</div>
+      <div class="audit-note">These apply to the model in general. Some may already be repaired on this car -- the NHTSA VIN check shows which are still open.</div>`;
+  } else {
+    summary = html`<div class="recall-summary no-recalls">No recalls issued for the ${vehicle}</div>`;
+  }
+  const checked = (r.matchedModels || []).length
+    ? html` NHTSA model names checked: ${(r.matchedModels || []).join(', ')}.` : '';
   el.innerHTML = html`
-    <div class="recall-summary ${items.length ? 'has-recalls' : 'no-recalls'}">
-      ${items.length ? html`⚠ ${items.length} recall${items.length === 1 ? '' : 's'} for this model year` : '✓ No recalls on file for this model year'}
-    </div>
-    ${items.map(r => html`
+    ${vinBlock}
+    <div class="recall-model-title">Recalls for this model</div>
+    ${summary}
+    ${items.map(item => html`
       <details class="recall-item">
-        <summary><strong>${r.component || 'Recall'}</strong> <span class="audit-note">#${r.campaign}</span></summary>
-        <p>${r.summary}</p>
-        ${r.remedy ? html`<p><strong>Remedy:</strong> ${r.remedy}</p>` : ''}
+        <summary><strong>${item.component || 'Recall'}</strong> <span class="audit-note">#${item.campaign}${item.models && item.models.length ? ` · ${item.models.join(', ')}` : ''}</span></summary>
+        <p>${item.summary}</p>
+        ${item.remedy ? html`<p><strong>Remedy:</strong> ${item.remedy}</p>` : ''}
       </details>`)}
-    <p class="audit-note">Checked ${new Date(a.recalls.checkedAt).toLocaleString()}. Whether a recall was already fixed on this VIN is checked at nhtsa.gov/recalls. <button type="button" class="link-btn" onclick="checkRecalls()">Check again</button></p>`;
+    <p class="audit-note">Checked ${new Date(r.checkedAt).toLocaleString()}.${checked} <button type="button" class="link-btn" onclick="checkRecalls()">Check again</button></p>`;
 }
 
 window.checkRecalls = async function() {
@@ -1303,7 +1332,7 @@ document.getElementById('appraisalPrintBtn').addEventListener('click', () => {
       <tr><td>Colors</td><td>${[a.exteriorColor, a.interiorColor].filter(Boolean).join(' / ') || '--'}</td></tr>
       <tr><td>Condition</td><td>${CONDITION_LABELS[a.condition] || '--'}</td></tr>
       <tr><td>Equipment</td><td>${(a.equipment || []).join(', ') || '--'}</td></tr>
-      <tr><td>Open recalls</td><td>${a.recalls ? String((a.recalls.items || []).length) : 'Not checked'}</td></tr>
+      <tr><td>Recalls issued for this model</td><td>${!a.recalls ? 'Not checked' : a.recalls.modelFound === false ? 'Model not matched -- check VIN at nhtsa.gov/recalls' : `${(a.recalls.items || []).length} (open recalls on this VIN: check nhtsa.gov/recalls)`}</td></tr>
     </table>
     <table>
       ${(a.recon || []).map(r => html`<tr><td>Recon: ${r.description || 'Item'}</td><td>${money(r.cost)}</td></tr>`)}

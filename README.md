@@ -33,7 +33,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 **Appraisals ("book outs") -- Vehicle Management → Appraisals**
 - Start one from **+ New Appraisal**, a customer's profile (**Appraise a Trade**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
 - VIN decode fills year, make, model, trim, body, engine, drivetrain, transmission, and fuel; then mileage, colors, condition, and equipment (clickable options by group)
-- **Safety recalls** for the year/make/model come live from NHTSA
+- **Recalls for this model**: every recall NHTSA has issued for the year/make/model, live. The decoded model name is matched to the names NHTSA files recalls under (e.g. "GLC-Class" → GLC300, GLC43 AMG), and the names checked are shown. These are model-wide -- some may already be repaired on the car. If NHTSA doesn't list the model, it says so instead of showing "no recalls"
+- **Open recalls for this VIN** (what's still unrepaired on this exact car): a **Check this VIN on NHTSA** button opens nhtsa.gov's official VIN search. A built-in "Not available yet" slot fills in once a VIN-level recall source is connected
 - Slots for **Market Comparables** (comparables, market day supply, suggested retail), **Factory Options**, **Kelley Blue Book, J.D. Power, Black Book, Manheim MMR, Carfax, AutoCheck,** and the **window sticker**. Each shows **"Not available yet"** until that source is licensed and connected in `providers.js` -- then it fills in automatically
 - Recon line items, and the offer calculator: **max offer = target retail - recon - pack - target gross** (pack and default target gross are store settings under Admin → Fee Defaults), with how your offer compares
 - **Acquire → add to inventory** (sales managers and admins) creates the inventory car with everything filled in, linked both ways; or **Mark lost** with a reason (and reopen)
