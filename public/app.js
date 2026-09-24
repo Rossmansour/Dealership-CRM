@@ -95,6 +95,8 @@ let appraisals = [];
 let providerList = []; // outside data sources and whether each is live yet
 let currentAppraisal = null; // the appraisal open on screen (with unsaved edits)
 let appraisalDirty = false;
+let staffList = []; // who works here, for the appraiser / salesperson pickers
+let retailPerformance = null; // this store's own sales of similar cars, for the open appraisal
 let appSettings = {};
 let leads = [];
 let deals = [];
@@ -829,6 +831,8 @@ const money = n => (n === null || n === undefined || n === '' || Number.isNaN(Nu
 
 const APPRAISAL_STATUS_LABELS = { open: 'Open', acquired: 'Acquired', lost: 'Lost' };
 const CONDITION_LABELS = { excellent: 'Excellent', very_good: 'Very Good', good: 'Good', fair: 'Fair', poor: 'Poor' };
+const APPRAISAL_SOURCE_LABELS = { trade_in: 'Trade-in', street_purchase: 'Street Purchase', service_drive: 'Service Drive' };
+const APPRAISAL_CATEGORY_LABELS = { undecided: 'Decide Later', retail: 'Retail', wholesale: 'Wholesale' };
 
 // Common equipment, grouped. When a factory-options source is connected,
 // its exact option list for the VIN replaces this.
@@ -844,7 +848,8 @@ const AP_FIELDS = [
   ['bodyStyle', 'apBodyStyle'], ['drivetrain', 'apDrivetrain'], ['engine', 'apEngine'], ['transmission', 'apTransmission'],
   ['fuelType', 'apFuelType'], ['mileage', 'apMileage'], ['exteriorColor', 'apExteriorColor'], ['interiorColor', 'apInteriorColor'],
   ['condition', 'apCondition'], ['leadId', 'apLeadId'], ['notes', 'apNotes'],
-  ['targetRetail', 'apTargetRetail'], ['targetGross', 'apTargetGross'], ['offer', 'apOffer']
+  ['source', 'apSource'], ['category', 'apCategory'],
+  ['targetRetail', 'apTargetRetail'], ['otherCosts', 'apOtherCosts'], ['targetGross', 'apTargetGross'], ['offer', 'apOffer']
 ];
 
 
@@ -949,7 +954,18 @@ function renderAppraisalDetail() {
   for (const [field, inputId] of AP_FIELDS) {
     document.getElementById(inputId).value = a[field] ?? '';
   }
+  if (!a.source) document.getElementById('apSource').value = 'trade_in';
+  if (!a.category) document.getElementById('apCategory').value = 'undecided';
+  // The appraiser: anyone on staff (plus whoever it is now, even if they've since left).
+  const appraiserOptions = [...staffList];
+  if (a.appraisedBy && !appraiserOptions.some(u => u.id === a.appraisedBy.id)) appraiserOptions.unshift(a.appraisedBy);
+  document.getElementById('apAppraiser').innerHTML = appraiserOptions.map(u => html`<option value="${u.id}">${u.name}</option>`).join('');
+  document.getElementById('apAppraiser').value = a.appraisedBy ? a.appraisedBy.id : '';
+  // Older appraisals didn't store this; if they had an offer, keep it and work out the profit.
+  const solveFor = a.calcSolveFor || (a.offer ? 'profit' : 'appraisal');
+  document.querySelectorAll('input[name="apSolveFor"]').forEach(r => { r.checked = r.value === solveFor; });
   document.getElementById('apVinStatus').innerHTML = '';
+  document.getElementById('apOfferHistory').hidden = true;
 
   const locked = a.status !== 'open';
   document.querySelectorAll('#appraisalDetailView input, #appraisalDetailView select, #appraisalDetailView textarea')
@@ -962,8 +978,12 @@ function renderAppraisalDetail() {
   renderProviderSlots();
   renderRecalls();
   renderReconLines();
+  renderSummaryHeader();
   updateOfferCalc();
+  renderOfferHistory();
+  renderCustomerOffer();
   renderOutcome();
+  loadRetailPerformance();
 }
 
 // Reads the form back into currentAppraisal.
@@ -971,6 +991,8 @@ function collectAppraisalForm() {
   const a = currentAppraisal;
   for (const [field, inputId] of AP_FIELDS) a[field] = document.getElementById(inputId).value;
   a.leadId = a.leadId || null;
+  a.appraiserId = document.getElementById('apAppraiser').value || null;
+  a.calcSolveFor = (document.querySelector('input[name="apSolveFor"]:checked') || {}).value || 'appraisal';
   a.recon = [...document.querySelectorAll('.recon-line')].map(row => ({
     description: row.querySelector('.recon-desc').value,
     cost: Number(row.querySelector('.recon-cost').value) || 0
@@ -992,15 +1014,21 @@ async function saveAppraisal() {
     return false;
   }
   const saved = await res.json();
+  const vehicleChanged = ['year', 'make', 'model'].some(f => String(saved[f] ?? '') !== String((appraisals.find(x => x.id === saved.id) || {})[f] ?? ''));
   replaceAppraisal(saved);
   currentAppraisal = JSON.parse(JSON.stringify(saved));
   setAppraisalDirty(false);
+  renderSummaryHeader();
+  renderOfferHistory();
+  if (vehicleChanged) loadRetailPerformance();
   // Pre-fill "Bought for" / "Asking price" from the saved offer and target
   // retail, unless someone already typed there.
   const acquiredFor = document.getElementById('apAcquiredFor');
   const asking = document.getElementById('apAskingPrice');
   if (acquiredFor && !acquiredFor.value && saved.offer) acquiredFor.value = saved.offer;
   if (asking && !asking.value && saved.targetRetail) asking.value = saved.targetRetail;
+  const coAmount = document.getElementById('apCoAmount');
+  if (coAmount && !coAmount.value && saved.offer) coAmount.value = saved.offer;
   return true;
 }
 
@@ -1011,13 +1039,18 @@ function replaceAppraisal(updated) {
 
 document.getElementById('appraisalSaveBtn').addEventListener('click', saveAppraisal);
 document.getElementById('appraisalBackBtn').addEventListener('click', showAppraisalList);
+// The outcome and customer-offer boxes act on their own (their buttons
+// save), so typing there doesn't count as an unsaved appraisal change.
+const apSeparateForm = el => el.closest('#apOutcome, #apCustomerOffer');
 document.getElementById('appraisalDetailView').addEventListener('input', (e) => {
-  if (e.target.closest('#apOutcome')) return;
+  if (apSeparateForm(e.target)) return;
   setAppraisalDirty(true);
   updateOfferCalc();
 });
 document.getElementById('appraisalDetailView').addEventListener('change', (e) => {
-  if (!e.target.closest('#apOutcome')) setAppraisalDirty(true);
+  if (apSeparateForm(e.target)) return;
+  setAppraisalDirty(true);
+  updateOfferCalc();
 });
 window.addEventListener('beforeunload', (e) => {
   if (appraisalDirty) { e.preventDefault(); e.returnValue = ''; }
@@ -1090,12 +1123,23 @@ window.togglePlugInfo = function(key) {
   if (el) el.hidden = !el.hidden;
 };
 
+// What a section will show once its source is connected -- laid out now,
+// with dashes until then.
+function pendingStats(labels) {
+  return html`<div class="pending-stats">${labels.map(l => html`<div><span>${l}</span><strong>--</strong></div>`)}</div>`;
+}
+
 function renderProviderSlots() {
   const byCat = cat => providerList.filter(p => p.category === cat);
-  document.getElementById('apMarketPlug').innerHTML = byCat('market').map(p => providerSlotHtml(p, true)).join('');
-  document.getElementById('apOptionsPlug').innerHTML = byCat('options').map(p => providerSlotHtml(p)).join('');
-  document.getElementById('apBookPlugs').innerHTML = byCat('book').map(p => providerSlotHtml(p)).join('');
-  document.getElementById('apHistoryPlugs').innerHTML = [...byCat('history'), ...byCat('sticker')].map(p => providerSlotHtml(p)).join('');
+  const slots = cat => byCat(cat).map(p => providerSlotHtml(p)).join('');
+  document.getElementById('apMarketPlug').innerHTML = byCat('market').map(p => providerSlotHtml(p, true)).join('') +
+    pendingStats(['Comparables', 'Rank', '% of market', 'Market days supply', 'Low', 'Average', 'High']);
+  document.getElementById('apOptionsPlug').innerHTML = slots('options');
+  document.getElementById('apBookPlugs').innerHTML = slots('book') +
+    html`<button type="button" class="btn-secondary btn-small" disabled title="Not available yet -- needs the book licenses">Print Book Sheets (not available yet)</button>`;
+  document.getElementById('apAuctionPlugs').innerHTML = slots('auctions') +
+    pendingStats(['Above', 'Average', 'Below', 'Last 30 days', 'Last 6 months', 'Last year']);
+  document.getElementById('apHistoryPlugs').innerHTML = slots('history') + slots('sticker');
 }
 
 // ----- Recalls (live, NHTSA) -----
@@ -1196,31 +1240,235 @@ document.getElementById('apReconLines').addEventListener('click', (e) => {
   updateOfferCalc();
 });
 
-// ----- Offer calculator -----
-// max offer = target retail - recon - pack - target gross
+// ----- Appraisal calculator -----
+// asking price - recon - pack - other - profit = appraisal
+// Pick which one to work out; it's calculated from the others.
+
+function apNumber(id) { return Number(document.getElementById(id).value) || 0; }
 
 function updateOfferCalc() {
   const reconTotal = [...document.querySelectorAll('.recon-cost')].reduce((sum, i) => sum + (Number(i.value) || 0), 0);
   const pack = Number(appSettings.appraisalPack) || 0;
-  const targetRetail = Number(document.getElementById('apTargetRetail').value) || 0;
-  const targetGross = Number(document.getElementById('apTargetGross').value) || 0;
-  const offer = Number(document.getElementById('apOffer').value) || 0;
+  const solveFor = (document.querySelector('input[name="apSolveFor"]:checked') || {}).value || 'appraisal';
+  const costs = reconTotal + pack + apNumber('apOtherCosts');
+  const inputs = { appraisal: 'apOffer', profit: 'apTargetGross', asking: 'apTargetRetail' };
 
   document.getElementById('apReconTotal').textContent = money(reconTotal);
   document.getElementById('apCalcRecon').textContent = money(reconTotal);
   document.getElementById('apCalcPack').textContent = money(pack);
-  const maxOffer = targetRetail ? targetRetail - reconTotal - pack - targetGross : null;
-  document.getElementById('apMaxOffer').textContent = maxOffer === null ? 'Enter target retail' : money(maxOffer);
+
+  const locked = currentAppraisal && currentAppraisal.status !== 'open';
+  for (const [key, id] of Object.entries(inputs)) {
+    const el = document.getElementById(id);
+    el.readOnly = key === solveFor;
+    el.closest('label').classList.toggle('calc-solved', key === solveFor);
+    if (locked) el.readOnly = true;
+  }
 
   let note = '';
-  if (maxOffer !== null && offer) {
-    const diff = offer - maxOffer;
-    note = diff > 0
-      ? html`<span class="offer-over">${money(diff)} over max -- gross would be ${money(targetGross - diff)}</span>`
-      : html`<span class="offer-under">${money(-diff)} under max -- gross would be ${money(targetGross - diff)}</span>`;
+  const asking = apNumber('apTargetRetail'), profit = apNumber('apTargetGross'), appraisal = apNumber('apOffer');
+  if (!locked) {
+    if (solveFor === 'appraisal') {
+      if (asking) document.getElementById('apOffer').value = asking - costs - profit;
+      else { document.getElementById('apOffer').value = ''; note = 'Enter the asking price to work out the appraisal.'; }
+    } else if (solveFor === 'profit') {
+      if (asking && appraisal) document.getElementById('apTargetGross').value = asking - costs - appraisal;
+      else note = 'Enter the asking price and appraisal to work out the profit.';
+    } else if (appraisal) {
+      document.getElementById('apTargetRetail').value = appraisal + costs + profit;
+    } else note = 'Enter the appraisal to work out the asking price.';
   }
+  const gross = apNumber('apTargetGross');
+  if (!note && gross < 0) note = html`<span class="offer-over">That's a ${money(-gross)} loss.</span>`;
   document.getElementById('apOfferNote').innerHTML = note;
+  renderValues();
 }
+
+document.getElementById('apHistoryToggle').addEventListener('click', () => {
+  const el = document.getElementById('apOfferHistory');
+  el.hidden = !el.hidden;
+  document.getElementById('apHistoryToggle').textContent = el.hidden ? 'View history' : 'Hide history';
+});
+
+// Every saved change to the appraisal amount, newest first.
+function renderOfferHistory() {
+  const a = currentAppraisal;
+  document.getElementById('apCurrentValue').textContent = a.offer ? money(a.offer) : '--';
+  const history = (a.offerHistory || []).slice().reverse();
+  document.getElementById('apOfferHistory').innerHTML = history.length
+    ? html`<table class="mini-table">${history.map(h => html`
+        <tr><td>${new Date(h.at).toLocaleString()}</td><td>${h.by ? h.by.name : '--'}</td>
+          <td>${h.previous !== null && h.previous !== undefined ? html`${money(h.previous)} → ` : ''}<strong>${h.amount === null ? 'cleared' : money(h.amount)}</strong></td></tr>`)}</table>`
+    : html`<p class="audit-note">No appraisal amount saved yet.</p>`;
+}
+
+// ----- Summary header: vehicle, source, and values at a glance -----
+
+function renderSummaryHeader() {
+  const a = currentAppraisal;
+  document.getElementById('apSummaryVehicle').textContent = appraisalVehicle(a);
+  document.getElementById('apSummaryVin').textContent = [a.vin ? `VIN ${a.vin}` : 'No VIN yet',
+    a.mileage ? `${Number(a.mileage).toLocaleString()} mi` : '', a.exteriorColor].filter(Boolean).join(' · ');
+  document.getElementById('apHistoryChips').innerHTML = providerList.filter(p => p.category === 'history').map(p => html`
+    <button type="button" class="history-chip" onclick="jumpToAppraisalCard('apCardHistory')" title="${p.status === 'live' ? p.name : `${p.name}: not available yet`}">
+      ${p.name}<span>${p.status === 'live' ? '✓' : 'n/a'}</span></button>`).join('');
+}
+
+// Every value next to the appraisal, with the difference (value - appraisal).
+function renderValues() {
+  const appraisal = apNumber('apOffer');
+  const provider = key => providerList.find(p => p.key === key);
+  const rows = [
+    { label: 'Asking price', value: apNumber('apTargetRetail') || null },
+    { label: 'Your avg sale, similar cars', value: retailPerformance && retailPerformance.ready ? retailPerformance.sold.avgSalePrice : null,
+      empty: retailPerformance && retailPerformance.ready ? 'No sales yet' : '--' },
+    { key: 'market', label: 'Market value' },
+    { key: 'mmr', label: 'MMR' },
+    { key: 'kbb', label: 'KBB trade-in' },
+    { key: 'jdpower', label: 'J.D. Power clean trade-in' },
+    { key: 'blackbook', label: 'Black Book' }
+  ];
+  document.getElementById('apValues').innerHTML = html`
+    <div class="ap-value-row ap-value-main"><span>Appraisal</span><strong>${appraisal ? money(appraisal) : '--'}</strong><span></span></div>
+    ${rows.map(r => {
+      const p = r.key ? provider(r.key) : null;
+      if (p && p.status !== 'live') {
+        return html`<div class="ap-value-row muted"><span>${r.label}</span><span>Not available yet</span><span></span></div>`;
+      }
+      if (r.value === null || r.value === undefined) {
+        return html`<div class="ap-value-row"><span>${r.label}</span><span>${r.empty || '--'}</span><span></span></div>`;
+      }
+      const diff = appraisal ? r.value - appraisal : null;
+      return html`<div class="ap-value-row"><span>${r.label}</span><strong>${money(r.value)}</strong>
+        <span class="${diff === null ? '' : diff < 0 ? 'diff-neg' : 'diff-pos'}">${diff === null ? '' : `${diff < 0 ? '-' : '+'}${money(Math.abs(diff))}`}</span></div>`;
+    })}`;
+}
+
+// ----- Retail performance: this store's own sales of similar cars -----
+
+async function loadRetailPerformance() {
+  const a = currentAppraisal;
+  retailPerformance = null;
+  renderRetailPerformance();
+  const res = await fetch(`${API}/appraisals/${a.id}/retail-performance`);
+  if (!res.ok || !currentAppraisal || currentAppraisal.id !== a.id) return;
+  retailPerformance = await res.json();
+  renderRetailPerformance();
+  renderValues();
+}
+
+function renderRetailPerformance() {
+  const el = document.getElementById('apRetail');
+  const r = retailPerformance;
+  if (!r) { el.innerHTML = html`<p class="audit-note">Loading...</p>`; return; }
+  if (!r.ready) { el.innerHTML = html`<p class="audit-note">Shows once the make and model are in.</p>`; return; }
+  const days = n => n === null ? '--' : `${n} day${n === 1 ? '' : 's'}`;
+  el.innerHTML = html`
+    <div class="audit-note">Matching ${r.matching}</div>
+    <div class="retail-stats">
+      <div><span>Sold</span><strong>${r.sold.count}</strong></div>
+      <div><span>Avg days to sell</span><strong>${days(r.sold.avgDaysToSell)}</strong></div>
+      <div><span>Avg sale price</span><strong>${r.sold.avgSalePrice === null ? '--' : money(r.sold.avgSalePrice)}</strong></div>
+      <div><span>Avg gross</span><strong>${r.sold.avgGross === null ? '--' : money(r.sold.avgGross)}</strong></div>
+      <div><span>In stock now</span><strong>${r.inStock.count}</strong></div>
+      <div><span>Avg asking (in stock)</span><strong>${r.inStock.avgAskingPrice === null ? '--' : money(r.inStock.avgAskingPrice)}</strong></div>
+    </div>
+    ${r.sold.recent.length ? html`<table class="mini-table">
+      <tr><th>Sold</th><th>Car</th><th>Miles</th><th>Price</th><th>Gross</th><th>Days</th></tr>
+      ${r.sold.recent.map(c => html`<tr>
+        <td>${c.dateSold ? new Date(c.dateSold).toLocaleDateString() : '--'}</td>
+        <td>${[c.year, c.model, c.trim].filter(Boolean).join(' ')}${c.stockNumber ? ` #${c.stockNumber}` : ''}</td>
+        <td>${c.mileage ? Number(c.mileage).toLocaleString() : '--'}</td>
+        <td>${money(c.salePrice)}</td><td>${money(c.gross)}</td><td>${c.daysToSell ?? '--'}</td></tr>`)}
+    </table>` : html`<p class="audit-note">No sales of similar cars yet -- this fills in as you sell them.</p>`}`;
+}
+
+// ----- Customer offer -----
+
+function renderCustomerOffer() {
+  const a = currentAppraisal;
+  const el = document.getElementById('apCustomerOffer');
+  const lead = leads.find(l => l.id === a.leadId);
+  const past = (a.customerOffers || []).slice().reverse();
+  const pastHtml = past.length ? html`<table class="mini-table">${past.map(o => html`
+      <tr><td>${new Date(o.at).toLocaleDateString()}</td><td><strong>${money(o.amount)}</strong></td>
+        <td>${o.salesperson ? o.salesperson.name : (o.by ? o.by.name : '')}</td></tr>`)}</table>` : '';
+  if (a.status !== 'open') {
+    el.innerHTML = pastHtml || html`<p class="audit-note">No offers were made.</p>`;
+    return;
+  }
+  const me = staffList.find(u => u.id === currentUser.id);
+  el.innerHTML = html`
+    <div class="customer-offer-form">
+      <label>Offer <input type="number" id="apCoAmount" value="${a.offer ?? ''}" /></label>
+      ${lead ? html`<div class="co-customer">Customer: <strong>${lead.name}</strong></div>
+        ${lead.phone ? '' : html`<label>Phone <input type="tel" id="apCoPhone" /></label>`}
+        ${lead.email ? '' : html`<label>Email <input type="email" id="apCoEmail" /></label>`}`
+      : html`
+        <label>First name <input type="text" id="apCoFirst" /></label>
+        <label>Last name <input type="text" id="apCoLast" /></label>
+        <label>Phone <input type="tel" id="apCoPhone" /></label>
+        <label>Email <input type="email" id="apCoEmail" /></label>`}
+      <label>Salesperson
+        <select id="apCoSalesperson">
+          <option value="">--</option>
+          ${staffList.map(u => html`<option value="${u.id}" ${me && me.id === u.id ? html`selected` : ''}>${u.name}</option>`)}
+        </select>
+      </label>
+    </div>
+    <button type="button" class="btn-primary btn-small" id="apCoCreateBtn">Create Customer Offer</button>
+    <span class="audit-note" id="apCoStatus"></span>
+    ${lead ? '' : html`<p class="audit-note">Creates the customer in the CRM, or pick an existing one under Vehicle → Customer.</p>`}
+    ${pastHtml}`;
+  document.getElementById('apCoCreateBtn').onclick = createCustomerOffer;
+}
+
+async function createCustomerOffer() {
+  if (appraisalDirty && !(await saveAppraisal())) return;
+  const val = id => (document.getElementById(id) || {}).value || '';
+  const res = await fetch(`${API}/appraisals/${currentAppraisal.id}/customer-offer`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      amount: val('apCoAmount'), firstName: val('apCoFirst'), lastName: val('apCoLast'),
+      phone: val('apCoPhone'), email: val('apCoEmail'), salespersonId: val('apCoSalesperson') || null
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status !== 403) document.getElementById('apCoStatus').innerHTML = html`<span class="send-text-status-error">${body.error || 'Could not save the offer.'}</span>`;
+    return;
+  }
+  const i = leads.findIndex(l => l.id === body.lead.id);
+  if (i >= 0) leads[i] = body.lead; else leads.push(body.lead);
+  replaceAppraisal(body.appraisal);
+  renderRail();
+  await openAppraisal(body.appraisal.id);
+  document.getElementById('apCoStatus').textContent = body.leadCreated
+    ? `Offer saved. ${body.lead.name} was added to your customers.` : 'Offer saved.';
+}
+
+// ----- Section tabs and collapsing -----
+
+window.jumpToAppraisalCard = function(id) {
+  const card = document.getElementById(id);
+  if (!card) return;
+  card.classList.remove('collapsed');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+document.getElementById('apTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-target]');
+  if (btn) jumpToAppraisalCard(btn.dataset.target);
+});
+document.getElementById('apCollapseAllBtn').addEventListener('click', () => {
+  const cards = [...document.querySelectorAll('#appraisalDetailView .appraisal-layout .appraisal-card')];
+  const collapse = cards.some(c => !c.classList.contains('collapsed'));
+  cards.forEach(c => c.classList.toggle('collapsed', collapse));
+  document.getElementById('apCollapseAllBtn').textContent = collapse ? 'Expand all' : 'Collapse all';
+});
+document.querySelector('#appraisalDetailView .appraisal-layout').addEventListener('click', (e) => {
+  const title = e.target.closest('.car-panel-title');
+  if (title && !e.target.closest('button, a, input, select')) title.closest('.appraisal-card').classList.toggle('collapsed');
+});
 
 // ----- Outcome: acquire / lost / reopen -----
 
@@ -1316,12 +1564,13 @@ document.getElementById('appraisalPrintBtn').addEventListener('click', () => {
   const lead = leads.find(l => l.id === a.leadId);
   const reconTotal = (a.recon || []).reduce((sum, r) => sum + (Number(r.cost) || 0), 0);
   const pack = Number(appSettings.appraisalPack) || 0;
-  const maxOffer = a.targetRetail ? Number(a.targetRetail) - reconTotal - pack - (Number(a.targetGross) || 0) : null;
   document.getElementById('appraisalPrintContent').innerHTML = html`
     <h2>Vehicle Appraisal A-${a.appraisalNumber}</h2>
     <div class="proposal-meta">
       <span><strong>Customer:</strong> ${lead ? lead.name : '--'}</span>
-      <span><strong>Appraiser:</strong> ${a.appraisedBy ? a.appraisedBy.name : '--'}</span>
+      <span><strong>Appraiser:</strong> ${(staffList.find(u => u.id === a.appraiserId) || a.appraisedBy || {}).name || '--'}</span>
+      <span><strong>Source:</strong> ${APPRAISAL_SOURCE_LABELS[a.source] || '--'}</span>
+      <span><strong>Category:</strong> ${APPRAISAL_CATEGORY_LABELS[a.category] || '--'}</span>
       <span><strong>Date:</strong> ${new Date(a.dateCreated).toLocaleDateString()}</span>
     </div>
     <table>
@@ -1339,11 +1588,13 @@ document.getElementById('appraisalPrintBtn').addEventListener('click', () => {
       <tr class="total-row"><td>Recon total</td><td>${money(reconTotal)}</td></tr>
     </table>
     <table>
-      <tr><td>Target retail</td><td>${money(a.targetRetail)}</td></tr>
+      <tr><td>Asking price</td><td>${money(a.targetRetail)}</td></tr>
+      <tr><td>Recon</td><td>${money(reconTotal)}</td></tr>
       <tr><td>Pack</td><td>${money(pack)}</td></tr>
-      <tr><td>Target gross</td><td>${money(a.targetGross)}</td></tr>
-      <tr class="total-row"><td>Max offer</td><td>${money(maxOffer)}</td></tr>
-      <tr class="total-row"><td>Offer</td><td>${money(a.offer)}</td></tr>
+      <tr><td>Other</td><td>${money(a.otherCosts)}</td></tr>
+      <tr><td>Profit</td><td>${money(a.targetGross)}</td></tr>
+      <tr class="total-row"><td>Appraisal</td><td>${money(a.offer)}</td></tr>
+      ${(a.customerOffers || []).length ? html`<tr><td>Last offer to customer</td><td>${money(a.customerOffers[a.customerOffers.length - 1].amount)}</td></tr>` : ''}
     </table>
     ${a.notes ? html`<p><strong>Notes:</strong> ${a.notes}</p>` : ''}
     <p class="fine-print">Internal appraisal worksheet. Book values and vehicle history are not included until those sources are connected.</p>`;
@@ -3663,8 +3914,9 @@ async function init() {
   if (!res.ok) return; // the fetch wrapper is already sending them to sign in
   currentUser = await res.json();
   applyPermissionsToUI();
-  const [providersRes, settingsRes] = await Promise.all([fetch(`${API}/providers`), fetch(`${API}/settings`)]);
+  const [providersRes, settingsRes, staffRes] = await Promise.all([fetch(`${API}/providers`), fetch(`${API}/settings`), fetch(`${API}/staff`)]);
   if (providersRes.ok) providerList = await providersRes.json();
+  if (staffRes.ok) staffList = await staffRes.json();
   if (settingsRes.ok) appSettings = await settingsRes.json();
   loadAll();
 }

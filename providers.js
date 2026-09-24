@@ -10,7 +10,7 @@
 const PROVIDERS = [
   {
     key: 'market', name: 'Market Comparables', category: 'market',
-    description: 'Similar cars for sale near you, market day supply, price to market, and a suggested retail price.',
+    description: 'Similar cars for sale near you (filter by trim, drivetrain, mileage, equipment), your rank among them, % of market, market days supply, the low/average/high price range, and a suggested retail price.',
     needs: 'a market data license (e.g. MarketCheck)'
   },
   {
@@ -18,10 +18,14 @@ const PROVIDERS = [
     description: 'The exact trims and factory options for this VIN, to book the car out option by option.',
     needs: 'a vehicle data license (e.g. J.D. Power Chrome Data or DataOne)'
   },
-  { key: 'kbb', name: 'Kelley Blue Book', category: 'book', description: 'Trade-in and retail values, and the printed KBB book sheet.', needs: 'a KBB data license' },
-  { key: 'jdpower', name: 'J.D. Power', category: 'book', description: 'Clean trade-in and clean retail values.', needs: 'a J.D. Power valuation license' },
+  { key: 'kbb', name: 'Kelley Blue Book', category: 'book', description: 'The KBB book-out: option checkboxes with their add/deduct amounts, condition, mileage adjustment, trade-in and retail values, and the printed KBB book sheet.', needs: 'a KBB data license' },
+  { key: 'jdpower', name: 'J.D. Power', category: 'book', description: 'The J.D. Power book-out: option checkboxes with their add/deduct amounts, mileage adjustment, rough/average/clean trade-in, loan, and retail values, and the printed book sheet.', needs: 'a J.D. Power valuation license' },
   { key: 'blackbook', name: 'Black Book', category: 'book', description: 'Wholesale and retail values.', needs: 'a Black Book data license' },
-  { key: 'mmr', name: 'Manheim MMR', category: 'book', description: 'Manheim Market Report wholesale (auction) value.', needs: 'Manheim / Cox partner access' },
+  {
+    key: 'mmr', name: 'Manheim MMR', category: 'auctions',
+    description: 'Manheim Market Report: the auction (wholesale) value with mileage and condition adjustments, above/below/average, and price history from the last 30 days to the last year.',
+    needs: 'Manheim / Cox partner access'
+  },
   { key: 'carfax', name: 'Carfax', category: 'history', description: 'Vehicle history: owners, accidents, service, title.', needs: 'a Carfax partner agreement' },
   { key: 'autocheck', name: 'AutoCheck', category: 'history', description: 'Vehicle history report and AutoCheck score.', needs: 'an AutoCheck partner agreement' },
   { key: 'windowsticker', name: 'Window Sticker', category: 'sticker', description: 'The original factory window sticker (Monroney label).', needs: 'a window sticker data source' },
