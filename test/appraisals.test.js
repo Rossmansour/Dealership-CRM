@@ -20,23 +20,40 @@ let nhtsaRequests = [];
 let admin, manager, sales;
 
 before(async () => {
-  // Shaped like https://api.nhtsa.gov/recalls/recallsByVehicle?make=..&model=..&modelYear=..
+  // Shaped like api.nhtsa.gov:
+  //   /products/vehicle/models?modelYear=..&make=..&issueType=r  (the model names NHTSA files recalls under)
+  //   /recalls/recallsByVehicle?make=..&model=..&modelYear=..
+  const airBag = {
+    Manufacturer: 'Honda (American Honda Motor Co.)', NHTSACampaignNumber: '18V123000',
+    ReportReceivedDate: '01/02/2018', Component: 'AIR BAGS',
+    Summary: 'The passenger air bag inflator may rupture.', Consequence: 'Injury risk.', Remedy: 'Dealers will replace the inflator, free of charge.'
+  };
+  const recall = (campaign, component) => ({ ...airBag, NHTSACampaignNumber: campaign, Component: component });
+  const MODELS = {
+    'HONDA/2018': ['ACCORD', 'ACCORD HYBRID', 'CIVIC'],
+    'TOYOTA/2021': ['CAMRY', 'COROLLA'],
+    'MERCEDES-BENZ/2023': ['GLC300', 'GLC43 AMG', 'GLE350', 'C300']
+  };
+  const RECALLS = {
+    'ACCORD/2018': [airBag],
+    'ACCORD HYBRID/2018': [airBag, recall('18V555000', 'ELECTRICAL SYSTEM')],
+    'GLC300/2023': [recall('23V100000', 'STEERING')],
+    'GLC43 AMG/2023': [recall('23V200000', 'FUEL SYSTEM')],
+    'GLE350/2023': [recall('23V999000', 'SHOULD NOT APPEAR')]
+  };
   fakeNhtsa = http.createServer((req, res) => {
     nhtsaRequests.push(req.url);
     const u = new URL(req.url, 'http://x');
+    const p = k => u.searchParams.get(k) || '';
     res.setHeader('Content-Type', 'application/json');
-    if (u.searchParams.get('model') === 'Accord' && u.searchParams.get('modelYear') === '2018') {
-      return res.end(JSON.stringify({
-        Count: 1, Message: 'Results returned successfully',
-        results: [{
-          Manufacturer: 'Honda (American Honda Motor Co.)', NHTSACampaignNumber: '18V123000',
-          ReportReceivedDate: '01/02/2018', Component: 'AIR BAGS',
-          Summary: 'The passenger air bag inflator may rupture.', Consequence: 'Injury risk.', Remedy: 'Dealers will replace the inflator, free of charge.'
-        }]
-      }));
+    if (u.pathname === '/products/vehicle/models') {
+      const models = MODELS[`${p('make').toUpperCase()}/${p('modelYear')}`];
+      if (!models) { res.statusCode = 400; return res.end('{}'); }
+      return res.end(JSON.stringify({ count: models.length, results: models.map(model => ({ modelYear: p('modelYear'), make: p('make').toUpperCase(), model })) }));
     }
-    if (u.searchParams.get('model') === 'Nonsense') { res.statusCode = 400; return res.end('{}'); }
-    res.end(JSON.stringify({ Count: 0, Message: 'Results returned successfully', results: [] }));
+    if (p('model') === 'Nonsense') { res.statusCode = 400; return res.end('{}'); }
+    const results = RECALLS[`${p('model').toUpperCase()}/${p('modelYear')}`] || [];
+    res.end(JSON.stringify({ Count: results.length, Message: 'Results returned successfully', results }));
   });
   await new Promise(resolve => fakeNhtsa.listen(0, resolve));
   process.env.NHTSA_API_URL = `http://localhost:${fakeNhtsa.address().port}`;
@@ -94,28 +111,53 @@ test('editing saves vehicle, equipment, recon, and offer -- but not status or hi
   assert.strictEqual(bad.condition, '', 'unknown condition values are dropped');
 });
 
-test('recalls come live from NHTSA for the year, make, and model', async () => {
+test('recalls come live from NHTSA, under the model names NHTSA actually uses', async () => {
   const a = await newAppraisal(sales, { year: 2018, make: 'Honda', model: 'Accord' });
   const res = await as(sales, 'POST', `/appraisals/${a.id}/recalls`);
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(res.body.recalls.items.length, 1);
-  assert.deepStrictEqual(res.body.recalls.items[0], {
+  const r = res.body.recalls;
+  assert.strictEqual(r.scope, 'model');
+  assert.strictEqual(r.modelFound, true);
+  assert.deepStrictEqual(r.matchedModels, ['ACCORD', 'ACCORD HYBRID'], 'Civic is not an Accord');
+  // The air bag recall is filed under both names -- counted once.
+  assert.deepStrictEqual(r.items.map(i => i.campaign), ['18V123000', '18V555000']);
+  assert.deepStrictEqual(r.items[0], {
     campaign: '18V123000', component: 'AIR BAGS', summary: 'The passenger air bag inflator may rupture.',
-    consequence: 'Injury risk.', remedy: 'Dealers will replace the inflator, free of charge.', reportDate: '01/02/2018'
+    consequence: 'Injury risk.', remedy: 'Dealers will replace the inflator, free of charge.', reportDate: '01/02/2018',
+    models: ['ACCORD', 'ACCORD HYBRID']
   });
-  assert.ok(nhtsaRequests.at(-1).includes('make=Honda&model=Accord&modelYear=2018'));
+  assert.deepStrictEqual(r.items[1].models, ['ACCORD HYBRID']);
+
+  // The VIN decoder says "GLC-Class"; NHTSA files these under GLC300 / GLC43 AMG.
+  const glc = await newAppraisal(sales, { year: 2023, make: 'Mercedes-Benz', model: 'GLC-Class' });
+  const g = (await as(sales, 'POST', `/appraisals/${glc.id}/recalls`)).body.recalls;
+  assert.deepStrictEqual(g.matchedModels, ['GLC300', 'GLC43 AMG']);
+  assert.deepStrictEqual(g.items.map(i => i.campaign).sort(), ['23V100000', '23V200000']);
 
   const clean = await newAppraisal(sales, { year: 2021, make: 'Toyota', model: 'Camry' });
-  assert.strictEqual((await as(sales, 'POST', `/appraisals/${clean.id}/recalls`)).body.recalls.items.length, 0);
+  const c = (await as(sales, 'POST', `/appraisals/${clean.id}/recalls`)).body.recalls;
+  assert.strictEqual(c.items.length, 0);
+  assert.strictEqual(c.modelFound, true, 'a real "no recalls" -- the model was found');
 
+  // A model name NHTSA doesn't know is NOT an all-clear.
   const unknownModel = await newAppraisal(sales, { year: 2021, make: 'Toyota', model: 'Nonsense' });
-  assert.strictEqual((await as(sales, 'POST', `/appraisals/${unknownModel.id}/recalls`)).body.recalls.items.length, 0,
-    "NHTSA's 400 for an unknown model means no recalls, not an error");
+  const u = (await as(sales, 'POST', `/appraisals/${unknownModel.id}/recalls`)).body.recalls;
+  assert.strictEqual(u.items.length, 0);
+  assert.strictEqual(u.modelFound, false);
 
   const empty = await newAppraisal();
   const missing = await as(sales, 'POST', `/appraisals/${empty.id}/recalls`);
   assert.strictEqual(missing.status, 400);
   assert.match(missing.body.error, /year, make, and model/);
+});
+
+test('decoded model names are matched to NHTSA recall model names', () => {
+  const { matchModelNames } = require('../providers');
+  assert.deepStrictEqual(matchModelNames('GLC-Class', ['GLC300', 'GLC43 AMG', 'GLC 300 COUPE', 'GLE350']), ['GLC300', 'GLC43 AMG', 'GLC 300 COUPE']);
+  assert.deepStrictEqual(matchModelNames('Grand Cherokee', ['CHEROKEE', 'GRAND CHEROKEE', 'COMPASS']), ['GRAND CHEROKEE']);
+  assert.deepStrictEqual(matchModelNames('F-150', ['F-150', 'F-150 LIGHTNING', 'F-250']), ['F-150', 'F-150 LIGHTNING']);
+  assert.deepStrictEqual(matchModelNames('Model 3', ['MODEL 3', 'MODEL S']), ['MODEL 3']);
+  assert.deepStrictEqual(matchModelNames('X', ['X5', 'X7']), [], 'too short to guess from');
 });
 
 test('when NHTSA is unreachable, it says so', async () => {
@@ -191,13 +233,13 @@ test('appraisals can be tied to a customer and a deal', async () => {
   assert.ok(listed);
 });
 
-test('provider slots: recalls live, everything else not available yet', async () => {
+test('provider slots: model recalls live, everything else not available yet', async () => {
   const list = (await as(sales, 'GET', '/providers')).body;
   const status = Object.fromEntries(list.map(p => [p.key, p.status]));
   assert.deepStrictEqual(status, {
     market: 'not_available', options: 'not_available', kbb: 'not_available', jdpower: 'not_available',
     blackbook: 'not_available', mmr: 'not_available', carfax: 'not_available', autocheck: 'not_available',
-    windowsticker: 'not_available', recalls: 'live'
+    windowsticker: 'not_available', vin_recalls: 'not_available', recalls: 'live'
   });
   assert.ok(list.find(p => p.key === 'kbb').needs);
 });
