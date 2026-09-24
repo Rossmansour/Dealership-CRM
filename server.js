@@ -107,8 +107,9 @@ const SERVER_MANAGED_FIELDS = {
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
+  // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
   appraisals: ['id', 'appraisalNumber', 'dateCreated', 'appraisedBy', 'status', 'recalls',
-    'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt']
+    'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt', 'offerHistory', 'customerOffers']
 };
 
 function editableFields(table, body) {
@@ -1449,6 +1450,10 @@ app.get('/api/integrations/keys/unmatched', allow('manageIntegrations'), wrap(as
 // that's the store's own record of what cars were worth and what it paid.
 
 const APPRAISAL_CONDITIONS = ['excellent', 'very_good', 'good', 'fair', 'poor'];
+const APPRAISAL_SOURCES = ['trade_in', 'street_purchase', 'service_drive'];
+const APPRAISAL_CATEGORIES = ['undecided', 'retail', 'wholesale'];
+// The offer calculator works out one of these from the others.
+const APPRAISAL_SOLVE_FOR = ['appraisal', 'profit', 'asking'];
 
 // Cleans up the fields an appraiser edits: numbers as numbers, VIN in
 // standard form, recon lines and equipment as tidy lists.
@@ -1457,11 +1462,15 @@ function appraisalFields(body) {
   const out = { ...b };
   // People type "41,000" or "$19,500" -- accept those as numbers.
   const toNumber = v => Number(String(v).replace(/[$,\s]/g, '')) || 0;
-  for (const f of ['year', 'mileage', 'targetRetail', 'targetGross', 'offer']) {
+  for (const f of ['year', 'mileage', 'targetRetail', 'targetGross', 'offer', 'otherCosts']) {
     if (f in b) out[f] = b[f] === '' || b[f] === null ? null : toNumber(b[f]);
   }
   if ('vin' in b) out.vin = vinDecoder.normalizeVin(b.vin);
   if ('condition' in b && !APPRAISAL_CONDITIONS.includes(b.condition)) out.condition = '';
+  if ('source' in b && !APPRAISAL_SOURCES.includes(b.source)) out.source = 'trade_in';
+  if ('category' in b && !APPRAISAL_CATEGORIES.includes(b.category)) out.category = 'undecided';
+  if ('calcSolveFor' in b && !APPRAISAL_SOLVE_FOR.includes(b.calcSolveFor)) out.calcSolveFor = 'appraisal';
+  delete out.appraiserId; // handled by applyAppraiser
   if ('equipment' in b) {
     out.equipment = Array.isArray(b.equipment)
       ? [...new Set(b.equipment.map(e => String(e).trim()).filter(Boolean))].slice(0, 100) : [];
@@ -1477,6 +1486,27 @@ function appraisalFields(body) {
     if (f in b) out[f] = b[f] === null ? null : String(b[f]).trim().slice(0, f === 'notes' ? 4000 : 200);
   }
   return out;
+}
+
+// Picking a different appraiser: must be an active user at this store.
+async function applyAppraiser(q, req, appraisal, appraiserId) {
+  if (!appraiserId || (appraisal.appraisedBy && appraisal.appraisedBy.id === appraiserId)) return null;
+  const { rows } = await q.query(
+    'SELECT id, name FROM users WHERE id::text = $1 AND dealership_id = $2 AND active',
+    [String(appraiserId), req.dealershipId]);
+  if (!rows.length) return 'Pick an appraiser from your store.';
+  appraisal.appraisedBy = { id: rows[0].id, name: rows[0].name };
+  return null;
+}
+
+// Every change to the appraisal amount is kept: who, when, and how much.
+function trackOfferChange(before, after, req) {
+  const was = before ? before.offer : null;
+  if ((after.offer ?? null) === (was ?? null)) return;
+  after.offerHistory = [...(after.offerHistory || []), {
+    amount: after.offer ?? null, previous: was ?? null,
+    at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }
+  }].slice(-200);
 }
 
 app.get('/api/appraisals', wrap(async (req, res) => {
@@ -1496,7 +1526,8 @@ app.post('/api/appraisals', wrap(async (req, res) => {
       vin: '', year: null, make: '', model: '', trim: '', bodyStyle: '', engine: '', drivetrain: '',
       transmission: '', fuelType: '', exteriorColor: '', interiorColor: '', mileage: null, condition: '',
       equipment: [], recon: [], notes: '', leadId: null, dealId: null,
-      targetRetail: null, targetGross: Number(settings.appraisalTargetGross) || 0, offer: null,
+      source: 'trade_in', category: 'undecided', calcSolveFor: 'appraisal',
+      targetRetail: null, targetGross: Number(settings.appraisalTargetGross) || 0, otherCosts: 0, offer: null,
       ...appraisalFields(req.body || {}),
       id: crypto.randomUUID(),
       appraisalNumber: await store.takeNextAppraisalNumber(q, req.dealershipId),
@@ -1504,8 +1535,11 @@ app.post('/api/appraisals', wrap(async (req, res) => {
       appraisedBy: { id: req.user.id, name: req.user.name },
       recalls: null,
       carId: null,
+      offerHistory: [],
+      customerOffers: [],
       dateCreated: new Date().toISOString()
     };
+    trackOfferChange(null, appraisal, req);
     await store.insert(q, 'appraisals', req.dealershipId, appraisal);
     await audit.created(q, req, 'appraisal', appraisal);
     return appraisal;
@@ -1517,12 +1551,18 @@ app.put('/api/appraisals/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
     if (!appraisal) return null;
-    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id,
-      { ...appraisal, ...appraisalFields(req.body || {}), dateUpdated: new Date().toISOString() });
-    await audit.updated(q, req, 'appraisal', { ...appraisal, dateUpdated: undefined }, { ...saved, dateUpdated: undefined });
+    const next = { ...appraisal, ...appraisalFields(req.body || {}), dateUpdated: new Date().toISOString() };
+    const problem = await applyAppraiser(q, req, next, (req.body || {}).appraiserId);
+    if (problem) return { error: problem };
+    trackOfferChange(appraisal, next, req);
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, next);
+    await audit.updated(q, req, 'appraisal',
+      { ...appraisal, dateUpdated: undefined, offerHistory: undefined },
+      { ...saved, dateUpdated: undefined, offerHistory: undefined });
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Appraisal not found' });
+  if (updated.error) return res.status(400).json({ error: updated.error });
   res.json(updated);
 }));
 
@@ -1554,6 +1594,127 @@ app.post('/api/appraisals/:id/recalls', wrap(async (req, res) => {
   });
   if (!saved) return res.status(404).json({ error: 'Appraisal not found' });
   res.json(saved);
+}));
+
+// The offer made to the customer. Saves it on the appraisal, and ties it to
+// the customer: the linked one, or a new customer created from the name,
+// phone, and email given. Also noted in the customer's activity log.
+app.post('/api/appraisals/:id/customer-offer', wrap(async (req, res) => {
+  const b = req.body || {};
+  const amount = Number(String(b.amount ?? '').replace(/[$,\s]/g, ''));
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter the offer amount.' });
+  const clean = (v, max = 200) => String(v || '').trim().slice(0, max);
+  const name = [clean(b.firstName, 100), clean(b.lastName, 100)].filter(Boolean).join(' ');
+  const phone = clean(b.phone, 40);
+  const email = clean(b.email);
+
+  const result = await store.tx(async q => {
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!appraisal) return { status: 404, error: 'Appraisal not found' };
+    if (appraisal.status !== 'open') return { status: 409, error: 'Offers can only be made on open appraisals.' };
+
+    let salesperson = null;
+    if (b.salespersonId) {
+      const { rows } = await q.query(
+        'SELECT id, name FROM users WHERE id::text = $1 AND dealership_id = $2 AND active',
+        [String(b.salespersonId), req.dealershipId]);
+      if (!rows.length) return { status: 400, error: 'Pick a salesperson from your store.' };
+      salesperson = { id: rows[0].id, name: rows[0].name };
+    }
+
+    let lead = appraisal.leadId ? await store.get(q, 'leads', req.dealershipId, appraisal.leadId, { forUpdate: true }) : null;
+    let leadCreated = false;
+    if (!lead) {
+      if (!name) return { status: 400, error: "Enter the customer's name (or pick the customer on the appraisal)." };
+      lead = {
+        id: crypto.randomUUID(), name, type: 'individual', phone, email, carId: null,
+        notes: '', status: 'new', source: 'walk-in', activities: [], dateAdded: new Date().toISOString()
+      };
+      await store.insert(q, 'leads', req.dealershipId, lead);
+      await audit.created(q, req, 'lead', lead, `From appraisal A-${appraisal.appraisalNumber}`);
+      leadCreated = true;
+    } else if ((phone && !lead.phone) || (email && !lead.email)) {
+      const before = { ...lead };
+      lead = { ...lead, phone: lead.phone || phone, email: lead.email || email };
+      await audit.updated(q, req, 'lead', before, lead, `From appraisal A-${appraisal.appraisalNumber}`);
+    }
+
+    const vehicle = [appraisal.year, appraisal.make, appraisal.model].filter(Boolean).join(' ') || 'their vehicle';
+    const moneyText = `$${amount.toLocaleString('en-US')}`;
+    lead.activities = [{
+      id: crypto.randomUUID(), type: 'note',
+      text: `Offered ${moneyText} for their ${vehicle} (appraisal A-${appraisal.appraisalNumber})${salesperson ? ` -- salesperson ${salesperson.name}` : ''}`,
+      date: new Date().toISOString()
+    }, ...(lead.activities || [])];
+    await store.save(q, 'leads', req.dealershipId, lead.id, lead);
+
+    const offer = { amount, at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }, salesperson, leadId: lead.id };
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
+      ...appraisal, leadId: lead.id, customerOffers: [...(appraisal.customerOffers || []), offer]
+    });
+    await audit.record(q, req, {
+      action: 'customer_offer', entityType: 'appraisal', entityId: appraisal.id, label: audit.labelFor('appraisal', saved),
+      details: `${moneyText} to ${lead.name}`
+    });
+    return { appraisal: saved, lead, leadCreated };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result);
+}));
+
+// How this store has done on cars like this one, from its own inventory
+// and deals: same make, a matching model, within two model years.
+const squashName = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function similarModel(a, b) {
+  const x = squashName(String(a).replace(/[-\s]*class$/i, ''));
+  const y = squashName(String(b).replace(/[-\s]*class$/i, ''));
+  if (!x || !y) return false;
+  return x === y || (Math.min(x.length, y.length) >= 3 && (x.startsWith(y) || y.startsWith(x)));
+}
+
+app.get('/api/appraisals/:id/retail-performance', wrap(async (req, res) => {
+  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
+  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
+  const { year, make, model } = appraisal;
+  if (!make || !model) return res.json({ ready: false });
+
+  const cars = (await store.list(store.pool, 'cars', req.dealershipId)).filter(c =>
+    c.id !== appraisal.carId &&
+    squashName(c.make) === squashName(make) && similarModel(c.model, model) &&
+    (!year || !c.year || Math.abs(Number(c.year) - Number(year)) <= 2));
+  const deals = await store.list(store.pool, 'deals', req.dealershipId);
+  const days = (from, to) => Math.max(0, Math.round((new Date(to) - new Date(from)) / 86400000));
+  const avg = list => list.length ? Math.round(list.reduce((s, n) => s + n, 0) / list.length) : null;
+
+  const sold = cars.filter(c => c.status === 'sold').map(c => {
+    const deal = deals.filter(d => d.carId === c.id && ['delivered', 'closed', 'finalized'].includes(d.status)).slice(-1)[0];
+    const salePrice = Number(deal && deal.vehiclePrice) || Number(c.price) || 0;
+    return {
+      id: c.id, year: c.year, make: c.make, model: c.model, trim: c.trim || '', mileage: c.mileage ?? null,
+      stockNumber: c.stockNumber || '', salePrice, cost: Number(c.cost) || 0,
+      gross: salePrice - (Number(c.cost) || 0),
+      daysToSell: c.dateSold && c.dateAdded ? days(c.dateAdded, c.dateSold) : null,
+      dateSold: c.dateSold || null
+    };
+  }).sort((a, b) => String(b.dateSold).localeCompare(String(a.dateSold)));
+  const inStock = cars.filter(c => c.status !== 'sold');
+
+  res.json({
+    ready: true,
+    matching: `${year ? `${Number(year) - 2}-${Number(year) + 2} ` : ''}${make} ${model}`,
+    sold: {
+      count: sold.length,
+      avgDaysToSell: avg(sold.filter(s => s.daysToSell !== null).map(s => s.daysToSell)),
+      avgSalePrice: avg(sold.map(s => s.salePrice)),
+      avgGross: avg(sold.map(s => s.gross)),
+      recent: sold.slice(0, 5)
+    },
+    inStock: {
+      count: inStock.length,
+      avgAskingPrice: avg(inStock.map(c => Number(c.price) || 0)),
+      avgDaysInStock: avg(inStock.filter(c => c.dateAdded).map(c => days(c.dateAdded, new Date())))
+    }
+  });
 }));
 
 // The store bought it: create the inventory car from the appraisal and

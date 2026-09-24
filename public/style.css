@@ -1522,6 +1522,63 @@ body.wide-page main { max-width: 1400px; }
 .outcome-done.lost { color: var(--text-secondary); }
 .outcome-link { font-size: 13px; margin-top: 6px; }
 
+/* Summary header: vehicle, source/category/appraiser, values at a glance */
+.appraisal-summary { margin-bottom: 12px; }
+.ap-summary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ap-summary-vehicle { font-size: 20px; font-weight: 700; color: var(--heading); }
+.ap-history-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.history-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px dashed var(--border); background: var(--surface); color: var(--text); border-radius: 14px; padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.history-chip span { font-weight: 400; color: var(--text-muted); }
+.ap-summary-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; align-items: start; }
+.ap-summary-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 10px; }
+.ap-values { font-size: 13px; }
+.ap-value-row { display: grid; grid-template-columns: 1fr auto 80px; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.ap-value-row > :nth-child(2), .ap-value-row > :nth-child(3) { text-align: right; }
+.ap-value-row.muted { color: var(--text-muted); }
+.ap-value-main { font-size: 15px; border-bottom-width: 2px; }
+.diff-neg { color: var(--red); }
+.diff-pos { color: var(--green); }
+
+.appraisal-card .audit-note { font-size: 12px; }
+.appraisal-card p.audit-note { margin: 6px 0; }
+.car-panel-title .audit-note { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
+
+/* Section tabs */
+.ap-tabs { position: sticky; top: 60px; z-index: 20; display: flex; gap: 4px; overflow-x: auto; background: var(--bg); padding: 6px 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
+.ap-tabs button { flex: none; border: none; background: none; color: var(--text-secondary); font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.ap-tabs button:hover { background: var(--surface-alt); color: var(--text); }
+.ap-tabs .ap-collapse-all { margin-left: auto; color: var(--blue); }
+.appraisal-layout .appraisal-card { scroll-margin-top: 120px; }
+.appraisal-layout .car-panel-title { cursor: pointer; user-select: none; }
+.appraisal-layout .car-panel-title::after { content: '▾'; float: right; color: var(--text-muted); }
+.appraisal-card.collapsed .car-panel-title { margin-bottom: 0; }
+.appraisal-card.collapsed .car-panel-title::after { content: '▸'; }
+.appraisal-card.collapsed > :not(.car-panel-title) { display: none !important; }
+
+/* Placeholders laid out ahead of their data */
+.pending-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin: 8px 0 4px; }
+.pending-stats div, .retail-stats div { background: var(--surface-alt); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.pending-stats span, .retail-stats span { font-size: 11px; color: var(--text-muted); }
+.pending-stats strong { color: var(--text-muted); }
+#apBookPlugs .btn-small { margin-top: 4px; align-self: flex-start; }
+.retail-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 8px 0; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.mini-table th { text-align: left; font-weight: 600; color: var(--text-secondary); padding: 3px 4px; }
+.mini-table td { padding: 4px; border-top: 1px solid var(--border); }
+
+/* Calculator */
+.calc-solve { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+.appraisal-card .calc-solve label { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--text); font-size: 13px; }
+.appraisal-card .calc-solve input { width: auto; margin: 0; }
+.calc-solved input { background: var(--highlight-bg, var(--surface-alt)); font-weight: 700; }
+.calc-history { display: flex; justify-content: space-between; align-items: center; font-size: 13px; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+
+/* Customer offer */
+.customer-offer-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.customer-offer-form label:first-child, .co-customer { grid-column: span 2; }
+.co-customer { font-size: 13px; margin-bottom: 8px; }
+#apCoCreateBtn { margin-right: 8px; }
+
 .trade-appraisal { margin-top: 10px; }
 .trade-appraisal-linked { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; background: var(--highlight-bg); border-radius: 8px; padding: 8px 10px; }
 .car-source { font-size: 12px; color: var(--text-secondary); margin: -6px 0 10px; }
@@ -1530,12 +1587,17 @@ body.wide-page main { max-width: 1400px; }
 @media (max-width: 1100px) {
   .appraisal-layout { grid-template-columns: 1fr 1fr; }
   .appraisal-layout .appraisal-col:last-child { grid-column: span 2; }
+  .ap-summary-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .appraisal-layout { grid-template-columns: 1fr; }
   .appraisal-layout .appraisal-col:last-child { grid-column: auto; }
   .appraisal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .appraisal-grid .span-3 { grid-column: span 2; }
+  .ap-summary-fields { grid-template-columns: 1fr 1fr; }
+  .ap-tabs { top: 56px; }
+  .ap-value-row { grid-template-columns: minmax(0, 1fr) auto auto; font-size: 12px; }
+  .ap-value-main { font-size: 14px; }
 }
 #apRecalls p.audit-note { font-size: 12px; margin: 8px 0 0; }
 .recall-vin { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }

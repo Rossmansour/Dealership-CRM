@@ -233,6 +233,111 @@ test('appraisals can be tied to a customer and a deal', async () => {
   assert.ok(listed);
 });
 
+test('source, category, other costs, and the calculator choice are saved -- and checked', async () => {
+  const a = await newAppraisal();
+  assert.deepStrictEqual([a.source, a.category, a.calcSolveFor, a.otherCosts], ['trade_in', 'undecided', 'appraisal', 0]);
+  const saved = (await as(sales, 'PUT', `/appraisals/${a.id}`, {
+    source: 'service_drive', category: 'wholesale', calcSolveFor: 'profit', otherCosts: '$1,200'
+  })).body;
+  assert.deepStrictEqual([saved.source, saved.category, saved.calcSolveFor, saved.otherCosts], ['service_drive', 'wholesale', 'profit', 1200]);
+  const bad = (await as(sales, 'PUT', `/appraisals/${a.id}`, { source: 'auction', category: 'x', calcSolveFor: 'x' })).body;
+  assert.deepStrictEqual([bad.source, bad.category, bad.calcSolveFor], ['trade_in', 'undecided', 'appraisal']);
+});
+
+test('the appraiser can be changed to someone at the store', async () => {
+  const a = await newAppraisal(sales);
+  const changed = (await as(sales, 'PUT', `/appraisals/${a.id}`, { appraiserId: manager.id })).body;
+  assert.strictEqual(changed.appraisedBy.id, manager.id);
+  assert.match(changed.appraisedBy.name, /sales_manager/);
+  assert.strictEqual(changed.appraiserId, undefined, 'not stored as its own field');
+  const bad = await as(sales, 'PUT', `/appraisals/${a.id}`, { appraiserId: '00000000-0000-0000-0000-000000000000' });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual((await as(sales, 'GET', `/appraisals/${a.id}`)).body.appraisedBy.id, manager.id);
+  // direct edits to appraisedBy are ignored
+  const hijack = (await as(sales, 'PUT', `/appraisals/${a.id}`, { appraisedBy: { id: 'x', name: 'Nobody' } })).body;
+  assert.strictEqual(hijack.appraisedBy.id, manager.id);
+});
+
+test('every change to the appraisal amount is kept in its history', async () => {
+  const a = await newAppraisal(sales, { offer: 15000 });
+  assert.deepStrictEqual(a.offerHistory.map(h => [h.previous, h.amount]), [[null, 15000]]);
+  await as(sales, 'PUT', `/appraisals/${a.id}`, { offer: 15000, notes: 'no amount change' });
+  await as(manager, 'PUT', `/appraisals/${a.id}`, { offer: '16,250' });
+  const saved = (await as(sales, 'PUT', `/appraisals/${a.id}`, { offerHistory: [] })).body;
+  assert.deepStrictEqual(saved.offerHistory.map(h => [h.previous, h.amount]), [[null, 15000], [15000, 16250]],
+    'unchanged saves add nothing, and the history cannot be edited');
+  assert.strictEqual(saved.offerHistory[1].by.id, manager.id);
+});
+
+test('customer offer: creates the customer, notes it on them, and links the appraisal', async () => {
+  const a = await newAppraisal(sales, { year: 2020, make: 'Honda', model: 'Odyssey', offer: 21000 });
+  assert.strictEqual((await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`, { amount: '' })).status, 400);
+  const noName = await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`, { amount: 20000 });
+  assert.strictEqual(noName.status, 400);
+  assert.match(noName.body.error, /name/);
+  assert.strictEqual((await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`,
+    { amount: 20000, firstName: 'X', salespersonId: '00000000-0000-0000-0000-000000000000' })).status, 400);
+
+  const res = await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`, {
+    amount: '$20,500', firstName: 'Dana', lastName: 'Rivera', phone: '555-0100', email: 'dana@example.com', salespersonId: sales.id
+  });
+  assert.strictEqual(res.status, 201);
+  const { appraisal, lead, leadCreated } = res.body;
+  assert.strictEqual(leadCreated, true);
+  assert.deepStrictEqual([lead.name, lead.phone, lead.email, lead.status], ['Dana Rivera', '555-0100', 'dana@example.com', 'new']);
+  assert.strictEqual(appraisal.leadId, lead.id);
+  assert.strictEqual(appraisal.customerOffers[0].amount, 20500);
+  assert.strictEqual(appraisal.customerOffers[0].salesperson.id, sales.id);
+  assert.strictEqual(appraisal.offer, 21000, "the offer to the customer doesn't change the appraisal");
+  const saved = (await as(sales, 'GET', `/leads`)).body.find(l => l.id === lead.id);
+  assert.match(saved.activities[0].text, /Offered \$20,500 for their 2020 Honda Odyssey \(appraisal A-\d+\)/);
+
+  // A second offer goes to the same customer; no new customer is created.
+  const again = (await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`, { amount: 21000, firstName: 'Someone', lastName: 'Else' })).body;
+  assert.strictEqual(again.leadCreated, false);
+  assert.strictEqual(again.lead.id, lead.id);
+  assert.strictEqual(again.appraisal.customerOffers.length, 2);
+
+  await as(sales, 'POST', `/appraisals/${a.id}/lost`, {});
+  assert.strictEqual((await as(sales, 'POST', `/appraisals/${a.id}/customer-offer`, { amount: 1 })).status, 409);
+  const log = (await as(admin, 'GET', `/audit-log?entityType=appraisal&entityId=${a.id}`)).body.entries;
+  assert.ok(log.some(e => e.action === 'customer_offer' && /\$20,500 to Dana Rivera/.test(e.details)));
+});
+
+test("retail performance comes from the store's own sales of similar cars", async () => {
+  const car = async (body, sold) => {
+    const c = (await as(manager, 'POST', '/cars', { make: 'Subaru', mileage: 30000, ...body })).body;
+    if (sold) await as(manager, 'PUT', `/cars/${c.id}`, { status: 'sold' });
+    return c;
+  };
+  await car({ year: 2019, model: 'Outback', cost: 20000, price: 24000 }, true);
+  await car({ year: 2021, model: 'Outback Wilderness', cost: 26000, price: 29000 }, true);
+  await car({ year: 2020, model: 'Outback', cost: 21000, price: 25500 }, false);
+  await car({ year: 2012, model: 'Outback', cost: 5000, price: 8000 }, true); // too old
+  await car({ year: 2020, model: 'Forester', cost: 20000, price: 23000 }, true); // different model
+
+  const a = await newAppraisal(sales, { year: 2020, make: 'SUBARU', model: 'Outback' });
+  const r = (await as(sales, 'GET', `/appraisals/${a.id}/retail-performance`)).body;
+  assert.strictEqual(r.ready, true);
+  assert.strictEqual(r.sold.count, 2);
+  assert.strictEqual(r.sold.avgSalePrice, 26500);
+  assert.strictEqual(r.sold.avgGross, 3500);
+  assert.strictEqual(r.sold.avgDaysToSell, 0);
+  assert.strictEqual(r.inStock.count, 1);
+  assert.strictEqual(r.inStock.avgAskingPrice, 25500);
+
+  const blank = await newAppraisal();
+  assert.strictEqual((await as(sales, 'GET', `/appraisals/${blank.id}/retail-performance`)).body.ready, false);
+});
+
+test('everyone can see staff names (for appraiser and salesperson), but not their emails', async () => {
+  const staff = (await as(sales, 'GET', '/staff')).body;
+  const me = staff.find(u => u.id === sales.id);
+  assert.ok(me && me.name);
+  assert.ok(staff.some(u => u.id === manager.id));
+  assert.strictEqual(me.email, undefined);
+});
+
 test('provider slots: model recalls live, everything else not available yet', async () => {
   const list = (await as(sales, 'GET', '/providers')).body;
   const status = Object.fromEntries(list.map(p => [p.key, p.status]));

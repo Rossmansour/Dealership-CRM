@@ -186,10 +186,57 @@
         <button type="button" class="btn-primary" id="appraisalSaveBtn">Save</button>
       </div>
 
+      <!-- Summary: who/why, and every value next to the appraisal -->
+      <div class="appraisal-card appraisal-summary" id="apSummaryCard">
+        <div class="ap-summary-head">
+          <div>
+            <div class="ap-summary-vehicle" id="apSummaryVehicle"></div>
+            <div class="audit-note" id="apSummaryVin"></div>
+          </div>
+          <div class="ap-history-chips" id="apHistoryChips"></div>
+        </div>
+        <div class="ap-summary-grid">
+          <div class="ap-summary-fields">
+            <label>Source
+              <select id="apSource">
+                <option value="trade_in">Trade-in</option>
+                <option value="street_purchase">Street Purchase</option>
+                <option value="service_drive">Service Drive</option>
+              </select>
+            </label>
+            <label>Category
+              <select id="apCategory">
+                <option value="undecided">Decide Later</option>
+                <option value="retail">Retail</option>
+                <option value="wholesale">Wholesale</option>
+              </select>
+            </label>
+            <label>Appraiser <select id="apAppraiser"></select></label>
+          </div>
+          <div class="ap-values" id="apValues"></div>
+        </div>
+      </div>
+
+      <nav class="ap-tabs" id="apTabs" aria-label="Appraisal sections">
+        <button type="button" data-target="apCardVehicle">Vehicle</button>
+        <button type="button" data-target="apCardEquipment">Equipment</button>
+        <button type="button" data-target="apCardMarket">Market</button>
+        <button type="button" data-target="apCardBooks">Books</button>
+        <button type="button" data-target="apCardAuctions">Auctions</button>
+        <button type="button" data-target="apCardRetail">Retail</button>
+        <button type="button" data-target="apCardHistory">History</button>
+        <button type="button" data-target="apCardRecalls">Recalls</button>
+        <button type="button" data-target="apCardRecon">Recon</button>
+        <button type="button" data-target="apCardCalc">Calculator</button>
+        <button type="button" data-target="apCardOffer">Offer</button>
+        <button type="button" data-target="apOutcomeCard">Outcome</button>
+        <button type="button" class="ap-collapse-all" id="apCollapseAllBtn">Collapse all</button>
+      </nav>
+
       <div class="appraisal-layout">
         <!-- Column 1: the vehicle -->
         <div class="appraisal-col">
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardVehicle">
             <div class="car-panel-title">Vehicle</div>
             <div class="vin-row">
               <label>VIN <input type="text" id="apVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
@@ -223,10 +270,10 @@
                 <select id="apLeadId"></select>
               </label>
             </div>
-            <label class="appraisal-notes">Notes <textarea id="apNotes" rows="2" placeholder="Damage, tires, smells, keys, anything the next person should know"></textarea></label>
+            <label class="appraisal-notes">Notes <textarea id="apNotes" rows="3" placeholder="Damage, tires, smells, keys, anything the next person should know"></textarea></label>
           </div>
 
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardEquipment">
             <div class="car-panel-title">Equipment</div>
             <div id="apOptionsPlug"></div>
             <div id="apEquipment" class="equipment-groups"></div>
@@ -235,44 +282,68 @@
 
         <!-- Column 2: market, values, history -->
         <div class="appraisal-col">
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardMarket">
             <div class="car-panel-title">Market</div>
             <div id="apMarketPlug"></div>
           </div>
-          <div class="appraisal-card">
-            <div class="car-panel-title">Book Values</div>
+          <div class="appraisal-card" id="apCardBooks">
+            <div class="car-panel-title">Books</div>
             <div id="apBookPlugs" class="plug-list"></div>
           </div>
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardAuctions">
+            <div class="car-panel-title">Auctions</div>
+            <div id="apAuctionPlugs"></div>
+          </div>
+          <div class="appraisal-card" id="apCardRetail">
+            <div class="car-panel-title">Retail Performance <span class="audit-note">your store's own sales</span></div>
+            <div id="apRetail"></div>
+          </div>
+          <div class="appraisal-card" id="apCardHistory">
             <div class="car-panel-title">Vehicle History &amp; Window Sticker</div>
             <div id="apHistoryPlugs" class="plug-list"></div>
           </div>
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardRecalls">
             <div class="car-panel-title">Safety Recalls</div>
             <div id="apRecalls"></div>
           </div>
         </div>
 
-        <!-- Column 3: recon, offer, outcome -->
+        <!-- Column 3: recon, numbers, offer, outcome -->
         <div class="appraisal-col">
-          <div class="appraisal-card">
+          <div class="appraisal-card" id="apCardRecon">
             <div class="car-panel-title">Reconditioning</div>
             <div id="apReconLines"></div>
             <button type="button" class="btn-secondary btn-small" id="apAddReconBtn">+ Add line</button>
             <div class="recon-total">Recon total: <strong id="apReconTotal">$0</strong></div>
           </div>
 
-          <div class="appraisal-card">
-            <div class="car-panel-title">Offer</div>
+          <div class="appraisal-card" id="apCardCalc">
+            <div class="car-panel-title">Appraisal Calculator</div>
+            <div class="calc-solve" role="radiogroup" aria-label="Work out">
+              <span>Work out:</span>
+              <label><input type="radio" name="apSolveFor" value="appraisal" /> Appraisal</label>
+              <label><input type="radio" name="apSolveFor" value="profit" /> Profit</label>
+              <label><input type="radio" name="apSolveFor" value="asking" /> Asking price</label>
+            </div>
             <div class="offer-calc">
-              <label>Target retail <input type="number" id="apTargetRetail" placeholder="What it should sell for" /></label>
+              <label>Asking price <input type="number" id="apTargetRetail" placeholder="What it should sell for" /></label>
               <div class="offer-line"><span>- Recon</span><span id="apCalcRecon">$0</span></div>
               <div class="offer-line"><span>- Pack</span><span id="apCalcPack">$0</span></div>
-              <label>- Target gross <input type="number" id="apTargetGross" /></label>
-              <div class="offer-line offer-max"><span>Max offer</span><span id="apMaxOffer">--</span></div>
-              <label class="offer-yours">Your offer <input type="number" id="apOffer" /></label>
+              <label>- Other <input type="number" id="apOtherCosts" placeholder="Transport, fees..." /></label>
+              <label>- Profit <input type="number" id="apTargetGross" /></label>
+              <label class="offer-yours">= Appraisal <input type="number" id="apOffer" /></label>
               <div class="offer-note" id="apOfferNote"></div>
             </div>
+            <div class="calc-history">
+              <span>Current appraisal <strong id="apCurrentValue">--</strong></span>
+              <button type="button" class="link-btn" id="apHistoryToggle">View history</button>
+            </div>
+            <div id="apOfferHistory" hidden></div>
+          </div>
+
+          <div class="appraisal-card" id="apCardOffer">
+            <div class="car-panel-title">Customer Offer</div>
+            <div id="apCustomerOffer"></div>
           </div>
 
           <div class="appraisal-card" id="apOutcomeCard">

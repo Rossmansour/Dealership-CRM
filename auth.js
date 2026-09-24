@@ -342,6 +342,17 @@ router.post('/auth/change-password', wrap(async (req, res) => {
   res.status(204).send();
 }));
 
+// ----- Staff names (everyone signed in) -----
+// Just who works here, for picking an appraiser or salesperson -- no
+// emails or login details.
+router.get('/staff', wrap(async (req, res) => {
+  const { rows } = await store.pool.query(
+    'SELECT id, name, role FROM users WHERE dealership_id = $1 AND active ORDER BY name',
+    [req.dealershipId]
+  );
+  res.json(rows.map(u => ({ id: u.id, name: u.name, role: u.role, roleLabel: ROLES[u.role] || u.role })));
+}));
+
 // ----- User management (admins only, within their own dealership) -----
 
 router.get('/users', requirePermission('manageUsers'), wrap(async (req, res) => {
