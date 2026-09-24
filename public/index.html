@@ -267,6 +267,9 @@
                   <option value="poor">Poor</option>
                 </select>
               </label>
+              <label>Payoff <input type="number" id="apPayoff" placeholder="What they owe" /></label>
+              <label>Lienholder <input type="text" id="apLienholder" /></label>
+              <label>Customer hopes to get <input type="number" id="apCustomerExpects" /></label>
               <label class="span-3">Customer
                 <select id="apLeadId"></select>
               </label>
@@ -631,6 +634,11 @@
           <div id="cpWishPicker"></div>
         </section>
         <section class="cp-card">
+          <div class="cp-card-title">Trades <span class="cp-count" id="cpTradeCount">0</span></div>
+          <div id="cpTrades"></div>
+          <button type="button" class="btn-secondary btn-small cp-full" onclick="openTradeForm()">+ Add a trade</button>
+        </section>
+        <section class="cp-card">
           <div class="cp-card-title">AI Summary</div>
           <button type="button" class="btn-secondary btn-small cp-full" id="aiSnapshotBtn">✨ Generate Summary</button>
           <div id="aiSnapshotBox" style="display:none;"></div>
@@ -683,6 +691,8 @@
         </div>
 
         <div class="cp-tabpanel" data-cptab="deals" hidden>
+          <div id="cpPushDeal"></div>
+          <div class="cp-section-head">Deals</div>
           <div id="profileDealsList"></div>
         </div>
 
@@ -694,7 +704,7 @@
       <!-- Right: things to do -->
       <aside class="cp-right">
         <div class="cp-right-title">Add</div>
-        <button type="button" class="cp-action" data-action="new-deal"><span>＄</span>New Deal</button>
+        <button type="button" class="cp-action" data-action="new-deal"><span>＄</span>Push Deal</button>
         <button type="button" class="cp-action" data-action="vehicles"><span>🚗</span>Vehicles</button>
         <button type="button" class="cp-action" data-action="trade" id="profileAppraiseBtn"><span>⇄</span>Trade In</button>
         <button type="button" class="cp-action" data-action="credit-app"><span>▤</span>Credit App</button>
@@ -712,6 +722,70 @@
         <div class="cp-later-note" id="cpLaterNote" hidden></div>
       </aside>
     </div>
+  </div>
+</div>
+
+<!-- Trade-in entry from the customer page: goes straight to Appraisals -->
+<div class="modal cp-overlay" id="tradeModal">
+  <div class="modal-content modal-wide">
+    <h2>Add a Trade</h2>
+    <p class="send-text-hint">Enter what you know -- the VIN fills in the rest. It goes to Appraisals for a manager to appraise; you stay here.</p>
+    <form id="tradeForm">
+      <div class="vin-row">
+        <label>VIN <input type="text" id="trVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters" /></label>
+        <button type="button" class="btn-secondary" id="trDecodeBtn">Decode VIN</button>
+      </div>
+      <div id="trVinStatus" class="vin-status"></div>
+      <div class="form-grid form-grid-3">
+        <label>Year <input type="number" id="trYear" /></label>
+        <label>Make <input type="text" id="trMake" /></label>
+        <label>Model <input type="text" id="trModel" /></label>
+        <label>Trim <input type="text" id="trTrim" /></label>
+        <label>Body Style <input type="text" id="trBodyStyle" /></label>
+        <label>Engine <input type="text" id="trEngine" /></label>
+        <label>Drivetrain <input type="text" id="trDrivetrain" /></label>
+        <label>Transmission <input type="text" id="trTransmission" /></label>
+        <label>Fuel <input type="text" id="trFuelType" /></label>
+        <label>Mileage <input type="number" id="trMileage" /></label>
+        <label>Exterior Color <input type="text" id="trExteriorColor" /></label>
+        <label>Interior Color <input type="text" id="trInteriorColor" /></label>
+        <label>Condition (customer's word)
+          <select id="trCondition">
+            <option value="">--</option><option value="excellent">Excellent</option><option value="very_good">Very Good</option>
+            <option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option>
+          </select>
+        </label>
+        <label>Payoff <input type="number" id="trPayoff" placeholder="What they still owe" /></label>
+        <label>Lienholder <input type="text" id="trLienholder" placeholder="Bank / lender" /></label>
+        <label>Customer hopes to get <input type="number" id="trCustomerExpects" /></label>
+      </div>
+      <label>Notes for the appraiser <textarea id="trNotes" rows="2" placeholder="Damage, warning lights, tires, keys, anything they mentioned"></textarea></label>
+      <div id="trStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="trCancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Send to Appraisals</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- The customer's credit application (sales side); pushed to the deal -->
+<div class="modal cp-overlay" id="cpCreditModal">
+  <div class="modal-content modal-wide cp-credit-content">
+    <div class="cp-credit-head">
+      <h2>Credit Application</h2>
+      <div id="cpCreditStatus"></div>
+    </div>
+    <div id="cpCreditSync" class="cp-credit-sync"></div>
+    <form id="cpCreditForm">
+      <div id="cpCreditAppFields"></div>
+      <div id="cpCreditMsg"></div>
+      <div class="modal-actions cp-credit-actions">
+        <button type="button" class="btn-secondary" id="cpCreditCloseBtn">Close</button>
+        <button type="submit" class="btn-secondary">Save</button>
+        <button type="button" class="btn-primary" id="cpPushCreditBtn">Save &amp; Push Credit to DMS</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -900,6 +974,11 @@
 
   <!-- Credit Application sub-tab -->
   <div id="creditapp" class="sub-tab-panel">
+    <div id="dealCreditSync" class="cp-credit-sync"></div>
+    <div class="deal-lenders">
+      <div class="ca-section-title">Submit to Lenders</div>
+      <div id="dealLenders" class="plug-list"></div>
+    </div>
     <form id="creditAppForm">
       <div id="creditAppFieldsContainer"></div>
       <div class="modal-actions">
@@ -1048,6 +1127,10 @@
 <div class="modal" id="integrationsModal">
   <div class="modal-content modal-wide">
     <h2>Integrations</h2>
+    <div class="ca-section-title">Outside DMS</div>
+    <p class="send-text-hint" style="margin-top:-4px;">For stores that keep their current DMS: customers, deals, and credit apps sync both ways once connected. Until then, the built-in Sales &amp; F&amp;I is the DMS.</p>
+    <div id="integrationDmsSlots" class="plug-list" style="margin-bottom:16px;"></div>
+    <div class="ca-section-title">Key machine</div>
     <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
       Connect your key machine (KeyTrak, KeyWatcher, Traka...) so Inventory shows whose name each key is checked out under.
       The key machine stays in charge of keys -- the CRM only displays what it reports.

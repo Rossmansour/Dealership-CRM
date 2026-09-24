@@ -280,8 +280,11 @@ function checkTable(table) {
 // Deals carry the credit application, whose SSN and license number are
 // encrypted on the way into the database and decrypted on the way out.
 // Doing it here means no route can forget to.
-const toStored = (table, record) => (table === 'deals' ? sealDeal(record) : record);
-const fromStored = (table, record) => (table === 'deals' ? openDeal(record) : record);
+// Deals and customers (leads) can both carry a credit application, whose
+// SSN and license number are encrypted at rest.
+const SEALED_TABLES = new Set(['deals', 'leads']);
+const toStored = (table, record) => (SEALED_TABLES.has(table) ? sealDeal(record) : record);
+const fromStored = (table, record) => (SEALED_TABLES.has(table) ? openDeal(record) : record);
 
 async function list(q, table, dealershipId) {
   checkTable(table);

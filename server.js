@@ -104,13 +104,15 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const SERVER_MANAGED_FIELDS = {
   cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
-  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap'],
+  // The customer's credit app changes through /credit-app (and comes back from the DMS).
+  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
   appraisals: ['id', 'appraisalNumber', 'dateCreated', 'appraisedBy', 'status', 'recalls',
-    'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt', 'offerHistory', 'customerOffers']
+    'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt', 'offerHistory', 'customerOffers',
+    'requestedBy', 'removedFromLead']
 };
 
 function editableFields(table, body) {
@@ -574,14 +576,29 @@ const LEAD_ASSIGNMENTS = ['sales1Id', 'sales2Id', 'bdc1Id', 'bdc2Id'];
 const LEAD_BEST_CONTACT = ['', 'text', 'call', 'email'];
 const ROADMAP_STEPS = 7;
 
+// A street address, in parts. Older customers stored one line of text;
+// that becomes the street.
+const ADDRESS_PARTS = ['street', 'unit', 'city', 'state', 'zip', 'county'];
+function cleanAddress(value) {
+  const v = typeof value === 'string' ? { street: value } : (value && typeof value === 'object' ? value : {});
+  const out = {};
+  for (const part of ADDRESS_PARTS) out[part] = String(v[part] ?? '').trim().slice(0, part === 'street' ? 120 : 60);
+  out.state = out.state.toUpperCase().slice(0, 2);
+  out.zip = out.zip.slice(0, 10);
+  return out;
+}
+
 // Cleans up the lead fields people edit.
 function leadFields(body) {
   const b = editableFields('leads', body);
   const out = { ...b };
   const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
-  for (const f of ['name', 'phone', 'email', 'address', 'source', 'lostReason']) {
-    if (f in b) out[f] = text(b[f], f === 'address' ? 300 : 200);
+  for (const f of ['name', 'phone', 'email', 'source', 'lostReason']) {
+    if (f in b) out[f] = text(b[f]);
   }
+  if ('address' in b) out.address = cleanAddress(b.address);
+  if ('mailingAddress' in b) out.mailingAddress = cleanAddress(b.mailingAddress);
+  if ('mailingDifferent' in b) out.mailingDifferent = b.mailingDifferent === true || b.mailingDifferent === 'true';
   if ('notes' in b) out.notes = text(b.notes, 4000);
   if ('type' in b) out.type = b.type === 'business' ? 'business' : 'individual';
   if ('hot' in b) out.hot = b.hot === true || b.hot === 'true';
@@ -617,7 +634,8 @@ async function createLead(q, req, fields) {
   // A salesperson adding a customer is their salesperson unless they pick someone else.
   if (!('sales1Id' in clean) && req.user.role === 'salesperson') clean.sales1Id = req.user.id;
   const lead = {
-    name: '', type: 'individual', phone: '', email: '', address: '', carId: null, notes: '',
+    name: '', type: 'individual', phone: '', email: '', address: cleanAddress({}), carId: null, notes: '',
+    mailingDifferent: false, mailingAddress: cleanAddress({}), creditApp: null, creditAppSync: null,
     status: 'new', // new | contacted | negotiating | won | lost
     source: 'other', // walk-in | phone | website | referral | autotrader | cargurus | facebook | other
     hot: false, bestContact: '', wishList: [], snoozedUntil: null, lostReason: '',
@@ -699,7 +717,8 @@ async function addLeadActivity(req, leadId, activity, action = 'add_activity') {
 // ---------- Lead activity log (calls, texts, emails, notes) ----------
 
 // visit = showroom check-in; task / appointment = a completed task.
-const ACTIVITY_TYPES = ['call', 'text', 'email', 'note', 'visit', 'task', 'appointment', 'status'];
+// dms = something pushed to or back from the Sales & F&I side.
+const ACTIVITY_TYPES = ['call', 'text', 'email', 'note', 'visit', 'task', 'appointment', 'status', 'dms'];
 
 // Road to the Sale: mark a step done (or not done), with who and when.
 app.post('/api/leads/:id/roadmap', wrap(async (req, res) => {
@@ -827,6 +846,158 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
     // pass the real message through so it's actionable, not just "failed".
     res.status(500).json({ error: err.message });
   }
+}));
+
+// ---------- Customer credit app, and pushing to the DMS (Sales & F&I) ----------
+
+// Sales saves the credit app on the customer. The approval status belongs
+// to F&I, so it's kept as the DMS last set it. The applicant's name,
+// phone, email, and address are the customer's -- saving here updates both.
+app.put('/api/leads/:id/credit-app', wrap(async (req, res) => {
+  const incoming = mergeCreditApp(req.body);
+  const saved = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return null;
+    const current = lead.creditApp || {};
+    const creditApp = { ...incoming, status: current.status || 'not_submitted', dateSubmitted: current.dateSubmitted || null };
+    const updated = {
+      ...lead, ...contactFromApplicant(creditApp.applicant, lead), creditApp,
+      creditAppSync: { ...(lead.creditAppSync || {}), savedAt: new Date().toISOString(), savedBy: { id: req.user.id, name: req.user.name } }
+    };
+    await store.save(q, 'leads', req.dealershipId, lead.id, updated);
+    await audit.updated(q, req, 'lead', lead, updated, 'Credit application');
+    return updated;
+  });
+  if (!saved) return res.status(404).json({ error: 'Lead not found' });
+  res.json(saved);
+}));
+
+// The credit app to send to a deal: the customer's, with their current
+// contact details, keeping the approval status the deal already has.
+function creditAppForDeal(lead, dealCreditApp) {
+  const base = lead.creditApp ? JSON.parse(JSON.stringify(lead.creditApp)) : mergeCreditApp({});
+  base.applicant = { ...base.applicant, ...applicantContact(lead) };
+  const existing = dealCreditApp || {};
+  return { ...base, status: existing.status || 'not_submitted', dateSubmitted: existing.dateSubmitted || null };
+}
+
+async function noteOnLead(q, req, lead, text) {
+  const updated = {
+    ...lead,
+    activities: [{ id: crypto.randomUUID(), type: 'dms', text, date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name } }, ...(lead.activities || [])]
+  };
+  await store.save(q, 'leads', req.dealershipId, lead.id, updated);
+  return updated;
+}
+
+// Push Deal: opens the deal in the DMS with a deal number, bringing the
+// car, the trade (and its payoff), and the credit app along.
+app.post('/api/leads/:id/push-deal', wrap(async (req, res) => {
+  const b = req.body || {};
+  const result = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return { status: 404, error: 'Lead not found' };
+    let car = null;
+    if (b.carId) {
+      car = await store.get(q, 'cars', req.dealershipId, String(b.carId));
+      if (!car) return { status: 400, error: 'That vehicle is not in your inventory.' };
+      if (car.status === 'sold') return { status: 400, error: 'That vehicle is already sold.' };
+    }
+    let trade = null;
+    if (b.tradeId) {
+      trade = await store.get(q, 'appraisals', req.dealershipId, String(b.tradeId), { forUpdate: true });
+      if (!trade || trade.leadId !== lead.id) return { status: 400, error: "Pick one of this customer's trades." };
+    }
+    const lastOffer = trade && (trade.customerOffers || []).slice(-1)[0];
+    const extra = {
+      dealType: ['retail', 'lease', 'cash'].includes(b.dealType) ? b.dealType : 'retail',
+      downPayment: Number(String(b.downPayment ?? '').replace(/[$,\s]/g, '')) || 0,
+      creditApp: creditAppForDeal(lead, null),
+      pushedFromCrm: { at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name } },
+      creditPushedAt: new Date().toISOString(),
+      ...(trade ? {
+        hasTrade: true, tradeVin: trade.vin || '', tradeYear: trade.year || '', tradeMake: trade.make || '',
+        tradeModel: trade.model || '', tradeMileage: trade.mileage || '',
+        tradeInValue: (lastOffer && lastOffer.amount) || trade.offer || 0, tradeInPayoff: trade.payoff || 0
+      } : {})
+    };
+    const deal = await createDeal(q, req, { leadId: lead.id, carId: car ? car.id : null }, extra);
+    if (trade) await store.save(q, 'appraisals', req.dealershipId, trade.id, { ...trade, dealId: deal.id });
+    const updatedLead = await noteOnLead(q, req, lead,
+      `Deal D-${deal.dealNumber} pushed to the DMS${car ? ` -- ${[car.year, car.make, car.model].join(' ')}` : ''}${trade ? `, trade A-${trade.appraisalNumber}` : ''}`);
+    await store.save(q, 'leads', req.dealershipId, lead.id, {
+      ...updatedLead,
+      // The car on the deal becomes the car they're interested in, if they had none.
+      ...(car && !lead.carId ? { carId: car.id, wishList: [car.id, ...(lead.wishList || []).filter(id => id !== car.id)] } : {}),
+      creditAppSync: { ...(lead.creditAppSync || {}), pushedAt: new Date().toISOString(), pushedBy: { id: req.user.id, name: req.user.name }, dealId: deal.id }
+    });
+    return { deal };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.deal);
+}));
+
+// Push Credit: sends the customer's credit app and current contact
+// details to one of their deals.
+app.post('/api/leads/:id/push-credit', wrap(async (req, res) => {
+  const b = req.body || {};
+  const result = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return { status: 404, error: 'Lead not found' };
+    if (!lead.creditApp) return { status: 400, error: 'Fill in and save the credit app first.' };
+    const deal = await store.get(q, 'deals', req.dealershipId, String(b.dealId || ''), { forUpdate: true });
+    if (!deal || deal.leadId !== lead.id) return { status: 400, error: 'Push the deal first, then push credit to it.' };
+    const saved = await store.save(q, 'deals', req.dealershipId, deal.id, {
+      ...deal, creditApp: creditAppForDeal(lead, deal.creditApp), creditPushedAt: new Date().toISOString()
+    });
+    await audit.updated(q, req, 'deal', deal, saved, 'Credit app pushed from the customer page');
+    const updatedLead = await noteOnLead(q, req, lead, `Credit app pushed to D-${deal.dealNumber}`);
+    await store.save(q, 'leads', req.dealershipId, lead.id, {
+      ...updatedLead, creditAppSync: { ...(lead.creditAppSync || {}), pushedAt: new Date().toISOString(), pushedBy: { id: req.user.id, name: req.user.name }, dealId: deal.id }
+    });
+    return { deal: saved };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.deal);
+}));
+
+// ---------- Trades from the customer page ----------
+// Sales enters the trade (decoded from the VIN) and it goes straight into
+// Appraisals as "needs appraisal" for a manager. Removing it from the
+// customer only hides it there; the appraisal itself is kept.
+
+app.post('/api/leads/:id/trades', wrap(async (req, res) => {
+  const result = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return { status: 404, error: 'Lead not found' };
+    const fields = appraisalFields(req.body || {});
+    if (!fields.vin && !(fields.year && fields.make && fields.model)) {
+      return { status: 400, error: 'Enter the VIN, or the year, make, and model.' };
+    }
+    const appraisal = await createAppraisal(q, req, { ...fields, leadId: lead.id, source: 'trade_in', dealId: null }, {
+      appraisedBy: null, requestedBy: { id: req.user.id, name: req.user.name }
+    });
+    await noteOnLead(q, req, lead, `Trade added: ${[appraisal.year, appraisal.make, appraisal.model].filter(Boolean).join(' ') || appraisal.vin} -- sent to Appraisals (A-${appraisal.appraisalNumber})`);
+    return { appraisal };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.appraisal);
+}));
+
+app.delete('/api/leads/:id/trades/:appraisalId', wrap(async (req, res) => {
+  const result = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.appraisalId, { forUpdate: true });
+    if (!lead || !appraisal || appraisal.leadId !== lead.id || appraisal.removedFromLead) return { status: 404, error: 'Trade not found' };
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
+      ...appraisal, removedFromLead: { at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name } }
+    });
+    await audit.record(q, req, { action: 'remove_trade', entityType: 'appraisal', entityId: appraisal.id, label: audit.labelFor('appraisal', appraisal), details: `Removed from ${lead.name}; appraisal kept` });
+    await noteOnLead(q, req, lead, `Trade removed: A-${appraisal.appraisalNumber} (still in Appraisals)`);
+    return { appraisal: saved };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.appraisal);
 }));
 
 // ---------- TASKS & APPOINTMENTS (follow-ups on a customer) ----------
@@ -1465,43 +1636,49 @@ app.post('/api/deals', wrap(async (req, res) => {
   // can be opened before either is known and filled in later from the
   // Desking tab, matching how a desk sometimes starts a deal before all
   // the paperwork is in hand.
-  const { leadId, carId } = req.body;
-
-  const newDeal = await store.tx(async q => {
-    const car = carId ? await store.get(q, 'cars', req.dealershipId, carId) : null;
-    const fees = await getSettings(q, req.dealershipId);
-    const calculated = calculateDeal({
-      vehiclePrice: req.body.vehiclePrice || (car ? car.price : 0),
-      taxRate: req.body.taxRate ?? fees.taxRate,
-      docFee: req.body.docFee ?? fees.docFee,
-      titleFee: req.body.titleFee ?? fees.titleFee,
-      registrationFee: req.body.registrationFee ?? fees.registrationFee,
-      licenseFee: req.body.licenseFee ?? fees.licenseFee,
-      dealerFees: req.body.dealerFees ?? fees.dealerFees,
-      acquisitionFee: req.body.acquisitionFee ?? fees.acquisitionFee,
-      apr: req.body.apr ?? 6.5,
-      termMonths: req.body.termMonths ?? 60
-    });
-
-    const deal = {
-      id: crypto.randomUUID(),
-      dealNumber: await store.takeNextDealNumber(q, req.dealershipId),
-      leadId: leadId || null,
-      carId: carId || null,
-      status: 'working', // working | delivered | closed | finalized
-      hasTrade: false,
-      ...calculated,
-      creditApp: defaultCreditApp(),
-      dateCreated: new Date().toISOString()
-    };
-
-    await store.insert(q, 'deals', req.dealershipId, deal);
-    await audit.created(q, req, 'deal', deal);
-    await syncCarStatusToDeal(q, req, deal);
-    return deal;
-  });
+  const newDeal = await store.tx(q => createDeal(q, req, req.body || {}));
   res.status(201).json(newDeal);
 }));
+
+// Opens a deal with the next deal number. Used by "+ Create Deal" and by a
+// salesperson's "Push Deal" from the customer page (which also brings the
+// trade and credit app along in `extra`).
+async function createDeal(q, req, input, extra = {}) {
+  const { leadId, carId } = input;
+  const car = carId ? await store.get(q, 'cars', req.dealershipId, carId) : null;
+  const fees = await getSettings(q, req.dealershipId);
+  const calculated = calculateDeal({
+    ...extra,
+    vehiclePrice: input.vehiclePrice || (car ? car.price : 0),
+    taxRate: input.taxRate ?? fees.taxRate,
+    docFee: input.docFee ?? fees.docFee,
+    titleFee: input.titleFee ?? fees.titleFee,
+    registrationFee: input.registrationFee ?? fees.registrationFee,
+    licenseFee: input.licenseFee ?? fees.licenseFee,
+    dealerFees: input.dealerFees ?? fees.dealerFees,
+    acquisitionFee: input.acquisitionFee ?? fees.acquisitionFee,
+    apr: input.apr ?? 6.5,
+    termMonths: input.termMonths ?? 60
+  });
+
+  const deal = {
+    hasTrade: false,
+    ...extra,
+    id: crypto.randomUUID(),
+    dealNumber: await store.takeNextDealNumber(q, req.dealershipId),
+    leadId: leadId || null,
+    carId: car ? car.id : null,
+    status: 'working', // working | delivered | closed | finalized
+    ...calculated,
+    creditApp: extra.creditApp || defaultCreditApp(),
+    dateCreated: new Date().toISOString()
+  };
+
+  await store.insert(q, 'deals', req.dealershipId, deal);
+  await audit.created(q, req, 'deal', deal);
+  await syncCarStatusToDeal(q, req, deal);
+  return deal;
+}
 
 // PUT (update/recalculate) an existing deal's desking numbers or status.
 // Credit app fields are preserved automatically since they're not part
@@ -1554,10 +1731,9 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
 // merges it over the defaults rather than doing a shallow patch --
 // that way any field the frontend didn't know about yet still gets a
 // safe default instead of `undefined`.
-app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
-  const body = req.body || {};
-  const defaults = defaultCreditApp();
-
+// A full credit app from what a form sent, over safe defaults.
+function mergeCreditApp(body) {
+  const b = body || {};
   function mergeApplicant(incoming) {
     const base = defaultApplicant();
     const merged = { ...base, ...(incoming || {}) };
@@ -1565,13 +1741,87 @@ app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
     merged.previousEmployer = { ...base.previousEmployer, ...((incoming && incoming.previousEmployer) || {}) };
     return merged;
   }
+  const allowed = Object.keys(defaultCreditApp());
+  const picked = Object.fromEntries(Object.entries(b).filter(([k]) => allowed.includes(k)));
+  return { ...defaultCreditApp(), ...picked, applicant: mergeApplicant(b.applicant), coApplicant: mergeApplicant(b.coApplicant) };
+}
 
-  const updatedCreditApp = {
-    ...defaults,
-    ...body,
-    applicant: mergeApplicant(body.applicant),
-    coApplicant: mergeApplicant(body.coApplicant)
+// ---- CRM <-> DMS sync of the customer and their credit app ----
+// Sales fills in the credit app on the customer page and pushes it to the
+// deal. When F&I changes it on the deal, just the fields they changed go
+// back to the customer, so nothing sales entered since gets overwritten.
+
+const isPlainObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+function flattenObj(obj, prefix = '', out = {}) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (isPlainObj(v)) flattenObj(v, path, out); else out[path] = v;
+  }
+  return out;
+}
+function changedPaths(before, after) {
+  const a = flattenObj(before), b = flattenObj(after);
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+function setPath(obj, path, value) {
+  const keys = path.split('.');
+  let o = obj;
+  for (const k of keys.slice(0, -1)) { if (!isPlainObj(o[k])) o[k] = {}; o = o[k]; }
+  o[keys[keys.length - 1]] = value;
+}
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+
+// The customer's contact details, as credit app applicant fields.
+function applicantContact(lead) {
+  const parts = String(lead.name || '').trim().split(/\s+/).filter(Boolean);
+  const a = lead.address && typeof lead.address === 'object' ? lead.address : cleanAddress(lead.address);
+  return {
+    firstName: parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || ''),
+    lastName: parts.length > 1 ? parts[parts.length - 1] : '',
+    phone: lead.phone || '', email: lead.email || '',
+    address1: a.street || '', address2: a.unit || '', city: a.city || '', state: a.state || '',
+    zip: a.zip || '', county: a.county || ''
   };
+}
+// ...and back: applicant contact fields as customer fields.
+function contactFromApplicant(applicant, lead) {
+  const a = applicant || {};
+  const name = [a.firstName, a.lastName].map(x => String(x || '').trim()).filter(Boolean).join(' ');
+  return {
+    name: name || lead.name, phone: a.phone || '', email: a.email || '',
+    address: cleanAddress({ ...(isPlainObj(lead.address) ? lead.address : {}), street: a.address1, unit: a.address2, city: a.city, state: a.state, zip: a.zip, county: a.county })
+  };
+}
+const CONTACT_APPLICANT_FIELDS = ['firstName', 'lastName', 'phone', 'email', 'address1', 'address2', 'city', 'state', 'zip', 'county'];
+
+// F&I saved the credit app on a deal: bring what changed back to the customer.
+async function pushCreditAppBackToCustomer(q, req, deal, before, after) {
+  if (!deal.leadId) return;
+  const lead = await store.get(q, 'leads', req.dealershipId, deal.leadId, { forUpdate: true });
+  if (!lead) return;
+  const changed = changedPaths(before, after).filter(p => p !== 'dateSubmitted');
+  if (!changed.length) return;
+  const creditApp = JSON.parse(JSON.stringify(lead.creditApp || after));
+  for (const path of changed) setPath(creditApp, path, getPath(after, path));
+  const updated = { ...lead, creditApp };
+  if (changed.some(p => CONTACT_APPLICANT_FIELDS.some(f => p === `applicant.${f}`))) {
+    Object.assign(updated, contactFromApplicant(after.applicant, lead));
+  }
+  updated.creditAppSync = { ...(lead.creditAppSync || {}), fromDmsAt: new Date().toISOString(), fromDmsBy: { id: req.user.id, name: req.user.name }, dealId: deal.id };
+  const statusChanged = changed.includes('status');
+  updated.activities = [{
+    id: crypto.randomUUID(), type: 'dms', date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name },
+    text: `F&I updated the credit app on D-${deal.dealNumber}${statusChanged ? ` -- status: ${String(after.status).replace('_', ' ')}` : ''} (${changed.length} field${changed.length === 1 ? '' : 's'})`
+  }, ...(lead.activities || [])];
+  await store.save(q, 'leads', req.dealershipId, lead.id, updated);
+  await audit.updated(q, req, 'lead', lead, updated, `Pushed back from deal D-${deal.dealNumber}`);
+}
+
+app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
+  const updatedCreditApp = mergeCreditApp(req.body);
+  const defaults = defaultCreditApp();
 
   const updated = await store.tx(async q => {
     const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
@@ -1587,6 +1837,7 @@ app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
 
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, creditApp: updatedCreditApp });
     await audit.updated(q, req, 'deal', deal, saved, 'Credit application');
+    await pushCreditAppBackToCustomer(q, req, deal, existing, updatedCreditApp);
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
@@ -1682,7 +1933,7 @@ function appraisalFields(body) {
   const out = { ...b };
   // People type "41,000" or "$19,500" -- accept those as numbers.
   const toNumber = v => Number(String(v).replace(/[$,\s]/g, '')) || 0;
-  for (const f of ['year', 'mileage', 'targetRetail', 'targetGross', 'offer', 'otherCosts']) {
+  for (const f of ['year', 'mileage', 'targetRetail', 'targetGross', 'offer', 'otherCosts', 'payoff', 'customerExpects']) {
     if (f in b) out[f] = b[f] === '' || b[f] === null ? null : toNumber(b[f]);
   }
   if ('vin' in b) out.vin = vinDecoder.normalizeVin(b.vin);
@@ -1702,7 +1953,7 @@ function appraisalFields(body) {
       : [];
   }
   for (const f of ['make', 'model', 'trim', 'bodyStyle', 'engine', 'drivetrain', 'transmission', 'fuelType',
-    'exteriorColor', 'interiorColor', 'notes', 'leadId', 'dealId']) {
+    'exteriorColor', 'interiorColor', 'notes', 'leadId', 'dealId', 'lienholder']) {
     if (f in b) out[f] = b[f] === null ? null : String(b[f]).trim().slice(0, f === 'notes' ? 4000 : 200);
   }
   return out;
@@ -1740,32 +1991,39 @@ app.get('/api/appraisals/:id', wrap(async (req, res) => {
 }));
 
 app.post('/api/appraisals', wrap(async (req, res) => {
-  const created = await store.tx(async q => {
-    const settings = await getSettings(q, req.dealershipId);
-    const appraisal = {
-      vin: '', year: null, make: '', model: '', trim: '', bodyStyle: '', engine: '', drivetrain: '',
-      transmission: '', fuelType: '', exteriorColor: '', interiorColor: '', mileage: null, condition: '',
-      equipment: [], recon: [], notes: '', leadId: null, dealId: null,
-      source: 'trade_in', category: 'undecided', calcSolveFor: 'appraisal',
-      targetRetail: null, targetGross: Number(settings.appraisalTargetGross) || 0, otherCosts: 0, offer: null,
-      ...appraisalFields(req.body || {}),
-      id: crypto.randomUUID(),
-      appraisalNumber: await store.takeNextAppraisalNumber(q, req.dealershipId),
-      status: 'open', // open | acquired | lost
-      appraisedBy: { id: req.user.id, name: req.user.name },
-      recalls: null,
-      carId: null,
-      offerHistory: [],
-      customerOffers: [],
-      dateCreated: new Date().toISOString()
-    };
-    trackOfferChange(null, appraisal, req);
-    await store.insert(q, 'appraisals', req.dealershipId, appraisal);
-    await audit.created(q, req, 'appraisal', appraisal);
-    return appraisal;
-  });
+  const created = await store.tx(q => createAppraisal(q, req, appraisalFields(req.body || {})));
   res.status(201).json(created);
 }));
+
+// A new appraisal. Started in Appraisals, the person starting it is the
+// appraiser; a trade entered by sales has no appraiser until a manager
+// picks it up (who = { appraisedBy, requestedBy }).
+async function createAppraisal(q, req, fields, who = {}) {
+  const settings = await getSettings(q, req.dealershipId);
+  const appraisal = {
+    vin: '', year: null, make: '', model: '', trim: '', bodyStyle: '', engine: '', drivetrain: '',
+    transmission: '', fuelType: '', exteriorColor: '', interiorColor: '', mileage: null, condition: '',
+    equipment: [], recon: [], notes: '', leadId: null, dealId: null,
+    source: 'trade_in', category: 'undecided', calcSolveFor: 'appraisal',
+    targetRetail: null, targetGross: Number(settings.appraisalTargetGross) || 0, otherCosts: 0, offer: null,
+    payoff: null, lienholder: '', customerExpects: null,
+    ...fields,
+    id: crypto.randomUUID(),
+    appraisalNumber: await store.takeNextAppraisalNumber(q, req.dealershipId),
+    status: 'open', // open | acquired | lost
+    appraisedBy: 'appraisedBy' in who ? who.appraisedBy : { id: req.user.id, name: req.user.name },
+    requestedBy: who.requestedBy || null,
+    recalls: null,
+    carId: null,
+    offerHistory: [],
+    customerOffers: [],
+    dateCreated: new Date().toISOString()
+  };
+  trackOfferChange(null, appraisal, req);
+  await store.insert(q, 'appraisals', req.dealershipId, appraisal);
+  await audit.created(q, req, 'appraisal', appraisal);
+  return appraisal;
+}
 
 app.put('/api/appraisals/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
@@ -1774,6 +2032,8 @@ app.put('/api/appraisals/:id', wrap(async (req, res) => {
     const next = { ...appraisal, ...appraisalFields(req.body || {}), dateUpdated: new Date().toISOString() };
     const problem = await applyAppraiser(q, req, next, (req.body || {}).appraiserId);
     if (problem) return { error: problem };
+    // A trade sent over by sales: whoever first puts a number on it is the appraiser.
+    if (!next.appraisedBy && next.offer && next.offer !== appraisal.offer) next.appraisedBy = { id: req.user.id, name: req.user.name };
     trackOfferChange(appraisal, next, req);
     const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, next);
     await audit.updated(q, req, 'appraisal',
@@ -2147,6 +2407,8 @@ async function buildDataContext(dealershipId) {
   const today = new Date().toISOString().split('T')[0];
 
   const safeDeals = deals.map(redactDeal);
+  // Customers' credit apps stay out of the AI entirely.
+  const safeLeads = leads.map(({ creditApp, ...lead }) => lead);
 
   return `
 Today's date is ${today}.
@@ -2154,8 +2416,8 @@ Today's date is ${today}.
 CARS (inventory):
 ${JSON.stringify(cars, null, 2)}
 
-LEADS (customers/prospects):
-${JSON.stringify(leads, null, 2)}
+LEADS (customers/prospects, credit applications removed):
+${JSON.stringify(safeLeads, null, 2)}
 
 DEALS (SSNs and license numbers redacted):
 ${JSON.stringify(safeDeals, null, 2)}

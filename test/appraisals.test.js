@@ -344,7 +344,9 @@ test('provider slots: model recalls live, everything else not available yet', as
   assert.deepStrictEqual(status, {
     market: 'not_available', options: 'not_available', kbb: 'not_available', jdpower: 'not_available',
     blackbook: 'not_available', mmr: 'not_available', carfax: 'not_available', autocheck: 'not_available',
-    windowsticker: 'not_available', vin_recalls: 'not_available', recalls: 'live'
+    windowsticker: 'not_available', vin_recalls: 'not_available', recalls: 'live',
+    routeone: 'not_available', dealertrack: 'not_available', cudl: 'not_available',
+    dms_reynolds: 'not_available', dms_cdk: 'not_available', dms_tekion: 'not_available', dms_dealertrack: 'not_available'
   });
   assert.ok(list.find(p => p.key === 'kbb').needs);
 });
