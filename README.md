@@ -82,6 +82,16 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Add**: New Deal (pick the car by search -- their cars first), Vehicles, Trade In, Credit App. **Actions**: Check In, Desk, Mark as Sold, Snooze, Dead (with a reason), Transfer (to another salesperson)
 - Coming later, with their places already on the page: Video, Documents, Portal, and customer replies in the Conversation tab
 
+**Sales → DMS (Sales & F&I), and back**
+- **Address** in parts (street, unit, city, state, ZIP, county -- county fills in from the ZIP where known), plus an optional separate mailing address
+- **Trades**: sales enters the trade on the customer page (the VIN decodes it; plus mileage, condition, payoff, lienholder, and what the customer hopes to get). It goes straight into **Appraisals** as *Needs appraiser* -- sales stays on the customer page. Whoever first puts a number on it becomes the appraiser. Removing a trade from the customer only takes it off their page; the appraisal is kept
+- **Credit App** on the customer page (the same form F&I uses). Name, phone, email, and address are the customer's -- filled in for you, and saving updates both. SSNs and license numbers are encrypted, hidden from the audit log, and never sent to the AI
+- **Push Deal** opens the deal in the DMS with a deal number, bringing the car, the trade (with its payoff), the cash down, and the credit app
+- **Push Credit** sends the credit app and any changed customer info to the deal, keeping the approval status F&I set
+- **Back from the DMS**: when F&I saves the credit app on the deal, just the fields they changed come back to the customer page (so nothing sales entered since is overwritten), including the approval status and any contact changes. It's noted in the customer's history
+- **Lenders** (RouteOne, Dealertrack, CUDL) are submitted to from the deal's Credit Application tab -- "Not available yet" until those partners approve the store
+- **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
+
 **Tasks & Appointments**
 - Each is for a customer, assigned to a staff member, with a due time. Completing one notes the outcome in the customer's history
 - The Sales Pipeline home lists **my tasks due today** (overdue first, in red; managers can switch to everyone's), and **My Tasks Due** is a badge on the left rail

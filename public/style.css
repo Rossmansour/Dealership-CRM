@@ -1792,3 +1792,48 @@ body:has(#leadProfileModal.active) { overflow: hidden; }
   .pipeline-task-when { grid-column: 2; }
 }
 .roadmap-label-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+
+/* Windows opened from the customer page sit above it */
+.modal.cp-overlay { z-index: 700; }
+.cp-credit-content { max-width: 900px; }
+.cp-credit-head { display: flex; align-items: center; gap: 12px; }
+.cp-credit-head h2 { margin: 0; }
+.cp-credit-sync { background: var(--highlight-bg, var(--surface-alt)); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin: 10px 0 14px; display: flex; flex-direction: column; gap: 3px; }
+.cp-credit-actions { position: sticky; bottom: -24px; background: var(--surface); padding: 12px 0; border-top: 1px solid var(--border); }
+.badge.credit-not_submitted { background: #888; }
+.badge.credit-pending { background: var(--amber); }
+.badge.credit-approved { background: var(--green); }
+.badge.credit-conditional { background: var(--blue); }
+.badge.credit-declined { background: var(--red); }
+.deal-lenders { margin-bottom: 16px; }
+
+/* Address */
+.cp-address-lines { white-space: pre-line; line-height: 1.35; }
+.cp-address .cp-field { align-items: start; }
+.cp-address-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; font-size: 12px; color: var(--text-secondary); }
+.cp-address-form label { display: block; }
+.cp-address-form .wide { grid-column: 1 / -1; }
+.cp-address-form input[type="text"] { width: 100%; box-sizing: border-box; margin-top: 2px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text); }
+.cp-check { display: flex !important; align-items: center; gap: 6px; color: var(--text); }
+.cp-mailing { border-top: 1px dashed var(--border); padding-top: 6px; }
+
+/* Trades */
+.cp-trade { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.cp-trade-status { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 10px; padding: 1px 8px; margin-top: 3px; }
+.cp-trade-status.wait { background: rgba(217,119,6,0.15); color: var(--amber); }
+.cp-trade-status.ok { background: rgba(22,163,74,0.15); color: var(--green); }
+.cp-trade-status.muted { background: var(--surface-alt); color: var(--text-muted); }
+.cp-card .cp-full { margin-top: 8px; }
+.needs-appraiser { font-size: 12px; font-weight: 600; color: var(--amber); }
+
+/* Push deal */
+.cp-push-deal { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface-alt); }
+.cp-push-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; font-size: 12px; color: var(--text-secondary); }
+.cp-push-grid .wide { grid-column: 1 / -1; }
+.cp-push-grid select, .cp-push-grid input { width: 100%; box-sizing: border-box; margin-top: 3px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; background: var(--surface); color: var(--text); }
+.cp-deal-row { align-items: flex-start; gap: 10px; }
+.cp-deal-buttons { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .cp-push-grid { grid-template-columns: 1fr; }
+  .cp-deal-row { flex-direction: column; }
+}

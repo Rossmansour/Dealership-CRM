@@ -57,11 +57,14 @@ test('hot, address, best contact, wish list, snooze, and dead reason are saved a
   const lead = (await as(sales, 'POST', '/leads', { name: 'Chris', carId: cars[0].id })).body;
   assert.deepStrictEqual(lead.wishList, [cars[0].id], 'the car they came in for starts the wish list');
   const saved = (await as(sales, 'PUT', `/leads/${lead.id}`, {
-    hot: true, address: ' 1 Main St ', bestContact: 'text', wishList: [cars[1].id, cars[1].id, ''],
+    hot: true, address: { street: ' 1 Main St ', unit: 'Apt 4', city: 'Phoenix', state: 'az', zip: '85001', county: 'Maricopa', extra: 'x' },
+    mailingDifferent: true, mailingAddress: 'PO Box 9', bestContact: 'text', wishList: [cars[1].id, cars[1].id, ''],
     snoozedUntil: '2030-01-02', status: 'lost', lostReason: 'Bought elsewhere'
   })).body;
   assert.strictEqual(saved.hot, true);
-  assert.strictEqual(saved.address, '1 Main St');
+  assert.deepStrictEqual(saved.address, { street: '1 Main St', unit: 'Apt 4', city: 'Phoenix', state: 'AZ', zip: '85001', county: 'Maricopa' });
+  assert.strictEqual(saved.mailingDifferent, true);
+  assert.strictEqual(saved.mailingAddress.street, 'PO Box 9', 'a one-line address becomes the street');
   assert.strictEqual(saved.bestContact, 'text');
   assert.deepStrictEqual(saved.wishList, [cars[0].id, cars[1].id], 'duplicates dropped; the interested car stays on it');
   assert.match(saved.snoozedUntil, /^2030-01-02/);

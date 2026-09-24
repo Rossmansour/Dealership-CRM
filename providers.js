@@ -34,6 +34,15 @@ const PROVIDERS = [
     description: 'Which recalls are still unrepaired on this exact car, straight from the manufacturer data.',
     needs: 'a VIN recall data source (e.g. through Carfax, AutoCheck, or a recall data provider)'
   },
+  // Lenders: F&I submits credit apps to them from the deal (the DMS side).
+  { key: 'routeone', name: 'RouteOne', category: 'lender', description: 'Send the credit app to lenders on RouteOne and get decisions back on the deal.', needs: 'RouteOne dealer and partner approval' },
+  { key: 'dealertrack', name: 'Dealertrack', category: 'lender', description: 'Send the credit app to lenders on Dealertrack and get decisions back on the deal.', needs: 'Dealertrack partner approval' },
+  { key: 'cudl', name: 'CUDL', category: 'lender', description: 'Send the credit app to credit unions on CUDL and get decisions back on the deal.', needs: 'CU Direct (CUDL) partner approval' },
+  // For stores that keep an outside DMS: customers, deals, and credit apps sync with it.
+  { key: 'dms_reynolds', name: 'Reynolds & Reynolds', category: 'dms', description: 'Two-way sync of customers, deals, and credit apps with ERA-IGNITE.', needs: 'Reynolds Certified Interface (RCI) approval' },
+  { key: 'dms_cdk', name: 'CDK Global', category: 'dms', description: 'Two-way sync of customers, deals, and credit apps with CDK Drive.', needs: 'CDK Fortellis partner approval' },
+  { key: 'dms_tekion', name: 'Tekion', category: 'dms', description: 'Two-way sync of customers, deals, and credit apps with Tekion ARC.', needs: 'Tekion partner API access' },
+  { key: 'dms_dealertrack', name: 'Dealertrack DMS', category: 'dms', description: 'Two-way sync of customers, deals, and credit apps with Dealertrack DMS.', needs: 'Dealertrack DMS partner approval' },
   {
     key: 'recalls', name: 'Recalls for this Model', category: 'recalls', live: true,
     description: 'Every safety recall issued for this year, make, and model, from NHTSA (the US government). Some may already be repaired on this car.'

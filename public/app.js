@@ -899,6 +899,7 @@ const AP_FIELDS = [
   ['fuelType', 'apFuelType'], ['mileage', 'apMileage'], ['exteriorColor', 'apExteriorColor'], ['interiorColor', 'apInteriorColor'],
   ['condition', 'apCondition'], ['leadId', 'apLeadId'], ['notes', 'apNotes'],
   ['source', 'apSource'], ['category', 'apCategory'],
+  ['payoff', 'apPayoff'], ['lienholder', 'apLienholder'], ['customerExpects', 'apCustomerExpects'],
   ['targetRetail', 'apTargetRetail'], ['otherCosts', 'apOtherCosts'], ['targetGross', 'apTargetGross'], ['offer', 'apOffer']
 ];
 
@@ -940,7 +941,7 @@ function renderAppraisalList() {
         <td>${appraisalVehicle(a)}${a.vin ? html`<div class="inventory-trim">${a.vin}</div>` : ''}</td>
         <td>${a.mileage ? Number(a.mileage).toLocaleString() : '--'}</td>
         <td>${lead ? lead.name : '--'}</td>
-        <td>${a.appraisedBy ? a.appraisedBy.name : '--'}</td>
+        <td>${a.appraisedBy ? a.appraisedBy.name : html`<span class="needs-appraiser">Needs appraiser</span>`}${a.requestedBy ? html`<div class="inventory-trim">from ${a.requestedBy.name}</div>` : ''}</td>
         <td>${money(a.offer)}</td>
         <td><span class="badge appraisal-${a.status}">${APPRAISAL_STATUS_LABELS[a.status]}</span></td>
       </tr>`;
@@ -1009,7 +1010,8 @@ function renderAppraisalDetail() {
   // The appraiser: anyone on staff (plus whoever it is now, even if they've since left).
   const appraiserOptions = [...staffList];
   if (a.appraisedBy && !appraiserOptions.some(u => u.id === a.appraisedBy.id)) appraiserOptions.unshift(a.appraisedBy);
-  document.getElementById('apAppraiser').innerHTML = appraiserOptions.map(u => html`<option value="${u.id}">${u.name}</option>`).join('');
+  document.getElementById('apAppraiser').innerHTML = (a.appraisedBy ? '' : html`<option value="">-- Needs an appraiser --</option>`) +
+    appraiserOptions.map(u => html`<option value="${u.id}">${u.name}</option>`).join('');
   document.getElementById('apAppraiser').value = a.appraisedBy ? a.appraisedBy.id : '';
   // Older appraisals didn't store this; if they had an offer, keep it and work out the profit.
   const solveFor = a.calcSolveFor || (a.offer ? 'profit' : 'appraisal');
@@ -1370,6 +1372,8 @@ function renderValues() {
   const provider = key => providerList.find(p => p.key === key);
   const rows = [
     { label: 'Asking price', value: apNumber('apTargetRetail') || null },
+    { label: 'Customer hopes to get', value: apNumber('apCustomerExpects') || null },
+    { label: 'Payoff (owed)', value: apNumber('apPayoff') || null },
     { label: 'Your avg sale, similar cars', value: retailPerformance && retailPerformance.ready ? retailPerformance.sold.avgSalePrice : null,
       empty: retailPerformance && retailPerformance.ready ? 'No sales yet' : '--' },
     { key: 'market', label: 'Market value' },
@@ -2227,14 +2231,15 @@ let cpHistoryFilter = 'all';
 let selectedSendTextPhoto = null;
 const leadProfileModal = document.getElementById('leadProfileModal');
 
-const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '📍', task: '✅', appointment: '📅', status: '🏷' };
-const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit', task: 'Task', appointment: 'Appointment', status: 'Status' };
+const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '📍', task: '✅', appointment: '📅', status: '🏷', dms: '⇄' };
+const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit', task: 'Task', appointment: 'Appointment', status: 'Status', dms: 'DMS' };
 const TASK_ICONS = { call: '📞', text: '💬', email: '✉️', appointment: '📅', todo: '☑️' };
 const TASK_LABELS = { call: 'Call', text: 'Text', email: 'Email', appointment: 'Appointment', todo: 'To-do' };
 const HISTORY_FILTERS = [
   ['all', 'All', () => true], ['note', 'Notes', a => a.type === 'note'], ['call', 'Calls', a => a.type === 'call'],
   ['text', 'Texts', a => a.type === 'text'], ['email', 'Emails', a => a.type === 'email'], ['visit', 'Visits', a => a.type === 'visit'],
-  ['task', 'Tasks', a => a.type === 'task'], ['appointment', 'Appts', a => a.type === 'appointment'], ['status', 'Status', a => a.type === 'status']
+  ['task', 'Tasks', a => a.type === 'task'], ['appointment', 'Appts', a => a.type === 'appointment'], ['status', 'Status', a => a.type === 'status'],
+  ['dms', 'DMS', a => a.type === 'dms']
 ];
 const ASSIGNMENT_SLOTS = [['sales1Id', 'Sales 1'], ['sales2Id', 'Sales 2'], ['bdc1Id', 'BDC 1'], ['bdc2Id', 'BDC 2']];
 const DEFAULT_ROADMAP_LABELS = ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery'];
@@ -2308,6 +2313,7 @@ function renderCustomerPage() {
   renderRoadmap(lead);
   renderCpContact(lead);
   renderWishList(lead);
+  renderCpTrades(lead);
   renderBestContact(lead);
   renderCpDetails(lead);
   renderComposer();
@@ -2359,9 +2365,9 @@ function roadmapAuto(lead) {
   return [
     (lead.activities || []).some(a => a.type === 'visit') ? 'Checked in' : null,
     null,
-    (lead.carId || (lead.wishList || []).length) ? 'Vehicle picked' : null,
+    (lead.carId || (lead.wishList || []).length || leadDeals.some(d => d.carId)) ? 'Vehicle picked' : null,
     null,
-    appraisals.some(a => a.leadId === lead.id) ? 'Trade appraised' : null,
+    leadTrades(lead).length ? 'Trade entered' : null,
     leadDeals.length ? 'Deal written' : null,
     (lead.status === 'won' || leadDeals.some(d => ['delivered', 'closed', 'finalized'].includes(d.status))) ? 'Sold / delivered' : null
   ];
@@ -2412,8 +2418,81 @@ function renderCpContact(lead) {
       ${value ? html`<span class="cp-field-value">${value}</span>` : html`<span class="cp-field-value muted">--</span>`}
       <button type="button" class="link-btn cp-field-edit" data-type="${type}">${value ? 'Edit' : 'Add'}</button>
     </div>`;
+  const addr = leadAddress(lead);
+  const mailing = lead.mailingDifferent ? leadAddress({ address: lead.mailingAddress }) : null;
   document.getElementById('cpContact').innerHTML =
-    row('phone', '📞', 'Phone', lead.phone, 'tel') + row('email', '✉️', 'Email', lead.email, 'email') + row('address', '🏠', 'Address', lead.address);
+    row('phone', '📞', 'Phone', lead.phone, 'tel') + row('email', '✉️', 'Email', lead.email, 'email') + html`
+    <div class="cp-address" id="cpAddressBlock">
+      <div class="cp-field">
+        <span class="cp-field-icon">🏠</span><span class="cp-field-label">Address</span>
+        ${formatAddress(addr) ? html`<span class="cp-field-value cp-address-lines">${formatAddress(addr)}</span>` : html`<span class="cp-field-value muted">--</span>`}
+        <button type="button" class="link-btn" id="cpAddressEdit">${formatAddress(addr) ? 'Edit' : 'Add'}</button>
+      </div>
+      ${mailing ? html`<div class="cp-field"><span class="cp-field-icon">📬</span><span class="cp-field-label">Mailing</span>
+        <span class="cp-field-value cp-address-lines">${formatAddress(mailing) || '--'}</span></div>` : ''}
+    </div>`;
+  document.getElementById('cpAddressEdit').onclick = () => editCpAddress(lead);
+}
+
+// Older customers have one line of text for an address; newer ones have parts.
+function leadAddress(lead) {
+  const a = lead.address;
+  if (!a) return {};
+  return typeof a === 'string' ? { street: a } : a;
+}
+function formatAddress(a) {
+  const line1 = [a.street, a.unit].filter(Boolean).join(', ');
+  const line2 = [[a.city, a.state].filter(Boolean).join(', '), a.zip].filter(Boolean).join(' ');
+  return [line1, line2, a.county ? `${a.county} County` : ''].filter(Boolean).join('\n');
+}
+
+function addressFieldsHtml(prefix, a) {
+  return html`
+    <label class="wide">Street <input type="text" id="${prefix}Street" value="${a.street || ''}" autocomplete="off" /></label>
+    <label>Apt / Unit <input type="text" id="${prefix}Unit" value="${a.unit || ''}" /></label>
+    <label>City <input type="text" id="${prefix}City" value="${a.city || ''}" /></label>
+    <label>State <input type="text" id="${prefix}State" maxlength="2" value="${a.state || ''}" placeholder="AZ" /></label>
+    <label>ZIP <input type="text" id="${prefix}Zip" maxlength="10" value="${a.zip || ''}" /></label>
+    <label>County <input type="text" id="${prefix}County" value="${a.county || ''}" placeholder="Fills in from ZIP where known" /></label>`;
+}
+function readAddressFields(prefix) {
+  const v = id => document.getElementById(`${prefix}${id}`).value.trim();
+  return { street: v('Street'), unit: v('Unit'), city: v('City'), state: v('State').toUpperCase(), zip: v('Zip'), county: v('County') };
+}
+async function fillCountyFromZip(prefix) {
+  const zip = document.getElementById(`${prefix}Zip`).value.trim();
+  const county = document.getElementById(`${prefix}County`);
+  if (!zip || county.value) return;
+  try {
+    const res = await fetch(`${API}/fees/county-lookup?state=${encodeURIComponent(document.getElementById(`${prefix}State`).value)}&zip=${encodeURIComponent(zip)}`);
+    const result = await res.json();
+    if (result.county && !county.value) county.value = result.county;
+  } catch (err) { /* a convenience only */ }
+}
+
+function editCpAddress(lead) {
+  const block = document.getElementById('cpAddressBlock');
+  block.innerHTML = html`
+    <div class="cp-address-form">
+      ${addressFieldsHtml('cpAddr', leadAddress(lead))}
+      <label class="wide cp-check"><input type="checkbox" id="cpMailingDifferent" ${lead.mailingDifferent ? html`checked` : ''} /> Mailing address is different</label>
+      <div class="cp-mailing wide" id="cpMailingFields" ${lead.mailingDifferent ? '' : html`hidden`}>
+        <div class="cp-address-form">${addressFieldsHtml('cpMail', lead.mailingAddress || {})}</div>
+      </div>
+      <div class="wide cp-panel-buttons">
+        <button type="button" class="btn-primary btn-small" id="cpAddrSave">Save address</button>
+        <button type="button" class="link-btn" id="cpAddrCancel">Cancel</button>
+      </div>
+    </div>`;
+  document.getElementById('cpAddrZip').addEventListener('change', () => fillCountyFromZip('cpAddr'));
+  document.getElementById('cpMailZip').addEventListener('change', () => fillCountyFromZip('cpMail'));
+  document.getElementById('cpMailingDifferent').onchange = e => { document.getElementById('cpMailingFields').hidden = !e.target.checked; };
+  document.getElementById('cpAddrCancel').onclick = () => renderCpContact(cpLead());
+  document.getElementById('cpAddrSave').onclick = () => {
+    const mailingDifferent = document.getElementById('cpMailingDifferent').checked;
+    cpSaveLead({ address: readAddressFields('cpAddr'), mailingDifferent, ...(mailingDifferent ? { mailingAddress: readAddressFields('cpMail') } : {}) });
+  };
+  document.getElementById('cpAddrStreet').focus();
 }
 
 // Edit a contact field in place: Enter or leaving the box saves, Escape cancels.
@@ -2880,20 +2959,28 @@ function renderThread(lead) {
 function renderProfileDeals(lead) {
   const related = deals.filter(d => d.leadId === lead.id);
   document.getElementById('cpDealCount').textContent = related.length;
-  document.getElementById('profileDealsList').innerHTML = (related.length ? related.map(d => {
+  const credit = s => CREDIT_STATUS_LABELS[s] || s;
+  document.getElementById('profileDealsList').innerHTML = related.length ? related.slice().reverse().map(d => {
     const car = cars.find(c => c.id === d.carId);
+    const ca = d.creditApp || {};
     return html`
-      <div class="related-deal-row">
-        <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal(${js(d.id)})">D-${d.dealNumber}</button>
-          -- ${car ? cpCarLabel(car) : 'No vehicle yet'}${d.vehiclePrice ? ` · ${money(d.vehiclePrice)}` : ''}</span>
-        <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
+      <div class="related-deal-row cp-deal-row">
+        <div>
+          <button class="deal-number-link" onclick="closeProfileAndOpenDeal(${js(d.id)})">D-${d.dealNumber}</button>
+          -- ${car ? cpCarLabel(car) : 'No vehicle yet'}${d.vehiclePrice ? ` · ${money(d.vehiclePrice)}` : ''}${d.hasTrade && d.tradeMake ? ` · trade ${[d.tradeYear, d.tradeMake, d.tradeModel].filter(Boolean).join(' ')}` : ''}
+          <div class="audit-note">Credit: ${credit(ca.status || 'not_submitted')}${d.creditPushedAt ? ` · pushed ${new Date(d.creditPushedAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ' · not pushed'}</div>
+        </div>
+        <div class="cp-deal-buttons">
+          <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
+          ${d.status === 'working' ? html`<button type="button" class="btn-secondary btn-small" onclick="cpPushCreditFromDeals(${js(d.id)})">Push Credit</button>` : ''}
+        </div>
       </div>`;
-  }).join('') : html`<div class="cp-empty">No deals yet.</div>`) +
-    html`<button type="button" class="btn-primary btn-small" onclick="cpAction('new-deal')">+ New Deal</button>`;
+  }).join('') : html`<div class="cp-empty">No deals yet. Push one above.</div>`;
+  renderPushDealForm(lead);
 }
 
 function renderCpValue(lead) {
-  const trades = appraisals.filter(a => a.leadId === lead.id).slice().reverse();
+  const trades = leadTrades(lead).slice().reverse();
   const sold = deals.filter(d => d.leadId === lead.id && ['delivered', 'closed', 'finalized'].includes(d.status));
   document.getElementById('cpValue').innerHTML = html`
     <div class="retail-stats">
@@ -2927,17 +3014,6 @@ function latestDeal(lead) {
   return related.find(d => d.status === 'working') || related.slice(-1)[0] || null;
 }
 
-async function createDealForLead(leadId, carId) {
-  const res = await fetch(`${API}/deals`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId, carId })
-  });
-  if (!res.ok) { const b = await res.json().catch(() => ({})); if (res.status !== 403) alert(b.error || 'Could not start the deal.'); return; }
-  const deal = await res.json();
-  closeCustomerPage();
-  await loadAll();
-  openDealWorkspace(deal.id);
-}
-
 function showActionPanel(content) {
   const panel = document.getElementById('cpActionPanel');
   panel.hidden = false;
@@ -2951,37 +3027,24 @@ window.cpAction = async function(action) {
   if (!lead) return;
   document.getElementById('cpLaterNote').hidden = true;
   if (action === 'new-deal') {
-    const panel = showActionPanel(html`<div class="cp-panel-title">New deal -- which vehicle?</div><div id="cpDealPicker"></div>
-      <button type="button" class="link-btn" data-panel-close>Cancel</button>`);
-    const picker = createSearchPicker({
-      kind: 'car', clearable: false,
-      getIds: () => {
-        const available = cars.filter(c => c.status !== 'sold').map(c => c.id);
-        const wanted = [...(lead.wishList || [])].filter(id => available.includes(id));
-        return [...available.filter(id => !wanted.includes(id)), ...wanted]; // their cars show first
-      },
-      onPick: (id) => id && createDealForLead(lead.id, id)
-    });
-    panel.querySelector('#cpDealPicker').appendChild(picker.element);
-    picker.input.focus();
+    cpSwitchTab('deals');
+    document.getElementById('cpPushDeal').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (cpPushDealPicker && !cpPushDealCarId) cpPushDealPicker.input.focus();
   } else if (action === 'vehicles') {
     cpWishPicker.input.focus();
   } else if (action === 'trade') {
-    closeCustomerPage();
-    startAppraisal({ leadId: lead.id });
-  } else if (action === 'credit-app' || action === 'desk') {
+    openTradeForm();
+  } else if (action === 'credit-app') {
+    openCpCreditApp();
+  } else if (action === 'desk') {
     const deal = latestDeal(lead);
     if (!deal) {
-      showActionPanel(html`<div class="cp-panel-title">No deal yet</div><p class="audit-note">Start a deal first -- the ${action === 'desk' ? 'desk' : 'credit app'} lives on the deal.</p>
-        <button type="button" class="btn-primary btn-small" onclick="cpAction('new-deal')">+ New Deal</button>`);
+      showActionPanel(html`<div class="cp-panel-title">No deal yet</div><p class="audit-note">Push a deal to the DMS first -- the desk lives on the deal.</p>
+        <button type="button" class="btn-primary btn-small" onclick="cpAction('new-deal')">Push a Deal</button>`);
       return;
     }
     closeCustomerPage();
     openDealWorkspace(deal.id);
-    if (action === 'credit-app') {
-      const tab = document.querySelector('.sub-tab-btn[data-subtab="creditapp"]');
-      if (tab) tab.click();
-    }
   } else if (action === 'check-in') {
     if (await cpLogActivity('visit', 'Checked in at the showroom')) await cpRefresh();
   } else if (action === 'sold') {
@@ -3071,6 +3134,238 @@ document.querySelector('.cp-right').addEventListener('click', async (e) => {
   }
 });
 
+// ----- Trades (go straight to Appraisals) -----
+
+const leadTrades = lead => appraisals.filter(a => a.leadId === lead.id && !a.removedFromLead);
+function tradeStatus(a) {
+  if (a.status === 'acquired') return { label: `Acquired · ${money(a.acquiredFor)}`, cls: 'ok' };
+  if (a.status === 'lost') return { label: 'Lost', cls: 'muted' };
+  if (a.offer) return { label: `Appraised · ${money(a.offer)}`, cls: 'ok' };
+  return { label: 'Waiting for appraisal', cls: 'wait' };
+}
+
+function renderCpTrades(lead) {
+  const trades = leadTrades(lead);
+  document.getElementById('cpTradeCount').textContent = trades.length;
+  document.getElementById('cpTrades').innerHTML = trades.length ? trades.map(a => {
+    const st = tradeStatus(a);
+    return html`<div class="cp-trade">
+      <div class="cp-wish-main">
+        <div class="cp-wish-car">${appraisalVehicle(a)}</div>
+        <div class="cp-wish-sub">${[a.mileage ? `${Number(a.mileage).toLocaleString()} mi` : '', a.payoff ? `owes ${money(a.payoff)}` : '', `A-${a.appraisalNumber}`].filter(Boolean).join(' · ')}</div>
+        <span class="cp-trade-status ${st.cls}">${st.label}</span>
+      </div>
+      <button type="button" class="recon-remove" data-remove-trade="${a.id}" aria-label="Remove trade" title="Remove from this customer (the appraisal is kept)">✕</button>
+    </div>`;
+  }).join('') : html`<p class="audit-note">No trade yet.</p>`;
+}
+
+document.getElementById('cpTrades').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-remove-trade]');
+  if (!btn || !confirm('Remove this trade from the customer? The appraisal stays in Appraisals.')) return;
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/trades/${btn.dataset.removeTrade}`, { method: 'DELETE' });
+  if (res.ok) await cpRefresh();
+});
+
+const TRADE_FIELDS = [['vin', 'trVin'], ['year', 'trYear'], ['make', 'trMake'], ['model', 'trModel'], ['trim', 'trTrim'],
+  ['bodyStyle', 'trBodyStyle'], ['engine', 'trEngine'], ['drivetrain', 'trDrivetrain'], ['transmission', 'trTransmission'],
+  ['fuelType', 'trFuelType'], ['mileage', 'trMileage'], ['exteriorColor', 'trExteriorColor'], ['interiorColor', 'trInteriorColor'],
+  ['condition', 'trCondition'], ['payoff', 'trPayoff'], ['lienholder', 'trLienholder'], ['customerExpects', 'trCustomerExpects'], ['notes', 'trNotes']];
+
+window.openTradeForm = function() {
+  document.getElementById('tradeForm').reset();
+  document.getElementById('trVinStatus').innerHTML = '';
+  document.getElementById('trStatus').innerHTML = '';
+  document.getElementById('tradeModal').classList.add('active');
+  document.getElementById('trVin').focus();
+};
+async function decodeTradeVin() {
+  await decodeVinInto({
+    inputId: 'trVin', statusId: 'trVinStatus',
+    fill: data => {
+      const set = (id, v) => { document.getElementById(id).value = v || ''; };
+      set('trYear', data.year); set('trMake', data.make); set('trModel', data.model); set('trTrim', data.trim);
+      set('trBodyStyle', data.bodyStyle); set('trEngine', data.engine); set('trDrivetrain', data.drivetrain);
+      set('trTransmission', data.transmission); set('trFuelType', data.fuelType);
+    }
+  });
+}
+document.getElementById('trDecodeBtn').addEventListener('click', decodeTradeVin);
+document.getElementById('trVin').addEventListener('input', (e) => {
+  if (VIN_PATTERN.test(cleanVin(e.target.value))) decodeTradeVin();
+});
+document.getElementById('trCancelBtn').addEventListener('click', () => document.getElementById('tradeModal').classList.remove('active'));
+document.getElementById('tradeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(TRADE_FIELDS.map(([field, id]) => [field, document.getElementById(id).value]));
+  body.vin = cleanVin(body.vin);
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/trades`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { document.getElementById('trStatus').innerHTML = html`<p class="send-text-status-error">${data.error || 'Could not save the trade.'}</p>`; return; }
+  document.getElementById('tradeModal').classList.remove('active');
+  await cpRefresh();
+});
+
+// ----- Credit app (sales side) and pushing to the DMS -----
+
+// The deal credit gets pushed to: their open deal, else their latest.
+const pushTargetDeal = lead => latestDeal(lead);
+
+function blankCreditAppFor(lead) {
+  const parts = String(lead.name || '').trim().split(/\s+/).filter(Boolean);
+  const a = leadAddress(lead);
+  return {
+    applicantType: lead.type === 'business' ? 'business' : 'individual',
+    businessName: lead.type === 'business' ? lead.name : '',
+    applicant: {
+      firstName: parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] || ''), lastName: parts.length > 1 ? parts[parts.length - 1] : '',
+      phone: lead.phone || '', email: lead.email || '',
+      address1: a.street || '', address2: a.unit || '', city: a.city || '', state: a.state || '', zip: a.zip || '', county: a.county || ''
+    }
+  };
+}
+
+function renderCreditSyncInfo(lead) {
+  const ca = lead.creditApp;
+  const sync = lead.creditAppSync || {};
+  const deal = pushTargetDeal(lead);
+  document.getElementById('cpCreditStatus').innerHTML = ca
+    ? html`<span class="badge credit-${ca.status}">${CREDIT_STATUS_LABELS[ca.status] || ca.status}</span>` : '';
+  const when = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  document.getElementById('cpCreditSync').innerHTML = html`
+    ${sync.pushedAt ? html`<div>⬆ Pushed to the DMS ${when(sync.pushedAt)}${sync.pushedBy ? ` by ${sync.pushedBy.name}` : ''}</div>` : html`<div>Not pushed to the DMS yet.</div>`}
+    ${sync.fromDmsAt ? html`<div>⬇ F&I updated it ${when(sync.fromDmsAt)}${sync.fromDmsBy ? ` (${sync.fromDmsBy.name})` : ''}</div>` : ''}
+    <div class="audit-note">${deal ? html`Pushes to deal D-${deal.dealNumber}.` : 'No deal yet -- push a deal first (Deals tab), then push credit.'} Name, phone, email, and address here are the customer's -- saving updates them too.</div>`;
+}
+
+window.openCpCreditApp = function() {
+  const lead = cpLead();
+  if (!lead) return;
+  const ca = lead.creditApp || blankCreditAppFor(lead);
+  renderCreditAppFields(ca, 'crm');
+  document.getElementById('cpCreditMsg').innerHTML = '';
+  renderCreditSyncInfo(lead);
+  document.getElementById('cpCreditModal').classList.add('active');
+  document.querySelector('#cpCreditModal .modal-content').scrollTop = 0;
+};
+
+async function saveCpCreditApp() {
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/credit-app`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(collectCreditAppForm('crm'))
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { document.getElementById('cpCreditMsg').innerHTML = html`<p class="send-text-status-error">${body.error || 'Could not save.'}</p>`; return null; }
+  const i = leads.findIndex(l => l.id === body.id);
+  if (i >= 0) leads[i] = body;
+  renderCreditSyncInfo(body);
+  renderCustomerPage();
+  return body;
+}
+
+async function pushCreditToDms(dealId) {
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/push-credit`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dealId })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return { error: body.error || 'Could not push the credit app.' };
+  await cpRefresh();
+  return { deal: body };
+}
+
+document.getElementById('cpCreditForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (await saveCpCreditApp()) document.getElementById('cpCreditMsg').innerHTML = html`<p class="send-text-status-success">✓ Saved</p>`;
+});
+document.getElementById('cpPushCreditBtn').addEventListener('click', async () => {
+  const lead = await saveCpCreditApp();
+  if (!lead) return;
+  const deal = pushTargetDeal(lead);
+  if (!deal) {
+    document.getElementById('cpCreditMsg').innerHTML = html`<p class="send-text-status-error">Saved. There's no deal to push it to yet -- push a deal from the Deals tab first.</p>`;
+    return;
+  }
+  const result = await pushCreditToDms(deal.id);
+  const msg = document.getElementById('cpCreditMsg');
+  msg.innerHTML = result.error ? html`<p class="send-text-status-error">${result.error}</p>`
+    : html`<p class="send-text-status-success">✓ Credit app pushed to D-${deal.dealNumber}. F&I can submit it to lenders from the deal.</p>`;
+  renderCreditSyncInfo(cpLead());
+});
+document.getElementById('cpCreditCloseBtn').addEventListener('click', () => document.getElementById('cpCreditModal').classList.remove('active'));
+
+// Push Deal: the form at the top of the Deals tab.
+let cpPushDealPicker = null;
+let cpPushDealCarId = '';
+function renderPushDealForm(lead) {
+  const el = document.getElementById('cpPushDeal');
+  const trades = leadTrades(lead).filter(a => a.status !== 'lost');
+  el.innerHTML = html`
+    <div class="cp-push-deal">
+      <div class="cp-panel-title">Push a deal to the DMS</div>
+      <div class="cp-push-grid">
+        <label class="wide">Vehicle <span id="cpPushCar"></span></label>
+        <label>Trade
+          <select id="cpPushTrade">
+            <option value="">No trade</option>
+            ${trades.map(a => html`<option value="${a.id}">${appraisalVehicle(a)} (${tradeStatus(a).label})</option>`)}
+          </select>
+        </label>
+        <label>Type
+          <select id="cpPushType"><option value="retail">Retail</option><option value="lease">Lease</option><option value="cash">Cash</option></select>
+        </label>
+        <label>Cash down <input type="number" id="cpPushDown" placeholder="0" /></label>
+      </div>
+      <div class="cp-panel-buttons">
+        <button type="button" class="btn-primary btn-small" id="cpPushDealBtn">Push Deal → get a deal #</button>
+        <span class="cp-composer-status" id="cpPushDealStatus"></span>
+      </div>
+      <p class="audit-note">Brings the car, the trade (with payoff), and the credit app to Sales &amp; F&amp;I.</p>
+    </div>`;
+  const available = cars.filter(c => c.status !== 'sold');
+  const wanted = (lead.wishList || []).filter(id => available.some(c => c.id === id));
+  cpPushDealCarId = lead.carId && wanted.includes(lead.carId) ? lead.carId : (wanted[0] || '');
+  cpPushDealPicker = createSearchPicker({
+    kind: 'car',
+    getIds: () => [...available.map(c => c.id).filter(id => !wanted.includes(id)), ...wanted],
+    onPick: (id) => {
+      cpPushDealCarId = id;
+      const car = cars.find(c => c.id === id);
+      cpPushDealPicker.setLabel(car ? carPickLabel(car) : '');
+    }
+  });
+  document.getElementById('cpPushCar').appendChild(cpPushDealPicker.element);
+  const car = cars.find(c => c.id === cpPushDealCarId);
+  cpPushDealPicker.setLabel(car ? carPickLabel(car) : '');
+  if (trades.length === 1) document.getElementById('cpPushTrade').value = trades[0].id;
+  document.getElementById('cpPushDealBtn').onclick = pushDealToDms;
+}
+
+async function pushDealToDms() {
+  const status = document.getElementById('cpPushDealStatus');
+  status.textContent = 'Pushing...';
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/push-deal`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      carId: cpPushDealCarId || null, tradeId: document.getElementById('cpPushTrade').value || null,
+      dealType: document.getElementById('cpPushType').value, downPayment: document.getElementById('cpPushDown').value
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { status.innerHTML = html`<span class="send-text-status-error">${body.error || 'Could not push the deal.'}</span>`; return; }
+  await cpRefresh();
+  cpSwitchTab('deals');
+  const again = document.getElementById('cpPushDealStatus');
+  if (again) again.innerHTML = html`<span class="send-text-status-success">✓ Deal D-${body.dealNumber} is in the DMS</span>`;
+}
+
+window.cpPushCreditFromDeals = async function(dealId) {
+  const lead = cpLead();
+  if (!lead.creditApp) { openCpCreditApp(); return; }
+  const result = await pushCreditToDms(dealId);
+  if (result.error) alert(result.error);
+};
+
 // ----- Opening, editing, closing -----
 
 document.getElementById('editFromProfileBtn').addEventListener('click', () => {
@@ -3081,7 +3376,9 @@ document.getElementById('editFromProfileBtn').addEventListener('click', () => {
 
 document.getElementById('closeProfileBtn').addEventListener('click', closeCustomerPage);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && leadProfileModal.classList.contains('active') && !e.target.closest('input, textarea, select')) closeCustomerPage();
+  if (e.key !== 'Escape' || !leadProfileModal.classList.contains('active') || e.target.closest('input, textarea, select')) return;
+  const overlay = document.querySelector('.modal.cp-overlay.active');
+  if (overlay) overlay.classList.remove('active'); else closeCustomerPage();
 });
 
 // ---------- Deals (Deal #, Desking, Credit App, Proposals) ----------
@@ -3288,6 +3585,7 @@ window.openDealWorkspace = function(dealId) {
   // (business vs individual, with or without a co-applicant) changes
   // per deal.
   renderCreditAppFields(deal.creditApp);
+  renderDealCreditSync(deal);
 
   // Always open back on the Desking sub-tab
   switchSubTab('desking');
@@ -3675,12 +3973,12 @@ window.autoFillCounty = async function(prefix) {
   }
 };
 
-function applicantFieldsHtml(prefix, title) {
+function applicantFieldsHtml(prefix, title, isCo = false) {
   return `
     <div class="ca-applicant-block" id="${prefix}ApplicantBlock">
       <div class="ca-applicant-header">
         <h3>${title}</h3>
-        ${prefix === 'co' ? `<button type="button" class="btn-secondary" id="removeCoApplicantBtn">Remove Co-Applicant</button>` : ''}
+        ${isCo ? `<button type="button" class="btn-secondary" id="${prefix}RemoveBtn">Remove Co-Applicant</button>` : ''}
       </div>
 
       <div class="ca-section-title">Personal Info</div>
@@ -3904,89 +4202,92 @@ function collectApplicantFields(prefix) {
   };
 }
 
-let workspaceHasCoApplicant = false;
+// The credit app form appears twice: on the deal (the DMS side, where
+// F&I also sets the approval status) and on the customer page (where
+// sales fills it in and pushes it). Same form, separate element ids.
+const CREDIT_FORMS = {
+  deal: { top: 'ca', primary: 'primary', co: 'co', container: 'creditAppFieldsContainer', showStatus: true },
+  crm: { top: 'crmCa', primary: 'crmPrimary', co: 'crmCo', container: 'cpCreditAppFields', showStatus: false }
+};
+const creditFormHasCo = { deal: false, crm: false };
+let workspaceHasCoApplicant = false; // the deal form's (kept for existing callers)
 
-function renderCreditAppFields(creditApp) {
+function renderCreditAppFields(creditApp, formKey = 'deal') {
+  const f = CREDIT_FORMS[formKey];
   const ca = creditApp || {};
-  workspaceHasCoApplicant = !!ca.hasCoApplicant;
+  creditFormHasCo[formKey] = !!ca.hasCoApplicant;
+  if (formKey === 'deal') workspaceHasCoApplicant = creditFormHasCo.deal;
 
-  const container = document.getElementById('creditAppFieldsContainer');
+  const container = document.getElementById(f.container);
   container.innerHTML = `
     <div class="form-grid">
       <label>Application Type
-        <select id="caApplicantType">
+        <select id="${f.top}ApplicantType">
           <option value="individual">Individual</option>
           <option value="business">Business</option>
         </select>
       </label>
-      <label>Approval Status
-        <select id="caStatus">
+      ${f.showStatus ? `<label>Approval Status
+        <select id="${f.top}Status">
           <option value="not_submitted">Not Submitted</option>
           <option value="pending">Pending</option>
           <option value="approved">Approved</option>
           <option value="conditional">Conditional</option>
           <option value="declined">Declined</option>
         </select>
-      </label>
+      </label>` : ''}
     </div>
 
-    <div id="caBusinessFields" class="form-grid" style="display:none;">
-      <label>Business Name <input type="text" id="caBusinessName" /></label>
-      <label>EIN <input type="text" id="caBusinessEIN" /></label>
-      <label>Business Address <input type="text" id="caBusinessAddress" /></label>
-      <label>Business Phone <input type="text" id="caBusinessPhone" /></label>
-      <label>Years in Business <input type="number" min="0" id="caYearsInBusiness" /></label>
-      <label>Annual Revenue <input type="number" id="caAnnualRevenue" /></label>
+    <div id="${f.top}BusinessFields" class="form-grid" style="display:none;">
+      <label>Business Name <input type="text" id="${f.top}BusinessName" /></label>
+      <label>EIN <input type="text" id="${f.top}BusinessEIN" /></label>
+      <label>Business Address <input type="text" id="${f.top}BusinessAddress" /></label>
+      <label>Business Phone <input type="text" id="${f.top}BusinessPhone" /></label>
+      <label>Years in Business <input type="number" min="0" id="${f.top}YearsInBusiness" /></label>
+      <label>Annual Revenue <input type="number" id="${f.top}AnnualRevenue" /></label>
     </div>
 
-    ${applicantFieldsHtml('primary', 'Applicant')}
+    ${applicantFieldsHtml(f.primary, 'Applicant')}
 
-    <div id="coApplicantToggleRow" style="margin-bottom:16px;">
-      <button type="button" class="btn-secondary" id="addCoApplicantBtn">+ Add Co-Applicant</button>
+    <div id="${f.top}CoToggleRow" style="margin-bottom:16px;">
+      <button type="button" class="btn-secondary" id="${f.top}AddCoBtn">+ Add Co-Applicant</button>
     </div>
-    <div id="coApplicantContainer"></div>
+    <div id="${f.top}CoContainer"></div>
   `;
 
-  document.getElementById('caApplicantType').value = ca.applicantType || 'individual';
-  document.getElementById('caStatus').value = ca.status || 'not_submitted';
-  document.getElementById('caBusinessName').value = ca.businessName || '';
-  document.getElementById('caBusinessEIN').value = ca.businessEIN || '';
-  document.getElementById('caBusinessAddress').value = ca.businessAddress || '';
-  document.getElementById('caBusinessPhone').value = ca.businessPhone || '';
-  document.getElementById('caYearsInBusiness').value = ca.yearsInBusiness || '';
-  document.getElementById('caAnnualRevenue').value = ca.annualRevenue || 0;
-  document.getElementById('caBusinessFields').style.display = ca.applicantType === 'business' ? 'grid' : 'none';
+  document.getElementById(`${f.top}ApplicantType`).value = ca.applicantType || 'individual';
+  if (f.showStatus) document.getElementById(`${f.top}Status`).value = ca.status || 'not_submitted';
+  document.getElementById(`${f.top}BusinessName`).value = ca.businessName || '';
+  document.getElementById(`${f.top}BusinessEIN`).value = ca.businessEIN || '';
+  document.getElementById(`${f.top}BusinessAddress`).value = ca.businessAddress || '';
+  document.getElementById(`${f.top}BusinessPhone`).value = ca.businessPhone || '';
+  document.getElementById(`${f.top}YearsInBusiness`).value = ca.yearsInBusiness || '';
+  document.getElementById(`${f.top}AnnualRevenue`).value = ca.annualRevenue || 0;
+  document.getElementById(`${f.top}BusinessFields`).style.display = ca.applicantType === 'business' ? 'grid' : 'none';
 
-  fillApplicantFields('primary', ca.applicant || {});
+  fillApplicantFields(f.primary, ca.applicant || {});
+  if (creditFormHasCo[formKey]) showCoApplicantBlock(ca.coApplicant || {}, formKey);
 
-  if (workspaceHasCoApplicant) {
-    showCoApplicantBlock(ca.coApplicant || {});
-  }
-
-  // Wire up: switching application type shows/hides business fields
-  document.getElementById('caApplicantType').addEventListener('change', (e) => {
-    document.getElementById('caBusinessFields').style.display = e.target.value === 'business' ? 'grid' : 'none';
+  document.getElementById(`${f.top}ApplicantType`).addEventListener('change', (e) => {
+    document.getElementById(`${f.top}BusinessFields`).style.display = e.target.value === 'business' ? 'grid' : 'none';
   });
-
-  // Wire up: primary applicant's previous-address / previous-employer toggles
-  wireApplicantToggles('primary');
-
-  document.getElementById('addCoApplicantBtn').addEventListener('click', () => {
-    showCoApplicantBlock({});
-  });
+  wireApplicantToggles(f.primary);
+  document.getElementById(`${f.top}AddCoBtn`).addEventListener('click', () => showCoApplicantBlock({}, formKey));
 }
 
-function showCoApplicantBlock(coApplicantData) {
-  workspaceHasCoApplicant = true;
-  document.getElementById('coApplicantToggleRow').style.display = 'none';
-  document.getElementById('coApplicantContainer').innerHTML = applicantFieldsHtml('co', 'Co-Applicant');
-  fillApplicantFields('co', coApplicantData);
-  wireApplicantToggles('co');
-
-  document.getElementById('removeCoApplicantBtn').addEventListener('click', () => {
-    workspaceHasCoApplicant = false;
-    document.getElementById('coApplicantContainer').innerHTML = '';
-    document.getElementById('coApplicantToggleRow').style.display = 'block';
+function showCoApplicantBlock(coApplicantData, formKey = 'deal') {
+  const f = CREDIT_FORMS[formKey];
+  creditFormHasCo[formKey] = true;
+  if (formKey === 'deal') workspaceHasCoApplicant = true;
+  document.getElementById(`${f.top}CoToggleRow`).style.display = 'none';
+  document.getElementById(`${f.top}CoContainer`).innerHTML = applicantFieldsHtml(f.co, 'Co-Applicant', true);
+  fillApplicantFields(f.co, coApplicantData);
+  wireApplicantToggles(f.co);
+  document.getElementById(`${f.co}RemoveBtn`).addEventListener('click', () => {
+    creditFormHasCo[formKey] = false;
+    if (formKey === 'deal') workspaceHasCoApplicant = false;
+    document.getElementById(`${f.top}CoContainer`).innerHTML = '';
+    document.getElementById(`${f.top}CoToggleRow`).style.display = 'block';
   });
 }
 
@@ -3999,26 +4300,43 @@ function wireApplicantToggles(prefix) {
   });
 }
 
-// Credit application form: save separately from desking numbers
-async function saveCreditAppForm() {
-  const payload = {
-    applicantType: document.getElementById('caApplicantType').value,
-    businessName: document.getElementById('caBusinessName').value,
-    businessEIN: document.getElementById('caBusinessEIN').value,
-    businessAddress: document.getElementById('caBusinessAddress').value,
-    businessPhone: document.getElementById('caBusinessPhone').value,
-    yearsInBusiness: document.getElementById('caYearsInBusiness').value,
-    annualRevenue: document.getElementById('caAnnualRevenue').value,
-    status: document.getElementById('caStatus').value,
-    applicant: collectApplicantFields('primary'),
-    hasCoApplicant: workspaceHasCoApplicant,
-    coApplicant: workspaceHasCoApplicant ? collectApplicantFields('co') : {}
+function collectCreditAppForm(formKey = 'deal') {
+  const f = CREDIT_FORMS[formKey];
+  const val = id => document.getElementById(`${f.top}${id}`).value;
+  const hasCo = creditFormHasCo[formKey];
+  return {
+    applicantType: val('ApplicantType'),
+    businessName: val('BusinessName'),
+    businessEIN: val('BusinessEIN'),
+    businessAddress: val('BusinessAddress'),
+    businessPhone: val('BusinessPhone'),
+    yearsInBusiness: val('YearsInBusiness'),
+    annualRevenue: val('AnnualRevenue'),
+    ...(f.showStatus ? { status: val('Status') } : {}),
+    applicant: collectApplicantFields(f.primary),
+    hasCoApplicant: hasCo,
+    coApplicant: hasCo ? collectApplicantFields(f.co) : {}
   };
+}
 
+// Deal (DMS side): where this credit app came from, and the lenders F&I
+// submits it to (each "Not available yet" until that partner is approved).
+function renderDealCreditSync(deal) {
+  const lead = leads.find(l => l.id === deal.leadId);
+  const when = iso => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  document.getElementById('dealCreditSync').innerHTML = lead ? html`
+    <div>${deal.creditPushedAt ? html`⬇ Pushed from ${lead.name}'s customer page ${when(deal.creditPushedAt)}.` : html`Not pushed from the customer page yet.`}</div>
+    <div class="audit-note">Changes you save here go back to the customer page automatically.</div>`
+    : html`<div class="audit-note">No customer on this deal yet.</div>`;
+  document.getElementById('dealLenders').innerHTML = providerList.filter(p => p.category === 'lender').map(p => providerSlotHtml(p)).join('');
+}
+
+// Credit application form on the deal: saved separately from the desking numbers
+async function saveCreditAppForm() {
   await fetch(`${API}/deals/${currentWorkspaceDealId}/credit-app`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(collectCreditAppForm('deal'))
   });
 }
 
@@ -4026,6 +4344,8 @@ document.getElementById('creditAppForm').addEventListener('submit', async (e) =>
   e.preventDefault();
   await saveCreditAppForm();
   await loadAll();
+  const savedDeal = deals.find(d => d.id === currentWorkspaceDealId);
+  if (savedDeal) renderDealCreditSync(savedDeal);
   // Stay on the page (it's full-page now, not a modal) -- just quietly
   // re-render so any computed fields reflect the save.
 });
@@ -4573,6 +4893,7 @@ const integrationsModal = document.getElementById('integrationsModal');
 const KEY_ACTION_LABELS = { check_out: 'Checked out', check_in: 'Checked in', missing: 'Missing' };
 
 async function loadIntegrations() {
+  document.getElementById('integrationDmsSlots').innerHTML = providerList.filter(p => p.category === 'dms').map(p => providerSlotHtml(p)).join('');
   document.getElementById('integrationEndpoint').textContent = `${location.origin}/api/integrations/keys/events`;
 
   const [tokensRes, unmatchedRes] = await Promise.all([

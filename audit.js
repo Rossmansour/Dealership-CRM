@@ -50,15 +50,17 @@ function diff(before, after, prefix = '') {
     const path = prefix ? `${prefix}.${key}` : key;
     const a = before ? before[key] : undefined;
     const b = after ? after[key] : undefined;
-    if (isPlainObject(a) && isPlainObject(b)) {
-      Object.assign(changes, diff(a, b, path));
+    // A section added or removed as a whole (e.g. a customer's first credit
+    // app) is still logged field by field, so sensitive values stay hidden.
+    if ((isPlainObject(a) || a == null) && (isPlainObject(b) || b == null) && (isPlainObject(a) || isPlainObject(b))) {
+      Object.assign(changes, diff(a || {}, b || {}, path));
       continue;
     }
     if (JSON.stringify(a ?? null) === JSON.stringify(b ?? null)) continue;
     if (sameNumber(a, b)) continue;
     changes[path] = SENSITIVE_FIELDS.has(key)
       ? { from: a ? '(hidden)' : '', to: b ? '(hidden)' : '', hidden: true }
-      : { from: a ?? null, to: b ?? null };
+      : { from: redact(a ?? null), to: redact(b ?? null) };
   }
   return changes;
 }
