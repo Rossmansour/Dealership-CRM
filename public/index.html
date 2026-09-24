@@ -76,7 +76,7 @@
       <thead>
         <tr>
           <th>Photo</th><th>Make</th><th>Model</th><th>Year</th><th>Stock #</th><th>Mileage</th>
-          <th>Price</th><th>Status</th><th>Days Listed</th><th></th>
+          <th>Price</th><th>Status</th><th>Key</th><th>Days Listed</th><th></th>
         </tr>
       </thead>
       <tbody id="carTableBody"></tbody>
@@ -598,6 +598,7 @@
     <div class="admin-menu-list">
       <button type="button" class="btn-secondary admin-menu-item" id="adminUsersBtn">👤 Users &amp; Roles</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminAuditLogBtn">📜 Audit Log</button>
+      <button type="button" class="btn-secondary admin-menu-item" id="adminIntegrationsBtn">🔌 Integrations (Key Machine)</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
     </div>
@@ -678,6 +679,49 @@
     <div class="modal-actions">
       <button type="button" class="btn-secondary" id="closeAuditLogBtn">Close</button>
       <button type="button" class="btn-secondary" id="auditLoadMoreBtn" style="display:none;">Load older entries</button>
+    </div>
+  </div>
+</div>
+
+<!-- Integrations Modal (admins) -->
+<div class="modal" id="integrationsModal">
+  <div class="modal-content modal-wide">
+    <h2>Integrations</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;">
+      Connect your key machine (KeyTrak, KeyWatcher, Traka...) so Inventory shows whose name each key is checked out under.
+      The key machine stays in charge of keys -- the CRM only displays what it reports.
+    </p>
+
+    <div class="ca-section-title">Access tokens</div>
+    <p class="send-text-hint">A token lets the key machine (or its connector) send key check-outs and check-ins to this CRM. Give it to whoever sets up the connection. Revoke it any time to cut the connection off.</p>
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+      <tbody id="integrationTokensBody"></tbody>
+    </table>
+    <form id="newTokenForm" class="integration-token-form">
+      <input type="text" id="newTokenName" placeholder="Name, e.g. KeyTrak" maxlength="60" required />
+      <button type="submit" class="btn-primary">Create token</button>
+    </form>
+    <div id="newTokenResult"></div>
+
+    <div class="ca-section-title">Connection details</div>
+    <p class="send-text-hint">Send each key event as a POST with the header <code>Authorization: Bearer &lt;token&gt;</code> to:</p>
+    <pre class="integration-code" id="integrationEndpoint"></pre>
+    <pre class="integration-code">{ "action": "check_out",          // or "check_in", "missing"
+  "stockNumber": "ST-4821",        // or "vin", or "tagCode" (the key machine's key id)
+  "personName": "Sam Sales",       // who took it ("personEmail" links it to their CRM login)
+  "occurredAt": "2026-09-24T14:05:00Z",
+  "eventId": "kt-99812" }          // the machine's event id, so resends count once</pre>
+
+    <div class="ca-section-title">Events that didn't match a car</div>
+    <p class="send-text-hint">Usually a stock # or VIN that isn't in Inventory yet. Add the car (or fix its stock #) and the next event for that key will match.</p>
+    <table class="data-table">
+      <thead><tr><th>Received</th><th>Action</th><th>Stock # / VIN / Tag</th><th>Person</th><th>From</th></tr></thead>
+      <tbody id="unmatchedKeyEventsBody"></tbody>
+    </table>
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="closeIntegrationsBtn">Close</button>
     </div>
   </div>
 </div>

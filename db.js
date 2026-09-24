@@ -125,6 +125,64 @@ const MIGRATIONS = [
   );
   CREATE INDEX audit_log_dealership_idx ON audit_log (dealership_id, id DESC);
   CREATE INDEX audit_log_entity_idx ON audit_log (dealership_id, entity_type, entity_id);
+  `,
+  `
+  -- Physical keys for inventory vehicles, and where each one is right now.
+  -- A car can have several (Key 1, Key 2, valet). tag_code is the id the
+  -- key cabinet / key machine uses for that key (or a QR code on the tag).
+  CREATE TABLE vehicle_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    car_id text NOT NULL,
+    label text NOT NULL DEFAULT 'Key 1',
+    tag_code text,
+    slot text,
+    status text NOT NULL DEFAULT 'in',           -- in | out | missing
+    holder_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    holder_name text,                             -- who has it (also for people the key machine knows but the CRM doesn't)
+    status_since timestamptz NOT NULL DEFAULT now(),
+    last_event_at timestamptz,                    -- time of the latest event applied (ignores late, out-of-order ones)
+    created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (dealership_id, car_id) REFERENCES cars(dealership_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX vehicle_keys_car_idx ON vehicle_keys (dealership_id, car_id);
+  CREATE UNIQUE INDEX vehicle_keys_tag_idx ON vehicle_keys (dealership_id, lower(tag_code)) WHERE tag_code IS NOT NULL AND tag_code <> '';
+
+  -- Every check-out, check-in, and missing/found report, from a person in
+  -- the CRM or from a key machine. (source, external_event_id) makes events
+  -- from a machine safe to receive twice.
+  CREATE TABLE key_events (
+    id bigserial PRIMARY KEY,
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    key_id uuid REFERENCES vehicle_keys(id) ON DELETE SET NULL,
+    car_id text,
+    action text NOT NULL,                         -- check_out | check_in | missing
+    source text NOT NULL DEFAULT 'manual',        -- manual | the key machine's name
+    external_event_id text,
+    person_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+    person_name text,
+    slot text,
+    occurred_at timestamptz NOT NULL DEFAULT now(),
+    received_at timestamptz NOT NULL DEFAULT now(),
+    matched boolean NOT NULL DEFAULT true,        -- false: couldn't be tied to a car yet
+    raw jsonb                                     -- the event exactly as received, for unmatched review
+  );
+  CREATE INDEX key_events_key_idx ON key_events (key_id, occurred_at DESC);
+  CREATE INDEX key_events_unmatched_idx ON key_events (dealership_id, received_at DESC) WHERE NOT matched;
+  CREATE UNIQUE INDEX key_events_external_idx ON key_events (dealership_id, source, external_event_id) WHERE external_event_id IS NOT NULL;
+
+  -- Access tokens for other systems (like a key machine) to send data in.
+  -- Only a hash is stored; the token itself is shown once when created.
+  CREATE TABLE integration_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    token_hash text NOT NULL UNIQUE,
+    created_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_used_at timestamptz,
+    revoked_at timestamptz
+  );
   `
 ];
 

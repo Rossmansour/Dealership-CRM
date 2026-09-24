@@ -248,6 +248,44 @@ Car photos are stored in [Cloudinary](https://cloudinary.com) (free plan: roughl
 
 The server log says which storage is in use at startup (`Car photos: stored in Cloudinary (...)`). Photos are organized in Cloudinary under `dealerships/<dealership>/cars/<car>/`.
 
+## Key machine integration (KeyTrak, KeyWatcher, Traka...)
+
+Inventory has a **Key** column showing whose name each car's key is checked out under ("🔑 Sam Sales · 2:14 PM"), or "🔑 In · slot 12" when it's back. Keys out longer than 2 hours show in red. Search inventory by stock # to look up a key without walking to the key machine. It refreshes every 30 seconds.
+
+**The key machine stays in charge of keys.** The CRM only displays what it reports -- checking keys in and out still happens at the machine.
+
+### Connecting a key machine
+1. **⚙️ Admin → Integrations (Key Machine) → Create token** (admins only). Copy the token -- it's shown once. Revoke it any time to cut the connection off.
+2. Whoever connects the key machine (its vendor's integration, or a small connector at the store) sends each check-out / check-in to:
+
+```
+POST https://<your-site>/api/integrations/keys/events
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "action": "check_out",            // or "check_in", "missing" (also understood: "out", "in", "returned"...)
+  "tagCode": "A-114",               // the key machine's id for the key -- and/or --
+  "stockNumber": "ST-4821",         // or "vin": "1HGCM82633A004352"
+  "personName": "Sam Sales",        // who has it
+  "personEmail": "sam@store.com",   // optional: links it to their CRM login
+  "slot": "12",                     // optional: cabinet slot, on check-in
+  "occurredAt": "2026-09-24T14:05:00Z", // optional: when it happened (defaults to now)
+  "eventId": "kt-99812"             // optional but recommended: the machine's event id
+}
+```
+
+**How events are handled**
+- **Matching:** by `tagCode` first; otherwise the car with that stock # or VIN. Keys are created automatically the first time a car's key is seen; the first tag code seen for a car's key is remembered, so later events can send just the tag. A car with two keys (two tags) shows both.
+- **Resent events** with the same `eventId` are counted once (`"status": "duplicate"`).
+- **Late events** older than the key's current status are recorded but don't change it (`"status": "recorded_late"`). Times in the future (a machine clock running ahead) are treated as now.
+- **Unknown cars** (a stock # not in the CRM yet) are saved and listed under **Integrations → Events that didn't match a car** (`202`, `"status": "unmatched"`).
+- Each dealership's token only ever matches its own inventory.
+- Responses: `200` applied / duplicate / recorded_late, `202` unmatched, `400` invalid event (with a message), `401` missing or revoked token.
+
+### Which connection method?
+That depends on what the key-machine vendor offers the store: an official integration that sends events to this address (best -- real time), scheduled data exports that a small connector reads and forwards, or a connector on the store's key-machine PC. Ask the vendor's integration team or the store's account rep which is available.
+
 ## Setting up the AI features
 
 The AI Assistant and Suggested Reply button need a free Google Gemini API key to work (everything else in the app works fine without one).
@@ -329,6 +367,7 @@ car-crm/
 ├── encryption.js      # Encrypts SSNs and license numbers at rest
 ├── vin.js             # VIN validation and decoding (NHTSA vPIC)
 ├── photos.js          # Car photo storage (Cloudinary, or local disk)
+├── keys.js            # Key status from the key machine (KeyTrak etc.) + integration tokens
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)
