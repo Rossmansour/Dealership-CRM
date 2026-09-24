@@ -91,6 +91,10 @@ function applyPermissionsToUI() {
 
 let cars = [];
 let vehicleKeys = []; // key status from the key machine (see Key column)
+let appraisals = [];
+let providerList = []; // outside data sources and whether each is live yet
+let currentAppraisal = null; // the appraisal open on screen (with unsaved edits)
+let appraisalDirty = false;
 let appSettings = {};
 let leads = [];
 let deals = [];
@@ -139,7 +143,7 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', label: 'Sales & F&I', views: ['deals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
-  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory'],
+  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
   { key: 'service', label: 'Service', views: ['service'],
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
@@ -148,7 +152,7 @@ const MODULES = [
 ];
 
 const VIEW_PANELS = {
-  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory',
+  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
   reports: 'dashboard', assistant: 'assistant', service: 'service', accounting: 'accounting'
 };
 let currentView = 'pipeline';
@@ -170,6 +174,9 @@ window.showModule = function(moduleKey) {
 };
 
 function showView(view) {
+  if (currentView === 'appraisals' && view !== 'appraisals' && appraisalDirty &&
+      !confirm('Leave this appraisal without saving your changes?')) return;
+  if (view !== 'appraisals') { document.body.classList.remove('wide-page'); setAppraisalDirty(false); }
   currentView = view;
   const module = moduleOfView(view);
   document.querySelectorAll('.rail-module').forEach(b => b.classList.toggle('active', b.dataset.module === module.key));
@@ -183,6 +190,7 @@ function showView(view) {
   });
   if (view === 'leads') setLeadsView('table');
   if (view === 'board') setLeadsView('kanban');
+  if (view === 'appraisals') showAppraisalList();
   window.scrollTo(0, 0);
 }
 
@@ -202,15 +210,17 @@ showView('pipeline');
 // ---------- Data loading ----------
 
 async function loadAll() {
-  const [carsRes, leadsRes, dealsRes, statsRes, keysRes] = await Promise.all([
+  const [carsRes, leadsRes, dealsRes, statsRes, keysRes, appraisalsRes] = await Promise.all([
     fetch(`${API}/cars`).then(r => r.json()),
     fetch(`${API}/leads`).then(r => r.json()),
     fetch(`${API}/deals`).then(r => r.json()),
     fetch(`${API}/stats`).then(r => r.json()),
-    fetch(`${API}/keys`).then(r => r.json())
+    fetch(`${API}/keys`).then(r => r.json()),
+    fetch(`${API}/appraisals`).then(r => r.json())
   ]);
   cars = carsRes;
   vehicleKeys = Array.isArray(keysRes) ? keysRes : [];
+  appraisals = Array.isArray(appraisalsRes) ? appraisalsRes : [];
   leads = leadsRes;
   deals = dealsRes;
   renderStats(statsRes);
@@ -221,6 +231,7 @@ async function loadAll() {
   populateLeadCarOptions();
   renderPipeline();
   renderRail();
+  renderAppraisalList();
 }
 
 // ---------- Needs-follow-up detection ----------
@@ -512,7 +523,8 @@ const ICONS = {
   userPlus: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6 1.6 0 3 .5 4.1 1.3"/><path d="M18.5 13v7M15 16.5h7"/></svg>',
   key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3M16.5 6.5l2.5 2.5M14.5 8.5l2 2"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
-  chevron: '<svg viewBox="0 0 24 24"><path d="M6 4l7 8-7 8M12 4l7 8-7 8"/></svg>'
+  chevron: '<svg viewBox="0 0 24 24"><path d="M6 4l7 8-7 8M12 4l7 8-7 8"/></svg>',
+  clipboard: '<svg viewBox="0 0 24 24"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/><path d="M9 9h2.5"/></svg>'
 };
 
 const PIPELINE_STAGES = [
@@ -609,6 +621,7 @@ function attentionCounts() {
   const keysOut = cars.filter(c => keysOutCarIds.has(c.id));
   const aged = cars.filter(c => c.status !== 'sold' && (Date.now() - new Date(c.dateAdded)) / DAY_MS >= AGED_INVENTORY_DAYS);
   const proposals = deals.filter(d => d.status === 'working');
+  const openAppraisals = appraisals.filter(a => a.status === 'open');
   return [
     { key: 'followup', label: 'Follow-Up Due', icon: ICONS.bell, color: 'amber', count: followUp.length,
       open: () => { setLeadsListFilter('Follow-up due', followUp.map(l => l.id)); showView('leads'); } },
@@ -616,6 +629,8 @@ function attentionCounts() {
       open: () => { setLeadsListFilter('New today', newToday.map(l => l.id)); showView('leads'); } },
     { key: 'proposals', label: 'Open Proposals', icon: ICONS.calc, color: 'violet', count: proposals.length, railOnly: true,
       open: () => { showView('deals'); document.getElementById('dealStatusFilter').value = 'working'; renderDeals(); } },
+    { key: 'appraisals', label: 'Open Appraisals', icon: ICONS.clipboard, color: 'violet', count: openAppraisals.length, railOnly: true,
+      open: () => { showView('appraisals'); document.getElementById('appraisalStatusFilter').value = 'open'; renderAppraisalList(); } },
     { key: 'keysout', label: 'Keys Out', icon: ICONS.key, color: 'teal', count: keysOut.length,
       open: () => { setInventoryListFilter('Keys out', keysOut.map(c => c.id)); showView('inventory'); } },
     { key: 'aged', label: `Aged Inventory (${AGED_INVENTORY_DAYS}+ days)`, icon: ICONS.clock, color: 'red', count: aged.length,
@@ -723,6 +738,15 @@ function quickSearch(query) {
       results.push({ type: 'Deal', title: `D-${d.dealNumber}`, sub: lead ? lead.name : 'No customer yet', run: () => openDealWorkspace(d.id) });
     }
   }
+  for (const a of appraisals) {
+    const lead = leads.find(l => l.id === a.leadId);
+    const vehicle = [a.year, a.make, a.model, a.trim].filter(Boolean).join(' ');
+    if (`a-${a.appraisalNumber}`.includes(q) || (a.vin || '').toLowerCase().includes(q) ||
+        (vehicle && vehicle.toLowerCase().includes(q)) || (lead && lead.name.toLowerCase().includes(q))) {
+      results.push({ type: 'Appraisal', title: `A-${a.appraisalNumber}${vehicle ? ' · ' + vehicle : ''}`,
+        sub: [lead && lead.name, a.vin].filter(Boolean).join(' · '), run: () => openAppraisal(a.id) });
+    }
+  }
   for (const c of cars) {
     const label = [c.year, c.make, c.model, c.trim].filter(Boolean).join(' ');
     if ((c.stockNumber || '').toLowerCase().includes(q) || (c.vin || '').toLowerCase().includes(q) || label.toLowerCase().includes(q)) {
@@ -792,6 +816,565 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('newCustomerBtn').addEventListener('click', () => {
   document.getElementById('addLeadBtn').click();
 });
+
+// ---------- Appraisals (Vehicle Management) ----------
+// Book out a trade or purchase: decode the VIN, pick trim and equipment,
+// see market, book values, history, and recalls, work out recon and the
+// offer, then mark it Acquired (creates the inventory car) or Lost.
+// Outside data sources (market, KBB, Carfax...) each have a slot; until a
+// source is connected its slot says "Not available yet".
+
+const money = n => (n === null || n === undefined || n === '' || Number.isNaN(Number(n)))
+  ? '--' : `${Number(n) < 0 ? '-' : ''}$${Math.abs(Math.round(Number(n))).toLocaleString()}`;
+
+const APPRAISAL_STATUS_LABELS = { open: 'Open', acquired: 'Acquired', lost: 'Lost' };
+const CONDITION_LABELS = { excellent: 'Excellent', very_good: 'Very Good', good: 'Good', fair: 'Fair', poor: 'Poor' };
+
+// Common equipment, grouped. When a factory-options source is connected,
+// its exact option list for the VIN replaces this.
+const EQUIPMENT_GROUPS = [
+  { name: 'Comfort', items: ['Leather Seats', 'Heated Seats', 'Ventilated Seats', 'Heated Steering Wheel', 'Power Seats', 'Memory Seats', 'Third Row Seating', 'Dual-Zone Climate', 'Remote Start'] },
+  { name: 'Technology', items: ['Navigation', 'Apple CarPlay / Android Auto', 'Premium Audio', 'Backup Camera', '360° Camera', 'Head-Up Display', 'Wireless Charging', 'Keyless Entry / Push Start'] },
+  { name: 'Safety', items: ['Blind Spot Monitor', 'Adaptive Cruise Control', 'Lane Keep Assist', 'Parking Sensors', 'Automatic Emergency Braking'] },
+  { name: 'Exterior', items: ['Sunroof / Moonroof', 'Panoramic Roof', 'Alloy Wheels', 'Tow Package', 'Running Boards', 'Roof Rack', 'Power Liftgate', 'LED Headlights'] }
+];
+
+const AP_FIELDS = [
+  ['vin', 'apVin'], ['year', 'apYear'], ['make', 'apMake'], ['model', 'apModel'], ['trim', 'apTrim'],
+  ['bodyStyle', 'apBodyStyle'], ['drivetrain', 'apDrivetrain'], ['engine', 'apEngine'], ['transmission', 'apTransmission'],
+  ['fuelType', 'apFuelType'], ['mileage', 'apMileage'], ['exteriorColor', 'apExteriorColor'], ['interiorColor', 'apInteriorColor'],
+  ['condition', 'apCondition'], ['leadId', 'apLeadId'], ['notes', 'apNotes'],
+  ['targetRetail', 'apTargetRetail'], ['targetGross', 'apTargetGross'], ['offer', 'apOffer']
+];
+
+
+function appraisalVehicle(a) {
+  return [a.year, a.make, a.model, a.trim].filter(Boolean).join(' ') || 'Vehicle not entered yet';
+}
+
+// ----- List -----
+
+function showAppraisalList() {
+  if (appraisalDirty && currentAppraisal && !confirm('Leave this appraisal without saving your changes?')) return false;
+  currentAppraisal = null;
+  setAppraisalDirty(false);
+  document.getElementById('appraisalDetailView').style.display = 'none';
+  document.getElementById('appraisalListView').style.display = 'block';
+  document.body.classList.remove('wide-page');
+  renderAppraisalList();
+  return true;
+}
+
+function renderAppraisalList() {
+  const status = document.getElementById('appraisalStatusFilter').value;
+  const q = document.getElementById('appraisalSearch').value.trim().toLowerCase();
+  const rows = appraisals.filter(a => {
+    if (status && a.status !== status) return false;
+    if (!q) return true;
+    const lead = leads.find(l => l.id === a.leadId);
+    return `a-${a.appraisalNumber}`.includes(q) || (a.vin || '').toLowerCase().includes(q) ||
+      appraisalVehicle(a).toLowerCase().includes(q) || (lead && lead.name.toLowerCase().includes(q));
+  }).slice().reverse(); // newest first
+
+  document.getElementById('appraisalTableBody').innerHTML = rows.map(a => {
+    const lead = leads.find(l => l.id === a.leadId);
+    return html`
+      <tr>
+        <td><button class="deal-number-link" onclick="openAppraisal(${js(a.id)})">A-${a.appraisalNumber}</button></td>
+        <td>${new Date(a.dateCreated).toLocaleDateString()}</td>
+        <td>${appraisalVehicle(a)}${a.vin ? html`<div class="inventory-trim">${a.vin}</div>` : ''}</td>
+        <td>${a.mileage ? Number(a.mileage).toLocaleString() : '--'}</td>
+        <td>${lead ? lead.name : '--'}</td>
+        <td>${a.appraisedBy ? a.appraisedBy.name : '--'}</td>
+        <td>${money(a.offer)}</td>
+        <td><span class="badge appraisal-${a.status}">${APPRAISAL_STATUS_LABELS[a.status]}</span></td>
+      </tr>`;
+  }).join('');
+  document.getElementById('appraisalEmpty').style.display = rows.length ? 'none' : 'block';
+}
+
+document.getElementById('appraisalStatusFilter').addEventListener('change', renderAppraisalList);
+document.getElementById('appraisalSearch').addEventListener('input', renderAppraisalList);
+
+// Starts a new appraisal (optionally already tied to a customer / deal /
+// trade details) and opens it.
+async function startAppraisal(prefill = {}) {
+  const res = await fetch(`${API}/appraisals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prefill)
+  });
+  if (!res.ok) return;
+  const created = await res.json();
+  appraisals.push(created);
+  renderRail();
+  await openAppraisal(created.id);
+  // Trade details from a deal often include the VIN already. The VIN is the
+  // source of truth, so decode it even if older year/make/model came along.
+  if (created.vin && VIN_PATTERN.test(created.vin)) decodeAppraisalVin({ overwrite: true });
+}
+
+document.getElementById('newAppraisalBtn').addEventListener('click', () => startAppraisal());
+
+// ----- Detail -----
+
+window.openAppraisal = async function(id) {
+  const a = appraisals.find(x => x.id === id);
+  if (!a) return;
+  if (currentView !== 'appraisals') showView('appraisals');
+  document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
+  if (document.getElementById('dealFullPage').classList.contains('active')) closeDealFullPage();
+  currentAppraisal = JSON.parse(JSON.stringify(a));
+  document.getElementById('appraisalListView').style.display = 'none';
+  document.getElementById('appraisalDetailView').style.display = 'block';
+  document.body.classList.add('wide-page'); // three columns need more than the normal page width
+  renderAppraisalDetail();
+  setAppraisalDirty(false);
+  window.scrollTo(0, 0);
+};
+
+function setAppraisalDirty(dirty) {
+  appraisalDirty = dirty;
+  document.getElementById('appraisalDirty').textContent = dirty ? 'Unsaved changes' : '';
+}
+
+function renderAppraisalDetail() {
+  const a = currentAppraisal;
+  document.getElementById('appraisalTitle').textContent = `Appraisal A-${a.appraisalNumber}`;
+  document.getElementById('appraisalStatusBadge').innerHTML =
+    html`<span class="badge appraisal-${a.status}">${APPRAISAL_STATUS_LABELS[a.status]}</span>`;
+
+  document.getElementById('apLeadId').innerHTML = html`<option value="">-- None --</option>` +
+    leads.map(l => html`<option value="${l.id}">${l.name}</option>`).join('');
+  for (const [field, inputId] of AP_FIELDS) {
+    document.getElementById(inputId).value = a[field] ?? '';
+  }
+  document.getElementById('apVinStatus').innerHTML = '';
+
+  const locked = a.status !== 'open';
+  document.querySelectorAll('#appraisalDetailView input, #appraisalDetailView select, #appraisalDetailView textarea')
+    .forEach(el => { if (!el.closest('#apOutcome')) el.disabled = locked; });
+  document.getElementById('apDecodeBtn').disabled = locked;
+  document.getElementById('apAddReconBtn').disabled = locked;
+  document.getElementById('appraisalSaveBtn').style.display = locked ? 'none' : '';
+
+  renderEquipment();
+  renderProviderSlots();
+  renderRecalls();
+  renderReconLines();
+  updateOfferCalc();
+  renderOutcome();
+}
+
+// Reads the form back into currentAppraisal.
+function collectAppraisalForm() {
+  const a = currentAppraisal;
+  for (const [field, inputId] of AP_FIELDS) a[field] = document.getElementById(inputId).value;
+  a.leadId = a.leadId || null;
+  a.recon = [...document.querySelectorAll('.recon-line')].map(row => ({
+    description: row.querySelector('.recon-desc').value,
+    cost: Number(row.querySelector('.recon-cost').value) || 0
+  })).filter(r => r.description || r.cost);
+  a.equipment = [...document.querySelectorAll('.equipment-chip.selected')].map(b => b.dataset.item);
+  return a;
+}
+
+async function saveAppraisal() {
+  const a = collectAppraisalForm();
+  const res = await fetch(`${API}/appraisals/${a.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(a)
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (res.status !== 403) alert(body.error || 'Could not save the appraisal.');
+    return false;
+  }
+  const saved = await res.json();
+  replaceAppraisal(saved);
+  currentAppraisal = JSON.parse(JSON.stringify(saved));
+  setAppraisalDirty(false);
+  // Pre-fill "Bought for" / "Asking price" from the saved offer and target
+  // retail, unless someone already typed there.
+  const acquiredFor = document.getElementById('apAcquiredFor');
+  const asking = document.getElementById('apAskingPrice');
+  if (acquiredFor && !acquiredFor.value && saved.offer) acquiredFor.value = saved.offer;
+  if (asking && !asking.value && saved.targetRetail) asking.value = saved.targetRetail;
+  return true;
+}
+
+function replaceAppraisal(updated) {
+  const i = appraisals.findIndex(x => x.id === updated.id);
+  if (i >= 0) appraisals[i] = updated; else appraisals.push(updated);
+}
+
+document.getElementById('appraisalSaveBtn').addEventListener('click', saveAppraisal);
+document.getElementById('appraisalBackBtn').addEventListener('click', showAppraisalList);
+document.getElementById('appraisalDetailView').addEventListener('input', (e) => {
+  if (e.target.closest('#apOutcome')) return;
+  setAppraisalDirty(true);
+  updateOfferCalc();
+});
+document.getElementById('appraisalDetailView').addEventListener('change', (e) => {
+  if (!e.target.closest('#apOutcome')) setAppraisalDirty(true);
+});
+window.addEventListener('beforeunload', (e) => {
+  if (appraisalDirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// ----- VIN decode (same decoder as inventory), then recalls -----
+
+async function decodeAppraisalVin({ overwrite = false } = {}) {
+  await decodeVinInto({
+    inputId: 'apVin',
+    statusId: 'apVinStatus',
+    fill: data => {
+      // Decoding replaces what the VIN determines; when starting from a deal's
+      // trade, fields the VIN doesn't cover are cleared rather than left stale.
+      const set = (id, v) => { if (v || overwrite) document.getElementById(id).value = v || ''; };
+      set('apYear', data.year); set('apMake', data.make); set('apModel', data.model); set('apTrim', data.trim);
+      set('apBodyStyle', data.bodyStyle); set('apDrivetrain', data.drivetrain); set('apEngine', data.engine);
+      set('apTransmission', data.transmission); set('apFuelType', data.fuelType);
+    }
+  });
+  if (document.getElementById('apMake').value) {
+    setAppraisalDirty(true);
+    if (await saveAppraisal()) await checkRecalls();
+  }
+}
+document.getElementById('apDecodeBtn').addEventListener('click', () => decodeAppraisalVin({ overwrite: true }));
+document.getElementById('apVin').addEventListener('input', (e) => {
+  if (VIN_PATTERN.test(cleanVin(e.target.value)) && !document.getElementById('apMake').value) decodeAppraisalVin();
+});
+
+// ----- Equipment -----
+
+function renderEquipment() {
+  const selected = new Set(currentAppraisal.equipment || []);
+  const locked = currentAppraisal.status !== 'open';
+  document.getElementById('apEquipment').innerHTML = EQUIPMENT_GROUPS.map(g => html`
+    <div class="equipment-group">
+      <div class="equipment-group-name">${g.name}</div>
+      <div class="equipment-chips">
+        ${g.items.map(item => html`<button type="button" class="equipment-chip ${selected.has(item) ? 'selected' : ''}" data-item="${item}" ${locked ? html`disabled` : ''}>${item}</button>`)}
+      </div>
+    </div>`).join('');
+}
+document.getElementById('apEquipment').addEventListener('click', (e) => {
+  const chip = e.target.closest('.equipment-chip');
+  if (!chip || chip.disabled) return;
+  chip.classList.toggle('selected');
+  setAppraisalDirty(true);
+});
+
+// ----- Provider slots ("Not available yet" until connected) -----
+
+function providerSlotHtml(p, big = false) {
+  const live = p.status === 'live';
+  return html`
+    <div class="plug ${big ? 'plug-big' : ''}" data-provider="${p.key}">
+      <button type="button" class="plug-head" onclick="togglePlugInfo(${js(p.key)})">
+        <span class="plug-name">${p.name}</span>
+        <span class="plug-status ${live ? 'live' : ''}">${live ? 'Live' : 'Not available yet'}</span>
+      </button>
+      <div class="plug-info" id="plug-info-${p.key}" hidden>
+        <p>${p.description}</p>
+        ${live ? '' : html`<p class="plug-needs">Not available yet -- this fills in automatically once ${p.needs} is connected.</p>`}
+      </div>
+    </div>`;
+}
+
+window.togglePlugInfo = function(key) {
+  const el = document.getElementById(`plug-info-${key}`);
+  if (el) el.hidden = !el.hidden;
+};
+
+function renderProviderSlots() {
+  const byCat = cat => providerList.filter(p => p.category === cat);
+  document.getElementById('apMarketPlug').innerHTML = byCat('market').map(p => providerSlotHtml(p, true)).join('');
+  document.getElementById('apOptionsPlug').innerHTML = byCat('options').map(p => providerSlotHtml(p)).join('');
+  document.getElementById('apBookPlugs').innerHTML = byCat('book').map(p => providerSlotHtml(p)).join('');
+  document.getElementById('apHistoryPlugs').innerHTML = [...byCat('history'), ...byCat('sticker')].map(p => providerSlotHtml(p)).join('');
+}
+
+// ----- Recalls (live, NHTSA) -----
+
+function renderRecalls() {
+  const a = currentAppraisal;
+  const el = document.getElementById('apRecalls');
+  if (!a.recalls) {
+    el.innerHTML = html`<p class="audit-note">Recalls are checked automatically once the year, make, and model are in.</p>
+      <button type="button" class="btn-secondary btn-small" onclick="checkRecalls()">Check recalls</button>`;
+    return;
+  }
+  const items = a.recalls.items || [];
+  el.innerHTML = html`
+    <div class="recall-summary ${items.length ? 'has-recalls' : 'no-recalls'}">
+      ${items.length ? html`⚠ ${items.length} recall${items.length === 1 ? '' : 's'} for this model year` : '✓ No recalls on file for this model year'}
+    </div>
+    ${items.map(r => html`
+      <details class="recall-item">
+        <summary><strong>${r.component || 'Recall'}</strong> <span class="audit-note">#${r.campaign}</span></summary>
+        <p>${r.summary}</p>
+        ${r.remedy ? html`<p><strong>Remedy:</strong> ${r.remedy}</p>` : ''}
+      </details>`)}
+    <p class="audit-note">Checked ${new Date(a.recalls.checkedAt).toLocaleString()}. Whether a recall was already fixed on this VIN is checked at nhtsa.gov/recalls. <button type="button" class="link-btn" onclick="checkRecalls()">Check again</button></p>`;
+}
+
+window.checkRecalls = async function() {
+  const a = currentAppraisal;
+  if (!a) return;
+  document.getElementById('apRecalls').innerHTML = html`<p class="audit-note">Checking NHTSA...</p>`;
+  const res = await fetch(`${API}/appraisals/${a.id}/recalls`, { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    document.getElementById('apRecalls').innerHTML = html`<p class="send-text-status-error">${body.error || 'Could not check recalls.'}</p>
+      <button type="button" class="btn-secondary btn-small" onclick="checkRecalls()">Try again</button>`;
+    return;
+  }
+  replaceAppraisal(body);
+  currentAppraisal.recalls = body.recalls;
+  renderRecalls();
+};
+
+// ----- Recon -----
+
+function renderReconLines() {
+  const lines = currentAppraisal.recon && currentAppraisal.recon.length ? currentAppraisal.recon : [{ description: '', cost: '' }];
+  const locked = currentAppraisal.status !== 'open';
+  document.getElementById('apReconLines').innerHTML = lines.map(r => html`
+    <div class="recon-line">
+      <input type="text" class="recon-desc" placeholder="e.g. Tires, detail, windshield" value="${r.description}" ${locked ? html`disabled` : ''} />
+      <input type="number" class="recon-cost" placeholder="$" value="${r.cost}" ${locked ? html`disabled` : ''} />
+      <button type="button" class="recon-remove" title="Remove line" aria-label="Remove line" ${locked ? html`disabled` : ''}>✕</button>
+    </div>`).join('');
+}
+document.getElementById('apAddReconBtn').addEventListener('click', () => {
+  collectAppraisalForm();
+  currentAppraisal.recon = [...(currentAppraisal.recon || []), { description: '', cost: '' }];
+  renderReconLines();
+  setAppraisalDirty(true);
+  const inputs = document.querySelectorAll('.recon-desc');
+  inputs[inputs.length - 1].focus();
+});
+document.getElementById('apReconLines').addEventListener('click', (e) => {
+  if (!e.target.classList.contains('recon-remove')) return;
+  e.target.closest('.recon-line').remove();
+  collectAppraisalForm();
+  if (!currentAppraisal.recon.length) renderReconLines();
+  setAppraisalDirty(true);
+  updateOfferCalc();
+});
+
+// ----- Offer calculator -----
+// max offer = target retail - recon - pack - target gross
+
+function updateOfferCalc() {
+  const reconTotal = [...document.querySelectorAll('.recon-cost')].reduce((sum, i) => sum + (Number(i.value) || 0), 0);
+  const pack = Number(appSettings.appraisalPack) || 0;
+  const targetRetail = Number(document.getElementById('apTargetRetail').value) || 0;
+  const targetGross = Number(document.getElementById('apTargetGross').value) || 0;
+  const offer = Number(document.getElementById('apOffer').value) || 0;
+
+  document.getElementById('apReconTotal').textContent = money(reconTotal);
+  document.getElementById('apCalcRecon').textContent = money(reconTotal);
+  document.getElementById('apCalcPack').textContent = money(pack);
+  const maxOffer = targetRetail ? targetRetail - reconTotal - pack - targetGross : null;
+  document.getElementById('apMaxOffer').textContent = maxOffer === null ? 'Enter target retail' : money(maxOffer);
+
+  let note = '';
+  if (maxOffer !== null && offer) {
+    const diff = offer - maxOffer;
+    note = diff > 0
+      ? html`<span class="offer-over">${money(diff)} over max -- gross would be ${money(targetGross - diff)}</span>`
+      : html`<span class="offer-under">${money(-diff)} under max -- gross would be ${money(targetGross - diff)}</span>`;
+  }
+  document.getElementById('apOfferNote').innerHTML = note;
+}
+
+// ----- Outcome: acquire / lost / reopen -----
+
+function renderOutcome() {
+  const a = currentAppraisal;
+  const el = document.getElementById('apOutcome');
+  const lead = leads.find(l => l.id === a.leadId);
+  const deal = deals.find(d => d.id === a.dealId);
+  const links = html`
+    ${lead ? html`<div class="outcome-link">Customer: <button class="link-btn" onclick="openLeadProfile(${js(lead.id)})">${lead.name}</button></div>` : ''}
+    ${deal ? html`<div class="outcome-link">Deal: <button class="link-btn" onclick="openDealWorkspace(${js(deal.id)})">D-${deal.dealNumber}</button></div>` : ''}
+    <div class="outcome-link audit-note">Appraised by ${a.appraisedBy ? a.appraisedBy.name : '--'} on ${new Date(a.dateCreated).toLocaleDateString()}</div>`;
+
+  if (a.status === 'acquired') {
+    const car = cars.find(c => c.id === a.carId);
+    el.innerHTML = html`
+      <div class="outcome-done acquired">✓ Acquired for ${money(a.acquiredFor)} on ${new Date(a.acquiredAt).toLocaleDateString()}</div>
+      ${car ? html`<div class="outcome-link">In inventory: <button class="link-btn" onclick="openCarFromAppraisal(${js(car.id)})">${[car.year, car.make, car.model].join(' ')}${car.stockNumber ? ` · Stock #${car.stockNumber}` : ''}</button></div>` : ''}
+      ${links}`;
+    return;
+  }
+  if (a.status === 'lost') {
+    el.innerHTML = html`
+      <div class="outcome-done lost">Lost${a.lostReason ? ` -- ${a.lostReason}` : ''}</div>
+      <button type="button" class="btn-secondary btn-small" id="apReopenBtn">Reopen</button>
+      ${links}`;
+    document.getElementById('apReopenBtn').onclick = () => appraisalAction('reopen');
+    return;
+  }
+  el.innerHTML = html`
+    ${userCan('editInventory') ? html`
+      <div class="outcome-acquire">
+        <label>Bought for (ACV) <input type="number" id="apAcquiredFor" value="${a.offer ?? ''}" /></label>
+        <label>Stock # <input type="text" id="apStockNumber" /></label>
+        <label>Asking price <input type="number" id="apAskingPrice" value="${a.targetRetail ?? ''}" /></label>
+        <button type="button" class="btn-primary" id="apAcquireBtn">Acquire → add to inventory</button>
+      </div>` : html`<p class="audit-note">A sales manager or admin marks it acquired.</p>`}
+    <div class="outcome-lost">
+      <input type="text" id="apLostReason" placeholder="Why it didn't happen (optional)" />
+      <button type="button" class="btn-secondary" id="apLostBtn">Mark lost</button>
+    </div>
+    ${links}`;
+  if (userCan('editInventory')) document.getElementById('apAcquireBtn').onclick = acquireAppraisal;
+  document.getElementById('apLostBtn').onclick = () => appraisalAction('lost', { reason: document.getElementById('apLostReason').value });
+}
+
+window.openCarFromAppraisal = function(carId) {
+  if (!showAppraisalList()) return;
+  showView('inventory');
+  if (userCan('editInventory')) editCar(carId);
+};
+
+async function acquireAppraisal() {
+  if (appraisalDirty && !(await saveAppraisal())) return;
+  const payload = {
+    acquiredFor: document.getElementById('apAcquiredFor').value,
+    stockNumber: document.getElementById('apStockNumber').value,
+    askingPrice: document.getElementById('apAskingPrice').value
+  };
+  const res = await fetch(`${API}/appraisals/${currentAppraisal.id}/acquire`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status !== 403) alert(body.error || 'Could not acquire this appraisal.');
+    return;
+  }
+  replaceAppraisal(body.appraisal);
+  cars.push(body.car);
+  await loadAll();
+  openAppraisal(body.appraisal.id);
+}
+
+async function appraisalAction(action, payload = {}) {
+  if (appraisalDirty && !(await saveAppraisal())) return;
+  const res = await fetch(`${API}/appraisals/${currentAppraisal.id}/${action}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status !== 403) alert(body.error || 'Could not update this appraisal.');
+    return;
+  }
+  replaceAppraisal(body);
+  renderRail();
+  openAppraisal(body.id);
+}
+
+// ----- Printable appraisal sheet -----
+
+document.getElementById('appraisalPrintBtn').addEventListener('click', () => {
+  const a = collectAppraisalForm();
+  const lead = leads.find(l => l.id === a.leadId);
+  const reconTotal = (a.recon || []).reduce((sum, r) => sum + (Number(r.cost) || 0), 0);
+  const pack = Number(appSettings.appraisalPack) || 0;
+  const maxOffer = a.targetRetail ? Number(a.targetRetail) - reconTotal - pack - (Number(a.targetGross) || 0) : null;
+  document.getElementById('appraisalPrintContent').innerHTML = html`
+    <h2>Vehicle Appraisal A-${a.appraisalNumber}</h2>
+    <div class="proposal-meta">
+      <span><strong>Customer:</strong> ${lead ? lead.name : '--'}</span>
+      <span><strong>Appraiser:</strong> ${a.appraisedBy ? a.appraisedBy.name : '--'}</span>
+      <span><strong>Date:</strong> ${new Date(a.dateCreated).toLocaleDateString()}</span>
+    </div>
+    <table>
+      <tr><td>Vehicle</td><td>${appraisalVehicle(a)}</td></tr>
+      <tr><td>VIN</td><td>${a.vin || '--'}</td></tr>
+      <tr><td>Mileage</td><td>${a.mileage ? Number(a.mileage).toLocaleString() : '--'}</td></tr>
+      <tr><td>Body / Engine / Drivetrain</td><td>${[a.bodyStyle, a.engine, a.drivetrain].filter(Boolean).join(' · ') || '--'}</td></tr>
+      <tr><td>Colors</td><td>${[a.exteriorColor, a.interiorColor].filter(Boolean).join(' / ') || '--'}</td></tr>
+      <tr><td>Condition</td><td>${CONDITION_LABELS[a.condition] || '--'}</td></tr>
+      <tr><td>Equipment</td><td>${(a.equipment || []).join(', ') || '--'}</td></tr>
+      <tr><td>Open recalls</td><td>${a.recalls ? String((a.recalls.items || []).length) : 'Not checked'}</td></tr>
+    </table>
+    <table>
+      ${(a.recon || []).map(r => html`<tr><td>Recon: ${r.description || 'Item'}</td><td>${money(r.cost)}</td></tr>`)}
+      <tr class="total-row"><td>Recon total</td><td>${money(reconTotal)}</td></tr>
+    </table>
+    <table>
+      <tr><td>Target retail</td><td>${money(a.targetRetail)}</td></tr>
+      <tr><td>Pack</td><td>${money(pack)}</td></tr>
+      <tr><td>Target gross</td><td>${money(a.targetGross)}</td></tr>
+      <tr class="total-row"><td>Max offer</td><td>${money(maxOffer)}</td></tr>
+      <tr class="total-row"><td>Offer</td><td>${money(a.offer)}</td></tr>
+    </table>
+    ${a.notes ? html`<p><strong>Notes:</strong> ${a.notes}</p>` : ''}
+    <p class="fine-print">Internal appraisal worksheet. Book values and vehicle history are not included until those sources are connected.</p>`;
+  document.getElementById('appraisalPrintModal').classList.add('active');
+});
+document.getElementById('closeAppraisalPrintBtn').addEventListener('click', () => {
+  document.getElementById('appraisalPrintModal').classList.remove('active');
+});
+document.getElementById('printAppraisalBtn').addEventListener('click', () => window.print());
+
+// ----- Starting an appraisal from a customer or a deal's trade-in -----
+
+document.getElementById('profileAppraiseBtn').addEventListener('click', () => {
+  const leadId = currentProfileLeadId;
+  document.getElementById('leadProfileModal').classList.remove('active');
+  startAppraisal({ leadId });
+});
+
+// The deal page's trade-in section: start an appraisal from the trade
+// details, or show the linked one with a button to use its offer.
+function renderDealTradeAppraisal(deal) {
+  const el = document.getElementById('dealTradeAppraisal');
+  const linked = appraisals.filter(a => a.dealId === deal.id).slice(-1)[0];
+  if (!linked) {
+    el.innerHTML = html`<button type="button" class="btn-secondary btn-small" onclick="appraiseDealTrade()">Appraise this trade</button>`;
+    return;
+  }
+  el.innerHTML = html`
+    <div class="trade-appraisal-linked">
+      <span>Appraisal <button type="button" class="link-btn" onclick="openAppraisal(${js(linked.id)})">A-${linked.appraisalNumber}</button>
+        · ${APPRAISAL_STATUS_LABELS[linked.status]} · offer ${money(linked.offer)}</span>
+      ${linked.offer ? html`<button type="button" class="btn-secondary btn-small" onclick="useAppraisalOffer(${js(linked.id)})">Use offer as trade value</button>` : ''}
+    </div>`;
+}
+
+window.appraiseDealTrade = function() {
+  const deal = deals.find(d => d.id === currentWorkspaceDealId);
+  if (!deal) return;
+  startAppraisal({
+    dealId: deal.id,
+    leadId: deal.leadId || null,
+    vin: cleanVin(document.getElementById('dealTradeVin').value),
+    year: document.getElementById('dealTradeYear').value,
+    make: document.getElementById('dealTradeMake').value,
+    model: document.getElementById('dealTradeModel').value,
+    mileage: document.getElementById('dealTradeMileage').value
+  });
+};
+
+window.useAppraisalOffer = function(appraisalId) {
+  const a = appraisals.find(x => x.id === appraisalId);
+  if (!a || !a.offer) return;
+  document.getElementById('dealTradeInValue').value = a.offer;
+  document.getElementById('dealTradeInValue').dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+window.openAppraisalFromCar = function(appraisalId) {
+  document.getElementById('carModal').classList.remove('active');
+  openAppraisal(appraisalId);
+};
 
 // ---------- Photo thumbnails ----------
 // Photos stored in Cloudinary can be resized on the fly by adding a size
@@ -898,6 +1481,7 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   document.getElementById('carId').value = '';
   document.getElementById('carDoors').value = '';
   document.getElementById('carVinStatus').innerHTML = '';
+  document.getElementById('carSourceAppraisal').innerHTML = '';
   setCarPhotosMode(false);
   document.getElementById('carPhotoCount').textContent = '';
   updateCarGross();
@@ -913,6 +1497,10 @@ window.editCar = function(id) {
   document.getElementById('carModalTitle').textContent =
     `Edit Car -- ${[car.year, car.make, car.model, car.trim].filter(Boolean).join(' ')}`;
   document.getElementById('carId').value = car.id;
+  const source = appraisals.find(a => a.id === car.sourceAppraisalId);
+  document.getElementById('carSourceAppraisal').innerHTML = source
+    ? html`From appraisal <button type="button" class="link-btn" onclick="openAppraisalFromCar(${js(source.id)})">A-${source.appraisalNumber}</button> · appraised ${new Date(source.dateCreated).toLocaleDateString()} by ${source.appraisedBy ? source.appraisedBy.name : '--'} · bought for ${money(source.acquiredFor)}`
+    : '';
   document.getElementById('carMake').value = car.make;
   document.getElementById('carModel').value = car.model;
   document.getElementById('carYear').value = car.year;
@@ -1486,6 +2074,7 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('dealRebate').value = deal.rebate;
   document.getElementById('dealTradeInValue').value = deal.tradeInValue;
   document.getElementById('dealTradeInPayoff').value = deal.tradeInPayoff;
+  renderDealTradeAppraisal(deal);
   document.getElementById('dealTradeVin').value = deal.tradeVin || '';
   document.getElementById('dealTradeVinStatus').innerHTML = '';
   document.getElementById('dealTradeYear').value = deal.tradeYear || '';
@@ -2676,6 +3265,8 @@ document.getElementById('adminFeeDefaultsBtn').addEventListener('click', async (
   document.getElementById('settingsTaxRate').value = settings.taxRate;
   document.getElementById('settingsDmvFeeMethod').value = settings.dmvFeeMethod || 'flat';
   document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
+  document.getElementById('settingsAppraisalPack').value = settings.appraisalPack ?? 0;
+  document.getElementById('settingsAppraisalTargetGross').value = settings.appraisalTargetGross ?? 2500;
   document.getElementById('dmvPercentageField').style.display = (settings.dmvFeeMethod === 'percentage') ? 'block' : 'none';
   adminMenuModal.classList.remove('active');
   feeDefaultsModal.classList.add('active');
@@ -2701,6 +3292,8 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
     taxRate: document.getElementById('settingsTaxRate').value,
     dmvFeeMethod: document.getElementById('settingsDmvFeeMethod').value,
     dmvFeePercentage: document.getElementById('settingsDmvFeePercentage').value,
+    appraisalPack: Number(document.getElementById('settingsAppraisalPack').value) || 0,
+    appraisalTargetGross: Number(document.getElementById('settingsAppraisalTargetGross').value) || 0,
   };
   const res = await fetch(`${API}/settings`, {
     method: 'PUT',
@@ -3041,6 +3634,9 @@ async function init() {
   if (!res.ok) return; // the fetch wrapper is already sending them to sign in
   currentUser = await res.json();
   applyPermissionsToUI();
+  const [providersRes, settingsRes] = await Promise.all([fetch(`${API}/providers`), fetch(`${API}/settings`)]);
+  if (providersRes.ok) providerList = await providersRes.json();
+  if (settingsRes.ok) appSettings = await settingsRes.json();
   loadAll();
 }
 

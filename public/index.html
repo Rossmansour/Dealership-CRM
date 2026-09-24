@@ -38,6 +38,9 @@
     <button type="button" class="nav-icon" data-view="deals" data-module="sales" title="Deals &amp; Desking" aria-label="Deals and Desking">
       <svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 6.5h7v3h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/></svg>
     </button>
+    <button type="button" class="nav-icon" data-view="appraisals" data-module="vehicles" title="Appraisals" aria-label="Appraisals">
+      <svg viewBox="0 0 24 24"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/><path d="M9 9h2.5"/></svg>
+    </button>
     <button type="button" class="nav-icon" data-view="inventory" data-module="vehicles" title="Inventory" aria-label="Inventory">
       <svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>
     </button>
@@ -149,6 +152,136 @@
       </thead>
       <tbody id="carTableBody"></tbody>
     </table>
+  </section>
+
+  <!-- APPRAISALS (Vehicle Management) -->
+  <section id="appraisals" class="tab-panel">
+    <div id="appraisalListView">
+      <div class="panel-header">
+        <select id="appraisalStatusFilter">
+          <option value="open">Open</option>
+          <option value="acquired">Acquired</option>
+          <option value="lost">Lost</option>
+          <option value="">All</option>
+        </select>
+        <input type="text" id="appraisalSearch" placeholder="Search A-#, VIN, vehicle, or customer..." />
+        <button class="btn-primary" id="newAppraisalBtn">+ New Appraisal</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Appraisal</th><th>Date</th><th>Vehicle</th><th>Miles</th><th>Customer</th><th>Appraiser</th><th>Offer</th><th>Status</th></tr>
+        </thead>
+        <tbody id="appraisalTableBody"></tbody>
+      </table>
+      <p id="appraisalEmpty" class="no-deals-note" style="display:none;">No appraisals here yet. Start one with + New Appraisal.</p>
+    </div>
+
+    <div id="appraisalDetailView" style="display:none;">
+      <div class="appraisal-topbar">
+        <button type="button" class="btn-secondary" id="appraisalBackBtn">&larr; Appraisals</button>
+        <h2 id="appraisalTitle"></h2>
+        <span id="appraisalStatusBadge"></span>
+        <span class="appraisal-dirty" id="appraisalDirty"></span>
+        <button type="button" class="btn-secondary" id="appraisalPrintBtn">Print</button>
+        <button type="button" class="btn-primary" id="appraisalSaveBtn">Save</button>
+      </div>
+
+      <div class="appraisal-layout">
+        <!-- Column 1: the vehicle -->
+        <div class="appraisal-col">
+          <div class="appraisal-card">
+            <div class="car-panel-title">Vehicle</div>
+            <div class="vin-row">
+              <label>VIN <input type="text" id="apVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
+              <button type="button" class="btn-secondary" id="apDecodeBtn">Decode VIN</button>
+            </div>
+            <div id="apVinStatus" class="vin-status"></div>
+            <div class="appraisal-grid">
+              <label>Year <input type="number" id="apYear" /></label>
+              <label>Make <input type="text" id="apMake" /></label>
+              <label>Model <input type="text" id="apModel" /></label>
+              <label>Trim <input type="text" id="apTrim" /></label>
+              <label>Body Style <input type="text" id="apBodyStyle" /></label>
+              <label>Drivetrain <input type="text" id="apDrivetrain" /></label>
+              <label>Engine <input type="text" id="apEngine" /></label>
+              <label>Transmission <input type="text" id="apTransmission" /></label>
+              <label>Fuel <input type="text" id="apFuelType" /></label>
+              <label>Mileage <input type="number" id="apMileage" /></label>
+              <label>Exterior Color <input type="text" id="apExteriorColor" /></label>
+              <label>Interior Color <input type="text" id="apInteriorColor" /></label>
+              <label>Condition
+                <select id="apCondition">
+                  <option value="">--</option>
+                  <option value="excellent">Excellent</option>
+                  <option value="very_good">Very Good</option>
+                  <option value="good">Good</option>
+                  <option value="fair">Fair</option>
+                  <option value="poor">Poor</option>
+                </select>
+              </label>
+              <label class="span-3">Customer
+                <select id="apLeadId"></select>
+              </label>
+            </div>
+            <label class="appraisal-notes">Notes <textarea id="apNotes" rows="2" placeholder="Damage, tires, smells, keys, anything the next person should know"></textarea></label>
+          </div>
+
+          <div class="appraisal-card">
+            <div class="car-panel-title">Equipment</div>
+            <div id="apOptionsPlug"></div>
+            <div id="apEquipment" class="equipment-groups"></div>
+          </div>
+        </div>
+
+        <!-- Column 2: market, values, history -->
+        <div class="appraisal-col">
+          <div class="appraisal-card">
+            <div class="car-panel-title">Market</div>
+            <div id="apMarketPlug"></div>
+          </div>
+          <div class="appraisal-card">
+            <div class="car-panel-title">Book Values</div>
+            <div id="apBookPlugs" class="plug-list"></div>
+          </div>
+          <div class="appraisal-card">
+            <div class="car-panel-title">Vehicle History &amp; Window Sticker</div>
+            <div id="apHistoryPlugs" class="plug-list"></div>
+          </div>
+          <div class="appraisal-card">
+            <div class="car-panel-title">Safety Recalls <span class="live-chip">Live</span></div>
+            <div id="apRecalls"></div>
+          </div>
+        </div>
+
+        <!-- Column 3: recon, offer, outcome -->
+        <div class="appraisal-col">
+          <div class="appraisal-card">
+            <div class="car-panel-title">Reconditioning</div>
+            <div id="apReconLines"></div>
+            <button type="button" class="btn-secondary btn-small" id="apAddReconBtn">+ Add line</button>
+            <div class="recon-total">Recon total: <strong id="apReconTotal">$0</strong></div>
+          </div>
+
+          <div class="appraisal-card">
+            <div class="car-panel-title">Offer</div>
+            <div class="offer-calc">
+              <label>Target retail <input type="number" id="apTargetRetail" placeholder="What it should sell for" /></label>
+              <div class="offer-line"><span>- Recon</span><span id="apCalcRecon">$0</span></div>
+              <div class="offer-line"><span>- Pack</span><span id="apCalcPack">$0</span></div>
+              <label>- Target gross <input type="number" id="apTargetGross" /></label>
+              <div class="offer-line offer-max"><span>Max offer</span><span id="apMaxOffer">--</span></div>
+              <label class="offer-yours">Your offer <input type="number" id="apOffer" /></label>
+              <div class="offer-note" id="apOfferNote"></div>
+            </div>
+          </div>
+
+          <div class="appraisal-card" id="apOutcomeCard">
+            <div class="car-panel-title">Outcome</div>
+            <div id="apOutcome"></div>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- LEADS -->
@@ -273,6 +406,7 @@
 <div class="modal" id="carModal">
   <div class="modal-content car-modal">
     <h2 id="carModalTitle">Add Car</h2>
+    <div class="car-source" id="carSourceAppraisal"></div>
     <form id="carForm">
       <input type="hidden" id="carId" />
       <input type="hidden" id="carDoors" />
@@ -409,6 +543,7 @@
     <div id="profileDealsList"></div>
     <div id="profileNoCarNotice" style="display:none;"></div>
     <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
+    <button type="button" class="btn-secondary" id="profileAppraiseBtn" style="margin-bottom:16px;">Appraise a Trade</button>
 
     <div class="ca-section-title">Communication Log</div>
 
@@ -533,6 +668,7 @@
                   <label>Trade-In Value (ACV) <input type="number" id="dealTradeInValue" value="0" /></label>
                   <label>Trade-In Payoff Owed <input type="number" id="dealTradeInPayoff" value="0" /></label>
                 </div>
+                <div class="trade-appraisal" id="dealTradeAppraisal"></div>
               </div>
             </div>
           </div>
@@ -860,11 +996,27 @@
         </select>
       </label>
       <label id="dmvPercentageField" style="display:none;">DMV Fee Percentage (%) <input type="number" step="0.01" id="settingsDmvFeePercentage" /></label>
+
+      <div class="ca-section-title">Appraisals</div>
+      <p class="send-text-hint" style="margin-top:-4px;">Used by the appraisal offer calculator: max offer = target retail - recon - pack - target gross.</p>
+      <label>Pack (added to every car's cost) <input type="number" id="settingsAppraisalPack" /></label>
+      <label>Default target gross <input type="number" id="settingsAppraisalTargetGross" /></label>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelFeeDefaultsBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save Defaults</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Appraisal sheet (printable) -->
+<div class="modal" id="appraisalPrintModal">
+  <div class="modal-content modal-wide">
+    <div id="appraisalPrintContent" class="proposal-sheet"></div>
+    <div class="modal-actions no-print">
+      <button type="button" class="btn-secondary" id="closeAppraisalPrintBtn">Close</button>
+      <button type="button" class="btn-primary" id="printAppraisalBtn">Print / Save as PDF</button>
+    </div>
   </div>
 </div>
 

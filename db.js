@@ -183,6 +183,22 @@ const MIGRATIONS = [
     last_used_at timestamptz,
     revoked_at timestamptz
   );
+  `,
+  `
+  -- Trade / purchase appraisals ("book outs"). Same record pattern as cars,
+  -- leads, and deals; appraisal_number is the human-friendly A-1001.
+  CREATE TABLE appraisals (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    seq bigserial,
+    appraisal_number integer NOT NULL,
+    data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id),
+    UNIQUE (dealership_id, appraisal_number)
+  );
+  ALTER TABLE dealerships ADD COLUMN next_appraisal_number integer NOT NULL DEFAULT 1001;
   `
 ];
 
@@ -240,7 +256,7 @@ async function tx(fn) {
 // Every function takes `q` -- either the pool or a transaction client --
 // plus the dealership the request is acting for.
 
-const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates']);
+const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);
@@ -278,6 +294,11 @@ async function insert(q, table, dealershipId, record) {
     await q.query(
       'INSERT INTO deals (dealership_id, id, deal_number, data) VALUES ($1, $2, $3, $4)',
       [dealershipId, record.id, record.dealNumber, toStored(table, record)]
+    );
+  } else if (table === 'appraisals') {
+    await q.query(
+      'INSERT INTO appraisals (dealership_id, id, appraisal_number, data) VALUES ($1, $2, $3, $4)',
+      [dealershipId, record.id, record.appraisalNumber, record]
     );
   } else {
     await q.query(
@@ -333,6 +354,16 @@ async function takeNextDealNumber(q, dealershipId) {
   return rows[0].deal_number;
 }
 
+// Same idea for appraisal numbers (A-1001, A-1002...).
+async function takeNextAppraisalNumber(q, dealershipId) {
+  const { rows } = await q.query(
+    `UPDATE dealerships SET next_appraisal_number = next_appraisal_number + 1
+     WHERE id = $1 RETURNING next_appraisal_number - 1 AS appraisal_number`,
+    [dealershipId]
+  );
+  return rows[0].appraisal_number;
+}
+
 module.exports = {
   pool,
   migrate,
@@ -344,5 +375,6 @@ module.exports = {
   remove,
   getDealership,
   saveSettings,
-  takeNextDealNumber
+  takeNextDealNumber,
+  takeNextAppraisalNumber
 };
