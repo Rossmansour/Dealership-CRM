@@ -27,7 +27,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Filter by lead source and when the customer was added
 - Tiles for Follow-Up Due, New Today, Keys Out, and Aged Inventory (60+ days); the left rail shows the same counts (plus open proposals) as badges on every screen
 - **Every number is clickable**: it opens the customer or inventory list showing exactly those records, with a "Showing: ..." chip to clear the filter
-- Icon bar across the top for every screen, **New Customer**, and **Quick Search** (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
+- **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting** (placeholder for later). Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
+- The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
 
 **VIN Decoder**
 - Type or paste a VIN when adding a car and year, make, model, trim, body style, engine, transmission, drivetrain, fuel, and doors fill in automatically (or press **Decode VIN**)
