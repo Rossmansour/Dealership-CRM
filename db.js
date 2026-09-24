@@ -199,6 +199,21 @@ const MIGRATIONS = [
     UNIQUE (dealership_id, appraisal_number)
   );
   ALTER TABLE dealerships ADD COLUMN next_appraisal_number integer NOT NULL DEFAULT 1001;
+  `,
+  `
+  -- Follow-up tasks and appointments (call, text, email, appointment, to-do),
+  -- each for a customer and assigned to a staff member.
+  CREATE TABLE tasks (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    seq bigserial,
+    data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  -- Customer numbers (C-10001...). Existing customers are numbered on startup.
+  ALTER TABLE dealerships ADD COLUMN next_customer_number integer NOT NULL DEFAULT 10001;
   `
 ];
 
@@ -256,7 +271,7 @@ async function tx(fn) {
 // Every function takes `q` -- either the pool or a transaction client --
 // plus the dealership the request is acting for.
 
-const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals']);
+const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);
@@ -364,6 +379,16 @@ async function takeNextAppraisalNumber(q, dealershipId) {
   return rows[0].appraisal_number;
 }
 
+// Same idea for customer numbers.
+async function takeNextCustomerNumber(q, dealershipId) {
+  const { rows } = await q.query(
+    `UPDATE dealerships SET next_customer_number = next_customer_number + 1
+     WHERE id = $1 RETURNING next_customer_number - 1 AS customer_number`,
+    [dealershipId]
+  );
+  return rows[0].customer_number;
+}
+
 module.exports = {
   pool,
   migrate,
@@ -376,5 +401,6 @@ module.exports = {
   getDealership,
   saveSettings,
   takeNextDealNumber,
-  takeNextAppraisalNumber
+  takeNextAppraisalNumber,
+  takeNextCustomerNumber
 };

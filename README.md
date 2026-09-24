@@ -31,7 +31,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
 
 **Appraisals ("book outs") -- Vehicle Management → Appraisals**
-- Start one from **+ New Appraisal**, a customer's profile (**Appraise a Trade**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
+- Start one from **+ New Appraisal**, a customer's page (**Trade In**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
 - VIN decode fills year, make, model, trim, body, engine, drivetrain, transmission, and fuel; then mileage, colors, condition, and equipment (clickable options by group)
 - **Recalls for this model**: every recall NHTSA has issued for the year/make/model, live. The decoded model name is matched to the names NHTSA files recalls under (e.g. "GLC-Class" → GLC300, GLC43 AMG), and the names checked are shown. These are model-wide -- some may already be repaired on the car. If NHTSA doesn't list the model, it says so instead of showing "no recalls"
 - **Open recalls for this VIN** (what's still unrepaired on this exact car): a **Check this VIN on NHTSA** button opens nhtsa.gov's official VIN search. A built-in "Not available yet" slot fills in once a VIN-level recall source is connected
@@ -72,11 +72,22 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Generates a clean, printable proposal (Print → Save as PDF) itemizing every line of the deal
 - Leads/prospects are typed as **Individual or Business** and track a **source** (walk-in, referral, website, Autotrader, etc.) so you can see which channels actually produce sales, not just leads
 
-**Lead Profiles**
-- Click any customer's name to open their **Profile**: contact info, source, interested vehicle, and status at a glance
-- **Communication Log**: log calls, texts, emails, and notes with a timestamp, newest first -- a real activity history instead of one cramped notes field
-- **Related Deals**: every deal tied to this customer, with the deal number linking straight into that deal's desking/credit app workspace
-- **"+ Create Deal"** right from the profile, using the customer's already-linked vehicle -- no need to re-pick the customer and car from a dropdown when you're already looking at their record
+**Customer Page**
+- Click any customer to open their full-screen page. New customers open straight to it
+- **Header**: initials, name, 🔥 hot flag, status, customer number (C-10001...), snooze, phone, email, source, and the car they're interested in
+- **Road to the Sale**: 7 steps (Greet, Needs, Vehicle, Demo Drive, Trade, Write-up, Delivery -- renamable under Admin → Fee Defaults). Greet, Vehicle, Trade, Write-up, and Delivery check themselves off from what's happened (check-in, a car picked, a trade appraised, a deal written, a sale); the others are clicked, with who and when
+- **Left**: contact (edit in place), **wish list** (search inventory to add; one is the main car), AI summary, **best contact method** (with a suggestion from their history), and **details**: Sales 1, Sales 2, BDC 1, BDC 2, customer #, source, last contact
+- **Activity**: one box for Note, Call, Text (sends a real text, with photos of their cars and an AI-suggested reply), Email (logged), **Task**, and **Appointment**. **Planned** shows open tasks and appointments (Done with what happened, Reschedule, Cancel; overdue in red); **History** is filterable by type and shows who logged each entry
+- **Conversation** (texts as a thread), **Deals**, and **Value** (purchases and trades appraised)
+- **Add**: New Deal (pick the car by search -- their cars first), Vehicles, Trade In, Credit App. **Actions**: Check In, Desk, Mark as Sold, Snooze, Dead (with a reason), Transfer (to another salesperson)
+- Coming later, with their places already on the page: Video, Documents, Portal, and customer replies in the Conversation tab
+
+**Tasks & Appointments**
+- Each is for a customer, assigned to a staff member, with a due time. Completing one notes the outcome in the customer's history
+- The Sales Pipeline home lists **my tasks due today** (overdue first, in red; managers can switch to everyone's), and **My Tasks Due** is a badge on the left rail
+
+**Search instead of dropdowns**
+- Everywhere you pick a car or a customer, you type: a car by stock #, any part of the VIN, year, make, model, trim, or color ("H-2020", "odyssey silver"); a customer by name, phone (any format), email, or customer #. Arrow keys and Enter work
 
 **Deal Search & Filtering (Sales & F&I)**
 - One search box matches across customer name (partial, first-name-only works -- "Ro" finds "Ross Mansour"), company name (for business leads), VIN, stock #, deal #, phone (formatting-independent -- "8872201" matches "555-887-2201"), and email
@@ -153,7 +164,7 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 - One click on a lead's profile generates a short AI summary of where things stand with that customer -- their situation, momentum, and one recommended next action -- instead of re-reading their whole communication history
 
 **"Needs Follow-Up" Alerts**
-- Any open lead (not won or lost) that hasn't been contacted in 3+ days gets flagged automatically, both on the Dashboard (a running count) and as a badge on their card/row -- modeled after the "smart alerts for leads going cold" feature in real dealership CRMs
+- Any open lead (not won or lost, not snoozed, and with no follow-up task scheduled) that hasn't been contacted in 3+ days gets flagged automatically, both on the Dashboard (a running count) and as a badge on their card/row -- modeled after the "smart alerts for leads going cold" feature in real dealership CRMs
 
 **AI Assistant**
 - A chat panel that can answer questions about your actual data -- "how many cars have we sold?", "summarize my leads by status", "which deals still need credit approval?" -- or generate a free-form report on request

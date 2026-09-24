@@ -120,8 +120,9 @@
       </div>
     </div>
     <div class="pipeline-stages" id="pipelineStages"></div>
-    <div class="pipeline-legend"><span>⚠ needs follow-up (no contact in 3+ days)</span><span>🔥 hot (activity in the last 24 hours)</span></div>
+    <div class="pipeline-legend"><span>⚠ needs follow-up (no contact in 3+ days)</span><span>🔥 hot (flagged hot, or activity in the last 24 hours)</span></div>
     <div class="pipeline-tiles" id="pipelineTiles"></div>
+    <div class="pipeline-tasks" id="pipelineTasks"></div>
   </section>
 
   <!-- REPORTS (store numbers) -->
@@ -595,57 +596,121 @@
 </div>
 
 <!-- Lead Profile Modal -->
-<div class="modal" id="leadProfileModal">
-  <div class="modal-content modal-wide">
-    <div class="profile-header">
-      <div>
-        <h2 id="profileName">Customer Name</h2>
-        <div id="profileBadges"></div>
+<!-- Customer page: everything about one customer on one screen -->
+<div class="modal customer-page" id="leadProfileModal">
+  <div class="cp-shell">
+    <header class="cp-header">
+      <div class="cp-avatar" id="cpAvatar"></div>
+      <div class="cp-header-main">
+        <div class="cp-name-row">
+          <h2 id="profileName">Customer</h2>
+          <button type="button" class="cp-hot" id="cpHotBtn" title="Mark as a hot prospect" aria-pressed="false">🔥</button>
+          <span id="profileBadges"></span>
+        </div>
+        <div class="cp-contact-row" id="cpHeaderContact"></div>
       </div>
-      <button type="button" class="btn-secondary" id="editFromProfileBtn">Edit Details</button>
-    </div>
-
-    <button type="button" class="btn-secondary" id="aiSnapshotBtn" style="margin-bottom:12px;">🔍 AI Snapshot</button>
-    <div id="aiSnapshotBox" style="display:none;"></div>
-
-    <div class="profile-info-grid" id="profileInfoGrid"></div>
-
-    <div class="ca-section-title">Related Deals</div>
-    <div id="profileDealsList"></div>
-    <div id="profileNoCarNotice" style="display:none;"></div>
-    <button type="button" class="btn-primary" id="profileCreateDealBtn" style="margin-bottom:16px;">+ Create Deal</button>
-    <button type="button" class="btn-secondary" id="profileAppraiseBtn" style="margin-bottom:16px;">Appraise a Trade</button>
-
-    <div class="ca-section-title">Communication Log</div>
-
-    <div class="send-text-box">
-      <strong>📱 Send Text Message</strong>
-      <p class="send-text-hint">This sends a real SMS (or MMS, if a photo is attached) to this customer's phone via Twilio -- not just a log entry.</p>
-      <textarea id="sendTextInput" rows="2" placeholder="Type a message to send..."></textarea>
-      <div id="sendTextPhotoPicker"></div>
-      <div class="send-text-actions">
-        <button type="button" class="btn-primary" id="sendTextBtn">Send Text</button>
+      <div class="cp-header-side" id="cpHeaderSide"></div>
+      <div class="cp-header-buttons">
+        <button type="button" class="btn-secondary btn-small" id="editFromProfileBtn">Edit</button>
+        <button type="button" class="cp-close" id="closeProfileBtn" aria-label="Close" title="Close">✕</button>
       </div>
-      <div id="sendTextStatus"></div>
-    </div>
+    </header>
 
-    <button type="button" class="btn-secondary" id="aiSuggestReplyBtn" style="margin-bottom:12px;">✨ AI Suggested Reply</button>
-    <div id="aiSuggestionBox" style="display:none;"></div>
-    <form id="activityForm" class="activity-form">
-      <select id="activityType">
-        <option value="call">Call</option>
-        <option value="text">Text</option>
-        <option value="email">Email</option>
-        <option value="note">Note</option>
-        <option value="visit">Showroom Visit</option>
-      </select>
-      <textarea id="activityText" rows="3" placeholder="What happened? e.g. Left voicemail about financing options" required></textarea>
-      <button type="submit" class="btn-primary">Add</button>
-    </form>
-    <div id="activityLogList"></div>
+    <nav class="cp-roadmap" id="cpRoadmap" aria-label="Road to the Sale"></nav>
 
-    <div class="modal-actions">
-      <button type="button" class="btn-secondary" id="closeProfileBtn">Close</button>
+    <div class="cp-body">
+      <!-- Left: who they are -->
+      <aside class="cp-left">
+        <section class="cp-card">
+          <div class="cp-card-title">Contact</div>
+          <div id="cpContact"></div>
+        </section>
+        <section class="cp-card">
+          <div class="cp-card-title">Wish List <span class="cp-count" id="cpWishCount">0</span></div>
+          <div id="cpWishList"></div>
+          <div id="cpWishPicker"></div>
+        </section>
+        <section class="cp-card">
+          <div class="cp-card-title">AI Summary</div>
+          <button type="button" class="btn-secondary btn-small cp-full" id="aiSnapshotBtn">✨ Generate Summary</button>
+          <div id="aiSnapshotBox" style="display:none;"></div>
+        </section>
+        <section class="cp-card">
+          <div class="cp-card-title">Best Contact Method</div>
+          <div id="cpBestContact"></div>
+        </section>
+        <section class="cp-card">
+          <div class="cp-card-title">Details</div>
+          <div id="cpDetails"></div>
+        </section>
+      </aside>
+
+      <!-- Middle: what's happening -->
+      <div class="cp-main">
+        <div class="cp-tabs" role="tablist">
+          <button type="button" class="cp-tab active" data-cptab="activity">Activity</button>
+          <button type="button" class="cp-tab" data-cptab="conversation">Conversation</button>
+          <button type="button" class="cp-tab" data-cptab="deals">Deals <span class="cp-count" id="cpDealCount">0</span></button>
+          <button type="button" class="cp-tab" data-cptab="value">Value</button>
+        </div>
+
+        <div class="cp-tabpanel" data-cptab="activity">
+          <div class="cp-composer">
+            <div class="cp-composer-tabs" id="cpComposerTabs">
+              <button type="button" data-kind="note" class="active">Note</button>
+              <button type="button" data-kind="call">Call</button>
+              <button type="button" data-kind="text">Text</button>
+              <button type="button" data-kind="email">Email</button>
+              <button type="button" data-kind="task">Task</button>
+              <button type="button" data-kind="appointment">Appt</button>
+              <button type="button" data-kind="video">Video</button>
+            </div>
+            <div class="cp-composer-body" id="cpComposer"></div>
+          </div>
+
+          <div class="cp-section-head">Planned</div>
+          <div id="cpPlanned"></div>
+
+          <div class="cp-section-head">History</div>
+          <div class="cp-filters" id="cpHistoryFilters"></div>
+          <div id="activityLogList"></div>
+        </div>
+
+        <div class="cp-tabpanel" data-cptab="conversation" hidden>
+          <div class="cp-thread" id="cpThread"></div>
+          <p class="audit-note cp-thread-note">Only texts sent from here show for now. Customer replies will appear once receiving texts is set up.</p>
+          <div class="cp-thread-compose" id="cpThreadCompose"></div>
+        </div>
+
+        <div class="cp-tabpanel" data-cptab="deals" hidden>
+          <div id="profileDealsList"></div>
+        </div>
+
+        <div class="cp-tabpanel" data-cptab="value" hidden>
+          <div id="cpValue"></div>
+        </div>
+      </div>
+
+      <!-- Right: things to do -->
+      <aside class="cp-right">
+        <div class="cp-right-title">Add</div>
+        <button type="button" class="cp-action" data-action="new-deal"><span>＄</span>New Deal</button>
+        <button type="button" class="cp-action" data-action="vehicles"><span>🚗</span>Vehicles</button>
+        <button type="button" class="cp-action" data-action="trade" id="profileAppraiseBtn"><span>⇄</span>Trade In</button>
+        <button type="button" class="cp-action" data-action="credit-app"><span>▤</span>Credit App</button>
+        <div class="cp-right-title">Actions</div>
+        <button type="button" class="cp-action" data-action="check-in"><span>📍</span>Check In</button>
+        <button type="button" class="cp-action" data-action="desk"><span>▦</span>Desk</button>
+        <button type="button" class="cp-action" data-action="sold"><span>👍</span>Mark as Sold</button>
+        <button type="button" class="cp-action" data-action="snooze"><span>⏰</span>Snooze</button>
+        <button type="button" class="cp-action" data-action="dead"><span>✕</span>Dead</button>
+        <button type="button" class="cp-action" data-action="transfer"><span>⇆</span>Transfer</button>
+        <div class="cp-action-panel" id="cpActionPanel" hidden></div>
+        <div class="cp-right-title">Coming later</div>
+        <button type="button" class="cp-action cp-later" data-later="Documents" data-needs="file storage for signed forms and IDs"><span>📄</span>Documents</button>
+        <button type="button" class="cp-action cp-later" data-later="Customer Portal" data-needs="a customer-facing website where they can see their deal and upload documents"><span>🛡</span>Portal</button>
+        <div class="cp-later-note" id="cpLaterNote" hidden></div>
+      </aside>
     </div>
   </div>
 </div>
@@ -1069,9 +1134,13 @@
       <label id="dmvPercentageField" style="display:none;">DMV Fee Percentage (%) <input type="number" step="0.01" id="settingsDmvFeePercentage" /></label>
 
       <div class="ca-section-title">Appraisals</div>
-      <p class="send-text-hint" style="margin-top:-4px;">Used by the appraisal offer calculator: max offer = target retail - recon - pack - target gross.</p>
+      <p class="send-text-hint" style="margin-top:-4px;">Used by the appraisal calculator: asking price - recon - pack - other - profit = appraisal.</p>
       <label>Pack (added to every car's cost) <input type="number" id="settingsAppraisalPack" /></label>
-      <label>Default target gross <input type="number" id="settingsAppraisalTargetGross" /></label>
+      <label>Default profit <input type="number" id="settingsAppraisalTargetGross" /></label>
+
+      <div class="ca-section-title">Road to the Sale</div>
+      <p class="send-text-hint" style="margin-top:-4px;">The 7 steps on every customer's page. Rename them to match how your store sells. Greet, Vehicle, Trade, Write-up, and Delivery also check themselves off automatically.</p>
+      <div class="roadmap-label-inputs" id="settingsRoadmapLabels"></div>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelFeeDefaultsBtn">Cancel</button>
         <button type="submit" class="btn-primary">Save Defaults</button>

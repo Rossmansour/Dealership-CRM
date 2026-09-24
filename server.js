@@ -103,7 +103,8 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
   cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
-  leads: ['id', 'activities', 'dateAdded'],
+  // Road to the Sale steps change through /roadmap; the customer number is assigned once.
+  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
@@ -147,7 +148,9 @@ function defaultFeeSettings() {
     dmvFeePercentage: 1.5,
     // Appraisal offer calculator: max offer = target retail - recon - pack - target gross
     appraisalPack: 0,
-    appraisalTargetGross: 2500
+    appraisalTargetGross: 2500,
+    // Road to the Sale: the 7 steps shown on each customer. Stores can rename them.
+    roadmapLabels: ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery']
   };
 }
 
@@ -159,7 +162,13 @@ app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
   const settings = await store.tx(async q => {
     await q.query('SELECT 1 FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
     const current = await getSettings(q, req.dealershipId);
-    const saved = await store.saveSettings(q, req.dealershipId, { ...current, ...req.body });
+    const incoming = { ...(req.body || {}) };
+    if ('roadmapLabels' in incoming) {
+      const labels = Array.isArray(incoming.roadmapLabels) ? incoming.roadmapLabels : [];
+      incoming.roadmapLabels = Array.from({ length: ROADMAP_STEPS }, (_, i) =>
+        String(labels[i] ?? '').trim().slice(0, 24) || defaultFeeSettings().roadmapLabels[i]);
+    }
+    const saved = await store.saveSettings(q, req.dealershipId, { ...current, ...incoming });
     await audit.updated(q, req, 'settings', { ...current, id: 'fee-defaults' }, { ...saved, id: 'fee-defaults' });
     return saved;
   });
@@ -560,50 +569,111 @@ app.get('/api/leads', wrap(async (req, res) => {
   res.json(leads);
 }));
 
-app.post('/api/leads', wrap(async (req, res) => {
-  const { name, phone, email, carId, notes, status, source, type } = req.body;
+// Who a customer is assigned to: two salespeople and two BDC reps.
+const LEAD_ASSIGNMENTS = ['sales1Id', 'sales2Id', 'bdc1Id', 'bdc2Id'];
+const LEAD_BEST_CONTACT = ['', 'text', 'call', 'email'];
+const ROADMAP_STEPS = 7;
 
-  if (!name) {
-    return res.status(400).json({ error: 'name is required' });
+// Cleans up the lead fields people edit.
+function leadFields(body) {
+  const b = editableFields('leads', body);
+  const out = { ...b };
+  const text = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+  for (const f of ['name', 'phone', 'email', 'address', 'source', 'lostReason']) {
+    if (f in b) out[f] = text(b[f], f === 'address' ? 300 : 200);
   }
+  if ('notes' in b) out.notes = text(b.notes, 4000);
+  if ('type' in b) out.type = b.type === 'business' ? 'business' : 'individual';
+  if ('hot' in b) out.hot = b.hot === true || b.hot === 'true';
+  if ('bestContact' in b && !LEAD_BEST_CONTACT.includes(b.bestContact)) out.bestContact = '';
+  if ('carId' in b) out.carId = b.carId ? text(b.carId) : null;
+  if ('wishList' in b) {
+    out.wishList = Array.isArray(b.wishList)
+      ? [...new Set(b.wishList.map(id => text(id)).filter(Boolean))].slice(0, 20) : [];
+  }
+  if ('snoozedUntil' in b) {
+    const d = b.snoozedUntil ? new Date(b.snoozedUntil) : null;
+    out.snoozedUntil = d && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+  }
+  for (const f of LEAD_ASSIGNMENTS) if (f in b) out[f] = b[f] ? text(b[f]) : null;
+  return out;
+}
 
-  const newLead = {
+// Assignments must be active staff at this store. Returns an error message or null.
+async function checkLeadAssignments(q, req, fields) {
+  const ids = LEAD_ASSIGNMENTS.map(f => fields[f]).filter(Boolean);
+  if (!ids.length) return null;
+  const { rows } = await q.query(
+    'SELECT id::text AS id FROM users WHERE dealership_id = $1 AND active AND id::text = ANY($2)',
+    [req.dealershipId, ids]);
+  const found = new Set(rows.map(r => r.id));
+  return ids.every(id => found.has(id)) ? null : 'Assign customers only to active staff at your store.';
+}
+
+// Builds and saves a new customer. Used by "Add Lead" and by appraisal
+// customer offers, so every customer gets the same fields and a number.
+async function createLead(q, req, fields) {
+  const clean = leadFields(fields);
+  // A salesperson adding a customer is their salesperson unless they pick someone else.
+  if (!('sales1Id' in clean) && req.user.role === 'salesperson') clean.sales1Id = req.user.id;
+  const lead = {
+    name: '', type: 'individual', phone: '', email: '', address: '', carId: null, notes: '',
+    status: 'new', // new | contacted | negotiating | won | lost
+    source: 'other', // walk-in | phone | website | referral | autotrader | cargurus | facebook | other
+    hot: false, bestContact: '', wishList: [], snoozedUntil: null, lostReason: '',
+    sales1Id: null, sales2Id: null, bdc1Id: null, bdc2Id: null,
+    ...clean,
     id: crypto.randomUUID(),
-    name,
-    type: type === 'business' ? 'business' : 'individual',
-    phone: phone || '',
-    email: email || '',
-    carId: carId || null,
-    notes: notes || '',
-    status: status || 'new', // new | contacted | negotiating | won | lost
-    source: source || 'other', // walk-in | phone | website | referral | autotrader | cargurus | facebook | other
-    activities: [], // communication log: { id, type, text, date }
+    customerNumber: await store.takeNextCustomerNumber(q, req.dealershipId),
+    roadmap: Array(ROADMAP_STEPS).fill(null),
+    activities: [], // communication log: { id, type, text, date, by }
     dateAdded: new Date().toISOString()
   };
+  if (lead.carId && !lead.wishList.includes(lead.carId)) lead.wishList = [lead.carId, ...lead.wishList];
+  await store.insert(q, 'leads', req.dealershipId, lead);
+  return lead;
+}
 
-  await store.tx(async q => {
-    await store.insert(q, 'leads', req.dealershipId, newLead);
-    await audit.created(q, req, 'lead', newLead);
+app.post('/api/leads', wrap(async (req, res) => {
+  if (!req.body || !String(req.body.name || '').trim()) {
+    return res.status(400).json({ error: 'name is required' });
+  }
+  const result = await store.tx(async q => {
+    const problem = await checkLeadAssignments(q, req, leadFields(req.body));
+    if (problem) return { error: problem };
+    const lead = await createLead(q, req, req.body);
+    await audit.created(q, req, 'lead', lead);
+    return lead;
   });
-  res.status(201).json(newLead);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.status(201).json(result);
 }));
 
 app.put('/api/leads/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
     if (!lead) return null;
-    const saved = await store.save(q, 'leads', req.dealershipId, lead.id, { ...lead, ...editableFields('leads', req.body) });
+    const fields = leadFields(req.body);
+    const problem = await checkLeadAssignments(q, req, fields);
+    if (problem) return { error: problem };
+    const next = { ...lead, ...fields };
+    if (next.carId && !(next.wishList || []).includes(next.carId)) next.wishList = [next.carId, ...(next.wishList || [])];
+    const saved = await store.save(q, 'leads', req.dealershipId, lead.id, next);
     await audit.updated(q, req, 'lead', lead, saved);
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Lead not found' });
+  if (updated.error) return res.status(400).json({ error: updated.error });
   res.json(updated);
 }));
 
 app.delete('/api/leads/:id', allow('deleteRecords'), wrap(async (req, res) => {
   const deleted = await store.tx(async q => {
     const removed = await store.remove(q, 'leads', req.dealershipId, req.params.id);
-    if (removed) await audit.deleted(q, req, 'lead', removed);
+    if (removed) {
+      await audit.deleted(q, req, 'lead', removed);
+      await q.query(`DELETE FROM tasks WHERE dealership_id = $1 AND data->>'leadId' = $2`, [req.dealershipId, removed.id]);
+    }
     return removed;
   });
   if (!deleted) return res.status(404).json({ error: 'Lead not found' });
@@ -628,15 +698,43 @@ async function addLeadActivity(req, leadId, activity, action = 'add_activity') {
 
 // ---------- Lead activity log (calls, texts, emails, notes) ----------
 
+// visit = showroom check-in; task / appointment = a completed task.
+const ACTIVITY_TYPES = ['call', 'text', 'email', 'note', 'visit', 'task', 'appointment', 'status'];
+
+// Road to the Sale: mark a step done (or not done), with who and when.
+app.post('/api/leads/:id/roadmap', wrap(async (req, res) => {
+  const step = Number((req.body || {}).step);
+  if (!Number.isInteger(step) || step < 0 || step >= ROADMAP_STEPS) {
+    return res.status(400).json({ error: 'Pick a Road to the Sale step.' });
+  }
+  const done = (req.body || {}).done !== false;
+  const saved = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!lead) return null;
+    const roadmap = Array.from({ length: ROADMAP_STEPS }, (_, i) => (lead.roadmap || [])[i] || null);
+    roadmap[step] = done ? { at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name } } : null;
+    const updated = await store.save(q, 'leads', req.dealershipId, lead.id, { ...lead, roadmap });
+    const labels = (await getSettings(q, req.dealershipId)).roadmapLabels || [];
+    await audit.record(q, req, {
+      action: 'roadmap', entityType: 'lead', entityId: lead.id, label: audit.labelFor('lead', lead),
+      details: `${labels[step] || `Step ${step + 1}`} ${done ? 'done' : 'not done'}`
+    });
+    return updated;
+  });
+  if (!saved) return res.status(404).json({ error: 'Lead not found' });
+  res.json(saved);
+}));
+
 app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   const { type, text } = req.body;
   if (!text) return res.status(400).json({ error: 'text is required' });
 
   const activity = {
     id: crypto.randomUUID(),
-    type: type || 'note', // call | text | email | note
-    text,
-    date: new Date().toISOString()
+    type: ACTIVITY_TYPES.includes(type) ? type : 'note',
+    text: String(text).slice(0, 4000),
+    date: new Date().toISOString(),
+    by: { id: req.user.id, name: req.user.name }
   };
   const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
@@ -715,7 +813,10 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       id: crypto.randomUUID(),
       type: 'text',
       text: logText,
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      by: { id: req.user.id, name: req.user.name },
+      // For the Conversation view: what was actually sent, and which way.
+      direction: 'out', message: text || '', photo: photoPath || null
     };
     await addLeadActivity(req, lead.id, activity, 'send_text');
 
@@ -726,6 +827,125 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
     // pass the real message through so it's actionable, not just "failed".
     res.status(500).json({ error: err.message });
   }
+}));
+
+// ---------- TASKS & APPOINTMENTS (follow-ups on a customer) ----------
+// Each task is for one customer and assigned to one staff member, with a
+// due time. Completing it notes the outcome in the customer's log.
+
+const TASK_TYPES = ['call', 'text', 'email', 'appointment', 'todo'];
+const TASK_TYPE_LABELS = { call: 'Call', text: 'Text', email: 'Email', appointment: 'Appointment', todo: 'To-do' };
+
+async function taskFields(q, req, body, current = {}) {
+  const b = body || {};
+  const out = {};
+  if ('type' in b || !current.type) out.type = TASK_TYPES.includes(b.type) ? b.type : 'call';
+  if ('title' in b) out.title = String(b.title || '').trim().slice(0, 200);
+  if ('notes' in b) out.notes = String(b.notes || '').trim().slice(0, 2000);
+  if ('dueAt' in b || !current.dueAt) {
+    const due = new Date(b.dueAt);
+    if (!b.dueAt || Number.isNaN(due.getTime())) return { error: 'Pick when it is due.' };
+    out.dueAt = due.toISOString();
+  }
+  if ('assignedToId' in b || !current.assignedTo) {
+    const id = b.assignedToId || req.user.id;
+    const { rows } = await q.query(
+      'SELECT id, name FROM users WHERE id::text = $1 AND dealership_id = $2 AND active', [String(id), req.dealershipId]);
+    if (!rows.length) return { error: 'Assign it to someone at your store.' };
+    out.assignedTo = { id: rows[0].id, name: rows[0].name };
+  }
+  return { fields: out };
+}
+
+app.get('/api/tasks', wrap(async (req, res) => {
+  let tasks = await store.list(store.pool, 'tasks', req.dealershipId);
+  const { leadId, status, assignedTo } = req.query;
+  if (leadId) tasks = tasks.filter(t => t.leadId === leadId);
+  if (status) tasks = tasks.filter(t => t.status === status);
+  if (assignedTo) {
+    const who = assignedTo === 'me' ? req.user.id : assignedTo;
+    tasks = tasks.filter(t => t.assignedTo && t.assignedTo.id === who);
+  }
+  res.json(tasks.sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt))));
+}));
+
+app.post('/api/tasks', wrap(async (req, res) => {
+  const result = await store.tx(async q => {
+    const lead = await store.get(q, 'leads', req.dealershipId, String((req.body || {}).leadId || ''));
+    if (!lead) return { status: 400, error: 'Pick the customer this is for.' };
+    const { fields, error } = await taskFields(q, req, req.body);
+    if (error) return { status: 400, error };
+    const task = {
+      title: '', notes: '', ...fields,
+      id: crypto.randomUUID(), leadId: lead.id, leadName: lead.name,
+      status: 'open', // open | done | cancelled
+      createdBy: { id: req.user.id, name: req.user.name }, createdAt: new Date().toISOString(),
+      completedAt: null, completedBy: null, outcome: ''
+    };
+    await store.insert(q, 'tasks', req.dealershipId, task);
+    await audit.created(q, req, 'task', task);
+    return { task };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result.task);
+}));
+
+app.put('/api/tasks/:id', wrap(async (req, res) => {
+  const result = await store.tx(async q => {
+    const task = await store.get(q, 'tasks', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!task) return { status: 404, error: 'Task not found' };
+    if (task.status !== 'open') return { status: 409, error: 'Only open tasks can be changed.' };
+    const { fields, error } = await taskFields(q, req, req.body, task);
+    if (error) return { status: 400, error };
+    const saved = await store.save(q, 'tasks', req.dealershipId, task.id, { ...task, ...fields });
+    await audit.updated(q, req, 'task', task, saved);
+    return { task: saved };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.task);
+}));
+
+// Done (with what happened) or cancelled. Done tasks go in the customer's log.
+async function closeTask(req, res, status) {
+  const outcome = String((req.body || {}).outcome || '').trim().slice(0, 2000);
+  const result = await store.tx(async q => {
+    const task = await store.get(q, 'tasks', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!task) return { status: 404, error: 'Task not found' };
+    if (task.status !== 'open') return { status: 409, error: 'This task is already closed.' };
+    const saved = await store.save(q, 'tasks', req.dealershipId, task.id, {
+      ...task, status, outcome, completedAt: new Date().toISOString(), completedBy: { id: req.user.id, name: req.user.name }
+    });
+    const lead = await store.get(q, 'leads', req.dealershipId, task.leadId, { forUpdate: true });
+    if (lead) {
+      const label = `${TASK_TYPE_LABELS[task.type] || 'Task'}${task.type === 'appointment' || task.type === 'todo' ? '' : ' task'}`;
+      lead.activities = [{
+        id: crypto.randomUUID(),
+        type: task.type === 'appointment' ? 'appointment' : 'task',
+        text: `${label} ${status === 'done' ? 'completed' : 'cancelled'}${task.title ? ` -- ${task.title}` : ''}${outcome ? `: ${outcome}` : ''}`,
+        date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }, taskId: task.id
+      }, ...(lead.activities || [])];
+      await store.save(q, 'leads', req.dealershipId, lead.id, lead);
+    }
+    await audit.record(q, req, {
+      action: status === 'done' ? 'complete' : 'cancel', entityType: 'task', entityId: task.id,
+      label: audit.labelFor('task', task), details: outcome || null
+    });
+    return { task: saved, lead };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+}
+app.post('/api/tasks/:id/complete', wrap((req, res) => closeTask(req, res, 'done')));
+app.post('/api/tasks/:id/cancel', wrap((req, res) => closeTask(req, res, 'cancelled')));
+
+app.delete('/api/tasks/:id', allow('deleteRecords'), wrap(async (req, res) => {
+  const removed = await store.tx(async q => {
+    const task = await store.remove(q, 'tasks', req.dealershipId, req.params.id);
+    if (task) await audit.deleted(q, req, 'task', task);
+    return task;
+  });
+  if (!removed) return res.status(404).json({ error: 'Task not found' });
+  res.status(204).send();
 }));
 
 // ---------- DEALS (Deal Calculator + Proposals) ----------
@@ -1626,11 +1846,9 @@ app.post('/api/appraisals/:id/customer-offer', wrap(async (req, res) => {
     let leadCreated = false;
     if (!lead) {
       if (!name) return { status: 400, error: "Enter the customer's name (or pick the customer on the appraisal)." };
-      lead = {
-        id: crypto.randomUUID(), name, type: 'individual', phone, email, carId: null,
-        notes: '', status: 'new', source: 'walk-in', activities: [], dateAdded: new Date().toISOString()
-      };
-      await store.insert(q, 'leads', req.dealershipId, lead);
+      lead = await createLead(q, req, {
+        name, phone, email, source: 'walk-in', ...(salesperson ? { sales1Id: salesperson.id } : {})
+      });
       await audit.created(q, req, 'lead', lead, `From appraisal A-${appraisal.appraisalNumber}`);
       leadCreated = true;
     } else if ((phone && !lead.phone) || (email && !lead.email)) {
@@ -1642,7 +1860,7 @@ app.post('/api/appraisals/:id/customer-offer', wrap(async (req, res) => {
     const vehicle = [appraisal.year, appraisal.make, appraisal.model].filter(Boolean).join(' ') || 'their vehicle';
     const moneyText = `$${amount.toLocaleString('en-US')}`;
     lead.activities = [{
-      id: crypto.randomUUID(), type: 'note',
+      id: crypto.randomUUID(), type: 'note', by: { id: req.user.id, name: req.user.name },
       text: `Offered ${moneyText} for their ${vehicle} (appraisal A-${appraisal.appraisalNumber})${salesperson ? ` -- salesperson ${salesperson.name}` : ''}`,
       date: new Date().toISOString()
     }, ...(lead.activities || [])];
@@ -2089,6 +2307,23 @@ async function bootstrap() {
         [defaultDealershipId, TAX_RATES_SEED_VERSION]);
     }
   });
+  await assignMissingCustomerNumbers();
+}
+
+// Customers added before customer numbers existed get one, oldest first.
+async function assignMissingCustomerNumbers() {
+  const { rows } = await store.pool.query(
+    `SELECT dealership_id, id FROM leads WHERE NOT (data ? 'customerNumber') ORDER BY seq`);
+  for (const row of rows) {
+    await store.tx(async q => {
+      const number = await store.takeNextCustomerNumber(q, row.dealership_id);
+      await q.query(
+        `UPDATE leads SET data = data || jsonb_build_object('customerNumber', $3::int)
+         WHERE dealership_id = $1 AND id = $2 AND NOT (data ? 'customerNumber')`,
+        [row.dealership_id, row.id, number]);
+    });
+  }
+  if (rows.length) console.log(`Numbered ${rows.length} existing customer${rows.length === 1 ? '' : 's'}`);
 }
 
 // Credit apps saved before encryption existed have SSNs and license
