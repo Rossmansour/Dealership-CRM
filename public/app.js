@@ -92,6 +92,7 @@ function applyPermissionsToUI() {
 let cars = [];
 let vehicleKeys = []; // key status from the key machine (see Key column)
 let appraisals = [];
+let openTasks = []; // every open task and appointment at the store
 let providerList = []; // outside data sources and whether each is live yet
 let currentAppraisal = null; // the appraisal open on screen (with unsaved edits)
 let appraisalDirty = false;
@@ -212,14 +213,16 @@ showView('pipeline');
 // ---------- Data loading ----------
 
 async function loadAll() {
-  const [carsRes, leadsRes, dealsRes, statsRes, keysRes, appraisalsRes] = await Promise.all([
+  const [carsRes, leadsRes, dealsRes, statsRes, keysRes, appraisalsRes, tasksRes] = await Promise.all([
     fetch(`${API}/cars`).then(r => r.json()),
     fetch(`${API}/leads`).then(r => r.json()),
     fetch(`${API}/deals`).then(r => r.json()),
     fetch(`${API}/stats`).then(r => r.json()),
     fetch(`${API}/keys`).then(r => r.json()),
-    fetch(`${API}/appraisals`).then(r => r.json())
+    fetch(`${API}/appraisals`).then(r => r.json()),
+    fetch(`${API}/tasks?status=open`).then(r => r.json())
   ]);
+  openTasks = Array.isArray(tasksRes) ? tasksRes : [];
   cars = carsRes;
   vehicleKeys = Array.isArray(keysRes) ? keysRes : [];
   appraisals = Array.isArray(appraisalsRes) ? appraisalsRes : [];
@@ -252,6 +255,9 @@ function daysSinceLastContact(lead) {
 
 function needsFollowUp(lead) {
   if (lead.status === 'won' || lead.status === 'lost') return false;
+  // Snoozed, or someone already has a follow-up scheduled: not "forgotten".
+  if (lead.snoozedUntil && new Date(lead.snoozedUntil) > new Date()) return false;
+  if (openTasks.some(t => t.leadId === lead.id)) return false;
   return daysSinceLastContact(lead) >= FOLLOWUP_THRESHOLD_DAYS;
 }
 
@@ -517,6 +523,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 // or marked Won). Lost customers aren't in the pipeline.
 
 const ICONS = {
+  calendar: '<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4M8.5 14l2.5 2.5 4.5-4.5"/></svg>',
   chat: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.5H10l-4.5 3.5V16H4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
   pin: '<svg viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>',
   calc: '<svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 6.5h7v3h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/></svg>',
@@ -552,7 +559,8 @@ function lastTouch(lead) {
   return new Date(activities.length ? activities[0].date : lead.dateAdded);
 }
 
-const isHot = lead => Date.now() - lastTouch(lead) < DAY_MS;
+// Hot: flagged 🔥 on their page, or activity in the last 24 hours.
+const isHot = lead => !!lead.hot || Date.now() - lastTouch(lead) < DAY_MS;
 const isToday = iso => new Date(iso).toDateString() === new Date().toDateString();
 
 // Customers in the pipeline after the Source / "Customers added" filters.
@@ -602,7 +610,45 @@ function renderPipeline() {
       </div>`;
   }).join('');
   renderPipelineTiles();
+  renderPipelineTasks();
 }
+
+// My tasks and appointments: overdue and today, soonest first. Managers
+// can switch to everyone's.
+let pipelineTasksScope = 'mine';
+function renderPipelineTasks() {
+  const el = document.getElementById('pipelineTasks');
+  if (!el) return;
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+  const now = new Date();
+  const mine = pipelineTasksScope === 'mine';
+  const due = openTasks
+    .filter(t => new Date(t.dueAt) <= endOfToday)
+    .filter(t => !mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id));
+  const upcoming = openTasks.filter(t => new Date(t.dueAt) > endOfToday && (!mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id))).length;
+  el.innerHTML = html`
+    <div class="pipeline-tasks-head">
+      <h2>${mine ? 'My' : "Everyone's"} tasks today <span class="cp-count">${due.length}</span></h2>
+      <div class="view-toggle">
+        <button type="button" class="view-toggle-btn ${mine ? 'active' : ''}" onclick="setPipelineTasksScope('mine')">Mine</button>
+        <button type="button" class="view-toggle-btn ${mine ? '' : 'active'}" onclick="setPipelineTasksScope('all')">Everyone</button>
+      </div>
+    </div>
+    ${due.length ? html`<div class="pipeline-task-list">${due.map(t => {
+      const when = new Date(t.dueAt);
+      const overdue = when < now;
+      const lead = leads.find(l => l.id === t.leadId);
+      return html`<button type="button" class="pipeline-task ${overdue ? 'overdue' : ''}" onclick="openLeadProfile(${js(t.leadId)})">
+        <span class="pipeline-task-icon">${TASK_ICONS[t.type] || '☑️'}</span>
+        <span class="pipeline-task-main"><strong>${lead ? lead.name : t.leadName}</strong> · ${TASK_LABELS[t.type] || 'Task'}${t.title ? ` -- ${t.title}` : ''}</span>
+        <span class="pipeline-task-when">${overdue ? `Overdue · ${when.toLocaleDateString()} ` : ''}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${mine ? '' : ` · ${t.assignedTo ? t.assignedTo.name : ''}`}</span>
+      </button>`;
+    })}</div>` : html`<p class="audit-note">Nothing due today.${upcoming ? ` ${upcoming} coming up later.` : ''} Schedule follow-ups from a customer's page.</p>`}`;
+}
+window.setPipelineTasksScope = function(scope) {
+  pipelineTasksScope = scope;
+  renderPipelineTasks();
+};
 
 window.openPipelineList = function(stageKey, kind) {
   const stage = PIPELINE_STAGES.find(st => st.key === stageKey);
@@ -624,7 +670,11 @@ function attentionCounts() {
   const aged = cars.filter(c => c.status !== 'sold' && (Date.now() - new Date(c.dateAdded)) / DAY_MS >= AGED_INVENTORY_DAYS);
   const proposals = deals.filter(d => d.status === 'working');
   const openAppraisals = appraisals.filter(a => a.status === 'open');
+  const endOfToday = new Date(); endOfToday.setHours(23, 59, 59, 999);
+  const myDue = openTasks.filter(t => new Date(t.dueAt) <= endOfToday && t.assignedTo && currentUser && t.assignedTo.id === currentUser.id);
   return [
+    { key: 'tasks', label: 'My Tasks Due', icon: ICONS.calendar, color: myDue.some(t => new Date(t.dueAt) < new Date()) ? 'red' : 'blue', count: myDue.length,
+      open: () => { showView('pipeline'); const el = document.getElementById('pipelineTasks'); pipelineTasksScope = 'mine'; renderPipelineTasks(); if (el) el.scrollIntoView({ behavior: 'smooth' }); } },
     { key: 'followup', label: 'Follow-Up Due', icon: ICONS.bell, color: 'amber', count: followUp.length,
       open: () => { setLeadsListFilter('Follow-up due', followUp.map(l => l.id)); showView('leads'); } },
     { key: 'newtoday', label: 'New Today', icon: ICONS.userPlus, color: 'blue', count: newToday.length,
@@ -1607,11 +1657,6 @@ document.getElementById('printAppraisalBtn').addEventListener('click', () => win
 
 // ----- Starting an appraisal from a customer or a deal's trade-in -----
 
-document.getElementById('profileAppraiseBtn').addEventListener('click', () => {
-  const leadId = currentProfileLeadId;
-  document.getElementById('leadProfileModal').classList.remove('active');
-  startAppraisal({ leadId });
-});
 
 // The deal page's trade-in section: start an appraisal from the trade
 // details, or show the linked one with a button to use its offer.
@@ -1930,6 +1975,161 @@ document.getElementById('carForm').addEventListener('submit', async (e) => {
   await loadAll();
 });
 
+// ---------- Search pickers (type instead of scrolling a dropdown) ----------
+// With hundreds of cars and customers a dropdown is too slow. These search
+// boxes find a car by stock #, VIN (any part), year, make, model, trim, or
+// color -- e.g. "H-2020", "odyssey silver", "19 camry" -- and a customer by
+// name, phone, email, or customer #. Several words narrow it down.
+
+function carSearchText(c) {
+  return [c.stockNumber, c.vin, c.year, c.make, c.model, c.trim, c.exteriorColor, c.bodyStyle, c.status].filter(Boolean).join(' ').toLowerCase();
+}
+function leadSearchText(l) {
+  return [l.name, l.phone, String(l.phone || '').replace(/\D/g, ''), l.email, l.customerNumber, l.customerNumber && `c-${l.customerNumber}`]
+    .filter(Boolean).join(' ').toLowerCase();
+}
+function carPickLabel(c) {
+  return `${c.stockNumber ? `#${c.stockNumber} · ` : ''}${[c.year, c.make, c.model, c.trim].filter(Boolean).join(' ')}`;
+}
+function leadPickLabel(l) {
+  return `${l.name}${l.phone ? ` · ${l.phone}` : ''}`;
+}
+
+// Best matches first: exact stock # / customer #, then starts-with, then the rest.
+function searchRecords(kind, ids, query, limit = 8) {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const records = ids.map(id => (kind === 'car' ? cars : leads).find(r => r.id === id)).filter(Boolean);
+  if (!words.length) return records.slice(-limit).reverse(); // newest first when nothing's typed
+  const q = query.trim().toLowerCase();
+  const scored = [];
+  for (const r of records) {
+    const hay = kind === 'car' ? carSearchText(r) : leadSearchText(r);
+    // Customers: "(844) 674" also matches the phone's digits.
+    const phoneDigits = w => kind === 'lead' && w.replace(/\D/g, '').length >= 3 && hay.includes(w.replace(/\D/g, ''));
+    if (!words.every(w => hay.includes(w) || phoneDigits(w))) continue;
+    const key = String((kind === 'car' ? r.stockNumber : r.customerNumber) || '').toLowerCase();
+    const name = String((kind === 'car' ? r.vin : r.name) || '').toLowerCase();
+    const score = key === q || key === q.replace(/^c-/, '') ? 0 : key.startsWith(q) ? 1 : name.startsWith(q) ? 2 : 3;
+    scored.push({ r, score });
+  }
+  return scored.sort((a, b) => a.score - b.score).slice(0, limit).map(x => x.r);
+}
+
+function pickerResultHtml(kind, r) {
+  if (kind === 'car') {
+    return html`<div class="picker-main">${carPickLabel(r)}</div>
+      <div class="picker-sub">${[r.exteriorColor, r.mileage ? `${Number(r.mileage).toLocaleString()} mi` : '', r.price ? money(r.price) : '', r.vin ? `VIN …${String(r.vin).slice(-8)}` : '']
+        .filter(Boolean).join(' · ')}${r.status && r.status !== 'available' ? html` <span class="picker-status">${r.status}</span>` : ''}</div>`;
+  }
+  return html`<div class="picker-main">${r.name}${r.hot ? ' 🔥' : ''}</div>
+    <div class="picker-sub">${[r.phone, r.email, r.customerNumber ? `C-${r.customerNumber}` : ''].filter(Boolean).join(' · ')}</div>`;
+}
+
+// A search box. getIds() gives the records it can pick from; onPick(id)
+// is called with the chosen one ('' when cleared).
+function createSearchPicker({ kind, getIds, onPick, placeholder, clearable = true }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'search-picker';
+  wrap.innerHTML = html`<input type="text" class="search-picker-input" autocomplete="off" spellcheck="false"
+      placeholder="${placeholder || (kind === 'car' ? 'Type stock #, VIN, year, make, model, color...' : 'Type name, phone, email, or customer #...')}" />
+    ${clearable ? html`<button type="button" class="search-picker-clear" aria-label="Clear" title="Clear">✕</button>` : ''}
+    <div class="search-picker-results" role="listbox" hidden></div>`;
+  const input = wrap.querySelector('input');
+  const results = wrap.querySelector('.search-picker-results');
+  let shown = [];
+  let active = 0;
+  let selectedLabel = '';
+
+  function render() {
+    shown = searchRecords(kind, getIds(), input.value);
+    active = 0;
+    results.innerHTML = shown.length
+      ? shown.map((r, i) => html`<div class="picker-result ${i === 0 ? 'active' : ''}" role="option" data-i="${i}">${pickerResultHtml(kind, r)}</div>`).join('')
+      : html`<div class="picker-empty">No ${kind === 'car' ? 'vehicles' : 'customers'} match "${input.value}"</div>`;
+    results.hidden = false;
+  }
+  function choose(r) {
+    results.hidden = true;
+    onPick(r ? r.id : '');
+  }
+  function highlight(i) {
+    const rows = results.querySelectorAll('.picker-result');
+    if (!rows.length) return;
+    active = (i + rows.length) % rows.length;
+    rows.forEach((row, n) => row.classList.toggle('active', n === active));
+    rows[active].scrollIntoView({ block: 'nearest' });
+  }
+
+  input.addEventListener('focus', () => { input.select(); render(); });
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (results.hidden) render(); else highlight(active + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(active - 1); }
+    else if (e.key === 'Enter') { if (!results.hidden) { e.preventDefault(); if (shown[active]) choose(shown[active]); } }
+    else if (e.key === 'Escape') { results.hidden = true; input.value = selectedLabel; }
+  });
+  input.addEventListener('blur', () => setTimeout(() => { results.hidden = true; input.value = selectedLabel; }, 150));
+  // mousedown so it fires before the input's blur hides the list
+  results.addEventListener('mousedown', (e) => {
+    const row = e.target.closest('.picker-result');
+    if (!row) return;
+    e.preventDefault();
+    choose(shown[Number(row.dataset.i)]);
+    input.blur();
+  });
+  const clear = wrap.querySelector('.search-picker-clear');
+  if (clear) clear.addEventListener('click', () => { input.value = ''; choose(null); });
+
+  return {
+    element: wrap,
+    input,
+    setLabel(label) { selectedLabel = label || ''; input.value = selectedLabel; wrap.classList.toggle('has-value', !!label); },
+    setDisabled(disabled) { input.disabled = disabled; if (clear) clear.disabled = disabled; }
+  };
+}
+
+// Puts a search box in place of an existing car/customer <select>. The
+// select stays (hidden) and keeps working as before: code reading or
+// setting its value, and its "change" event, are unchanged.
+const nativeSelectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+const nativeSelectDisabled = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'disabled');
+function attachSearchPicker(select, kind) {
+  const picker = createSearchPicker({
+    kind,
+    getIds: () => [...select.options].map(o => o.value).filter(Boolean),
+    onPick: (id) => {
+      nativeSelectValue.set.call(select, id);
+      sync();
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  function sync() {
+    const id = nativeSelectValue.get.call(select);
+    const record = id && (kind === 'car' ? cars : leads).find(r => r.id === id);
+    picker.setLabel(record ? (kind === 'car' ? carPickLabel(record) : leadPickLabel(record)) : '');
+    picker.setDisabled(nativeSelectDisabled.get.call(select));
+  }
+  Object.defineProperty(select, 'value', {
+    configurable: true,
+    get: () => nativeSelectValue.get.call(select),
+    set: (v) => { nativeSelectValue.set.call(select, v); sync(); }
+  });
+  Object.defineProperty(select, 'disabled', {
+    configurable: true,
+    get: () => nativeSelectDisabled.get.call(select),
+    set: (v) => { nativeSelectDisabled.set.call(select, v); sync(); }
+  });
+  select.classList.add('picker-source');
+  select.after(picker.element);
+  if (select.form) select.form.addEventListener('reset', () => setTimeout(sync));
+  sync();
+}
+
+attachSearchPicker(document.getElementById('leadCarId'), 'car');
+attachSearchPicker(document.getElementById('dealAssignedLeadId'), 'lead');
+attachSearchPicker(document.getElementById('dealAssignedCarId'), 'car');
+attachSearchPicker(document.getElementById('apLeadId'), 'lead');
+
 // ---------- Lead modal ----------
 
 const leadModal = document.getElementById('leadModal');
@@ -1990,11 +2190,17 @@ document.getElementById('leadForm').addEventListener('submit', async (e) => {
       body: JSON.stringify(payload)
     });
   } else {
-    await fetch(`${API}/leads`, {
+    const res = await fetch(`${API}/leads`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) { if (res.status !== 403) alert(created.error || 'Could not add the customer.'); return; }
+    leadModal.classList.remove('active');
+    await loadAll();
+    openLeadProfile(created.id); // straight to their page to start working them
+    return;
   }
 
   leadModal.classList.remove('active');
@@ -2008,193 +2214,874 @@ document.getElementById('leadForm').addEventListener('submit', async (e) => {
   }
 });
 
-// ---------- Lead Profile (activity log + related deals) ----------
+// ---------- Customer page (everything about one customer) ----------
+// Header with contact and the car they want; the Road to the Sale; who
+// they are on the left; activity, conversation, deals, and value in the
+// middle; things to do on the right.
 
 let returnToProfileAfterEdit = false;
 let currentProfileLeadId = null;
+let cpTasks = []; // this customer's tasks (open and closed)
+let cpComposerKind = 'note';
+let cpHistoryFilter = 'all';
+let selectedSendTextPhoto = null;
 const leadProfileModal = document.getElementById('leadProfileModal');
 
-const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '🏢' };
-const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit' };
+const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '📍', task: '✅', appointment: '📅', status: '🏷' };
+const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit', task: 'Task', appointment: 'Appointment', status: 'Status' };
+const TASK_ICONS = { call: '📞', text: '💬', email: '✉️', appointment: '📅', todo: '☑️' };
+const TASK_LABELS = { call: 'Call', text: 'Text', email: 'Email', appointment: 'Appointment', todo: 'To-do' };
+const HISTORY_FILTERS = [
+  ['all', 'All', () => true], ['note', 'Notes', a => a.type === 'note'], ['call', 'Calls', a => a.type === 'call'],
+  ['text', 'Texts', a => a.type === 'text'], ['email', 'Emails', a => a.type === 'email'], ['visit', 'Visits', a => a.type === 'visit'],
+  ['task', 'Tasks', a => a.type === 'task'], ['appointment', 'Appts', a => a.type === 'appointment'], ['status', 'Status', a => a.type === 'status']
+];
+const ASSIGNMENT_SLOTS = [['sales1Id', 'Sales 1'], ['sales2Id', 'Sales 2'], ['bdc1Id', 'BDC 1'], ['bdc2Id', 'BDC 2']];
+const DEFAULT_ROADMAP_LABELS = ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery'];
 
-window.openLeadProfile = function(leadId) {
+const cpLead = () => leads.find(l => l.id === currentProfileLeadId);
+const staffName = id => (staffList.find(u => u.id === id) || {}).name || (id ? 'Former employee' : '');
+const initials = name => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('') || '?';
+const isSnoozed = l => l.snoozedUntil && new Date(l.snoozedUntil) > new Date();
+const cpCarLabel = c => [c.year, c.make, c.model, c.trim].filter(Boolean).join(' ');
+
+async function cpFetchTasks() {
+  const res = await fetch(`${API}/tasks?leadId=${encodeURIComponent(currentProfileLeadId)}`);
+  cpTasks = res.ok ? await res.json() : [];
+}
+
+// Saves some fields on the customer, then refreshes the page.
+async function cpSaveLead(fields) {
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { if (res.status !== 403) alert(body.error || 'Could not save.'); return null; }
+  const i = leads.findIndex(l => l.id === body.id);
+  if (i >= 0) leads[i] = body;
+  renderCustomerPage();
+  return body;
+}
+
+async function cpLogActivity(type, text) {
+  const res = await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, text })
+  });
+  return res.ok;
+}
+
+// Reloads everything (lists behind the page stay current) and redraws.
+async function cpRefresh() {
+  await Promise.all([loadAll(), cpFetchTasks()]);
+  if (cpLead()) renderCustomerPage(); else closeCustomerPage();
+}
+
+window.openLeadProfile = async function(leadId) {
   const lead = leads.find(l => l.id === leadId);
   if (!lead) return;
+  const switching = currentProfileLeadId !== leadId;
   currentProfileLeadId = leadId;
-
-  document.getElementById('profileName').textContent = lead.name;
-  document.getElementById('profileBadges').innerHTML = html`
-    <span class="badge ${lead.type === 'business' ? 'finalized' : 'working'}">${lead.type === 'business' ? 'Business' : 'Individual'}</span>
-    <span class="badge ${lead.status}">${lead.status}</span>
-  `;
-
-  const car = cars.find(c => c.id === lead.carId);
-  document.getElementById('profileInfoGrid').innerHTML = html`
-    <div class="info-item"><div class="label">Phone</div><div class="value">${lead.phone || '-'}</div></div>
-    <div class="info-item"><div class="label">Email</div><div class="value">${lead.email || '-'}</div></div>
-    <div class="info-item"><div class="label">Source</div><div class="value">${formatSource(lead.source)}</div></div>
-    <div class="info-item"><div class="label">Interested In</div><div class="value">${car ? `${car.year} ${car.make} ${car.model}` : '-'}</div></div>
-    <div class="info-item"><div class="label">Added</div><div class="value">${new Date(lead.dateAdded).toLocaleDateString()}</div></div>
-    <div class="info-item"><div class="label">Notes</div><div class="value">${lead.notes || '-'}</div></div>
-  `;
-
-  renderProfileDeals(lead);
-  renderActivityLog(lead);
-
-  const suggestionBox = document.getElementById('aiSuggestionBox');
-  suggestionBox.style.display = 'none';
-  suggestionBox.innerHTML = '';
-
-  const snapshotBox = document.getElementById('aiSnapshotBox');
-  snapshotBox.style.display = 'none';
-  snapshotBox.innerHTML = '';
-
-  document.getElementById('sendTextInput').value = '';
-  document.getElementById('sendTextStatus').innerHTML = '';
-  renderSendTextPhotoPicker(car);
-
-  leadProfileModal.classList.add('active');
-};
-
-let selectedSendTextPhoto = null;
-
-function renderSendTextPhotoPicker(car) {
-  selectedSendTextPhoto = null;
-  const container = document.getElementById('sendTextPhotoPicker');
-
-  if (!car || !car.photos || car.photos.length === 0) {
-    container.innerHTML = '';
-    return;
-  }
-
-  container.innerHTML = html`
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">Attach a photo of the ${car.year} ${car.make} ${car.model} (optional):</div>
-    <div class="photo-picker-grid">
-      ${car.photos.map(p => html`<img src="${photoThumb(p, 56, 42)}" class="photo-picker-thumb" data-photo="${p}" onclick="toggleSendTextPhoto(this)" loading="lazy" />`)}
-    </div>
-  `;
-}
-
-window.toggleSendTextPhoto = function(imgEl) {
-  const photo = imgEl.dataset.photo;
-  const alreadySelected = selectedSendTextPhoto === photo;
-  document.querySelectorAll('.photo-picker-thumb').forEach(el => el.classList.remove('selected'));
-  if (alreadySelected) {
+  if (switching) {
+    cpComposerKind = 'note';
+    cpHistoryFilter = 'all';
     selectedSendTextPhoto = null;
-  } else {
-    selectedSendTextPhoto = photo;
-    imgEl.classList.add('selected');
+    cpSwitchTab('activity');
+    document.getElementById('aiSnapshotBox').style.display = 'none';
+    document.getElementById('cpActionPanel').hidden = true;
+    document.getElementById('cpLaterNote').hidden = true;
   }
+  cpTasks = [];
+  renderCustomerPage();
+  leadProfileModal.classList.add('active');
+  await cpFetchTasks();
+  if (currentProfileLeadId === leadId) { renderPlanned(); renderHistory(); }
 };
 
-function renderProfileDeals(lead) {
-  const relatedDeals = deals.filter(d => d.leadId === lead.id);
-  const listEl = document.getElementById('profileDealsList');
-  const noCarNotice = document.getElementById('profileNoCarNotice');
-  const createBtn = document.getElementById('profileCreateDealBtn');
-
-  if (relatedDeals.length === 0) {
-    listEl.innerHTML = `<p class="no-deals-note">No deals yet for this customer.</p>`;
-  } else {
-    listEl.innerHTML = relatedDeals.map(d => {
-      const car = cars.find(c => c.id === d.carId);
-      return html`
-        <div class="related-deal-row">
-          <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal(${js(d.id)})">D-${d.dealNumber}</button> -- ${car ? `${car.year} ${car.make} ${car.model}` : 'Unknown vehicle'}</span>
-          <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
-        </div>
-      `;
-    }).join('');
-  }
-
-  // Creating a deal needs a vehicle. If the lead already has one attached,
-  // skip straight to it; otherwise let the create button fall back to the
-  // full picker on the Deals tab instead of guessing a vehicle for them.
-  if (lead.carId && cars.find(c => c.id === lead.carId && c.status !== 'sold')) {
-    noCarNotice.style.display = 'none';
-    createBtn.style.display = 'inline-block';
-    createBtn.onclick = () => createDealFromProfile(lead.id, lead.carId);
-  } else {
-    noCarNotice.style.display = 'block';
-    noCarNotice.innerHTML = `<p class="no-car-note">This customer isn't linked to an available vehicle yet -- set "Interested Car" via Edit Details, or use "+ Create Deal" on the Deals tab to pick one.</p>`;
-    createBtn.style.display = 'none';
-  }
+function closeCustomerPage() {
+  leadProfileModal.classList.remove('active');
 }
 
-async function createDealFromProfile(leadId, carId) {
-  const res = await fetch(`${API}/deals`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ leadId, carId })
+function renderCustomerPage() {
+  const lead = cpLead();
+  if (!lead) return;
+  renderCpHeader(lead);
+  renderRoadmap(lead);
+  renderCpContact(lead);
+  renderWishList(lead);
+  renderBestContact(lead);
+  renderCpDetails(lead);
+  renderComposer();
+  renderPlanned();
+  renderHistory();
+  renderThread(lead);
+  renderProfileDeals(lead);
+  renderCpValue(lead);
+}
+
+// ----- Header -----
+
+function renderCpHeader(lead) {
+  document.getElementById('cpAvatar').textContent = initials(lead.name);
+  document.getElementById('profileName').textContent = lead.name;
+  const hot = document.getElementById('cpHotBtn');
+  hot.classList.toggle('on', !!lead.hot);
+  hot.setAttribute('aria-pressed', lead.hot ? 'true' : 'false');
+  hot.title = lead.hot ? 'Hot prospect -- click to turn off' : 'Mark as a hot prospect';
+  const statusLabel = { new: 'New', contacted: 'Contacted', negotiating: 'Negotiating', won: 'Sold', lost: 'Dead' }[lead.status] || lead.status;
+  document.getElementById('profileBadges').innerHTML = html`
+    <span class="badge ${lead.status}">${statusLabel}</span>
+    ${lead.customerNumber ? html`<span class="cp-chip">C-${lead.customerNumber}</span>` : ''}
+    ${lead.type === 'business' ? html`<span class="cp-chip">Business</span>` : ''}
+    ${isSnoozed(lead) ? html`<span class="cp-chip cp-chip-warn">Snoozed until ${new Date(lead.snoozedUntil).toLocaleDateString()}</span>` : ''}`;
+  document.getElementById('cpHeaderContact').innerHTML = html`
+    ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a>` : html`<span class="muted">No phone</span>`}
+    ${lead.email ? html`<a href="mailto:${lead.email}">✉️ ${lead.email}</a>` : html`<span class="muted">No email</span>`}
+    <span class="muted">${formatSource(lead.source)}</span>`;
+  const car = cars.find(c => c.id === lead.carId) || cars.find(c => c.id === (lead.wishList || [])[0]);
+  document.getElementById('cpHeaderSide').innerHTML = car ? html`
+    <div class="cp-side-label">Interested in</div>
+    <div class="cp-side-car">${cpCarLabel(car)}</div>
+    <div class="cp-side-sub">${car.stockNumber ? `Stock #${car.stockNumber} · ` : ''}${money(car.price)}${car.status !== 'available' ? ` · ${car.status}` : ''}</div>`
+    : html`<div class="cp-side-label">Interested in</div><div class="cp-side-sub">No vehicle picked yet</div>`;
+}
+
+document.getElementById('cpHotBtn').addEventListener('click', () => {
+  const lead = cpLead();
+  if (lead) cpSaveLead({ hot: !lead.hot });
+});
+
+// ----- Road to the Sale -----
+// Some steps check themselves off from what's already happened; the
+// rest are clicked. Either way the bar shows where the customer is.
+
+function roadmapAuto(lead) {
+  const leadDeals = deals.filter(d => d.leadId === lead.id);
+  return [
+    (lead.activities || []).some(a => a.type === 'visit') ? 'Checked in' : null,
+    null,
+    (lead.carId || (lead.wishList || []).length) ? 'Vehicle picked' : null,
+    null,
+    appraisals.some(a => a.leadId === lead.id) ? 'Trade appraised' : null,
+    leadDeals.length ? 'Deal written' : null,
+    (lead.status === 'won' || leadDeals.some(d => ['delivered', 'closed', 'finalized'].includes(d.status))) ? 'Sold / delivered' : null
+  ];
+}
+
+function renderRoadmap(lead) {
+  const labels = (appSettings.roadmapLabels && appSettings.roadmapLabels.length === 7) ? appSettings.roadmapLabels : DEFAULT_ROADMAP_LABELS;
+  const auto = roadmapAuto(lead);
+  const manual = lead.roadmap || [];
+  const done = labels.map((_, i) => !!(manual[i] || auto[i]));
+  const current = done.indexOf(false);
+  document.getElementById('cpRoadmap').innerHTML = html`
+    <div class="cp-roadmap-title">Road to the Sale <span>${done.filter(Boolean).length} of 7</span></div>
+    <ol class="cp-steps">
+      ${labels.map((label, i) => {
+        const how = manual[i] ? `Checked by ${manual[i].by ? manual[i].by.name : '--'} on ${new Date(manual[i].at).toLocaleDateString()}` : auto[i] ? `${auto[i]} (automatic)` : 'Click when done';
+        return html`<li class="cp-step ${done[i] ? 'done' : ''} ${i === current ? 'current' : ''}">
+          <button type="button" data-step="${i}" title="${how}" ${auto[i] && !manual[i] ? html`data-auto="1"` : ''}>
+            <span class="cp-step-dot">${done[i] ? '✓' : i + 1}</span><span class="cp-step-label">${label}</span>
+          </button></li>`;
+      })}
+    </ol>`;
+}
+
+document.getElementById('cpRoadmap').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-step]');
+  if (!btn) return;
+  const lead = cpLead();
+  const step = Number(btn.dataset.step);
+  if (btn.dataset.auto) return; // done automatically; nothing to undo
+  const res = await fetch(`${API}/leads/${lead.id}/roadmap`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ step, done: !(lead.roadmap || [])[step] })
   });
-  const newDeal = await res.json();
-  leadProfileModal.classList.remove('active');
-  await loadAll();
-  openDealWorkspace(newDeal.id);
+  if (!res.ok) return;
+  const saved = await res.json();
+  leads[leads.findIndex(l => l.id === saved.id)] = saved;
+  renderRoadmap(saved);
+});
+
+// ----- Left column -----
+
+function renderCpContact(lead) {
+  const row = (field, icon, label, value, type = 'text') => html`
+    <div class="cp-field" data-field="${field}">
+      <span class="cp-field-icon">${icon}</span>
+      <span class="cp-field-label">${label}</span>
+      ${value ? html`<span class="cp-field-value">${value}</span>` : html`<span class="cp-field-value muted">--</span>`}
+      <button type="button" class="link-btn cp-field-edit" data-type="${type}">${value ? 'Edit' : 'Add'}</button>
+    </div>`;
+  document.getElementById('cpContact').innerHTML =
+    row('phone', '📞', 'Phone', lead.phone, 'tel') + row('email', '✉️', 'Email', lead.email, 'email') + row('address', '🏠', 'Address', lead.address);
 }
 
-window.closeProfileAndOpenDeal = function(dealId) {
-  leadProfileModal.classList.remove('active');
-  openDealWorkspace(dealId);
-};
+// Edit a contact field in place: Enter or leaving the box saves, Escape cancels.
+document.getElementById('cpContact').addEventListener('click', (e) => {
+  const btn = e.target.closest('.cp-field-edit');
+  if (!btn) return;
+  const row = btn.closest('.cp-field');
+  const field = row.dataset.field;
+  const lead = cpLead();
+  const input = document.createElement('input');
+  input.type = btn.dataset.type;
+  input.value = lead[field] || '';
+  input.className = 'cp-inline-input';
+  row.querySelector('.cp-field-value').replaceWith(input);
+  btn.remove();
+  input.focus();
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    if (save && input.value.trim() !== (lead[field] || '')) cpSaveLead({ [field]: input.value.trim() });
+    else renderCpContact(cpLead());
+  };
+  input.addEventListener('keydown', ev => { if (ev.key === 'Enter') finish(true); if (ev.key === 'Escape') finish(false); });
+  input.addEventListener('blur', () => finish(true));
+});
 
-function renderActivityLog(lead) {
-  const activities = lead.activities || [];
-  const listEl = document.getElementById('activityLogList');
+let cpWishPicker = null;
+function renderWishList(lead) {
+  const list = (lead.wishList || []).map(id => cars.find(c => c.id === id)).filter(Boolean);
+  document.getElementById('cpWishCount').textContent = list.length;
+  document.getElementById('cpWishList').innerHTML = list.length ? list.map(c => html`
+    <div class="cp-wish ${c.id === lead.carId ? 'primary' : ''}">
+      <div class="cp-wish-main">
+        <div class="cp-wish-car">${c.id === lead.carId ? '★ ' : ''}${cpCarLabel(c)}</div>
+        <div class="cp-wish-sub">${c.stockNumber ? `#${c.stockNumber} · ` : ''}${money(c.price)}${c.exteriorColor ? ` · ${c.exteriorColor}` : ''}${c.status !== 'available' ? ` · ${c.status}` : ''}</div>
+      </div>
+      <div class="cp-wish-actions">
+        ${c.id === lead.carId ? '' : html`<button type="button" class="link-btn" data-primary="${c.id}" title="The car they're most interested in">Make main</button>`}
+        <button type="button" class="recon-remove" data-remove="${c.id}" aria-label="Remove" title="Remove">✕</button>
+      </div>
+    </div>`).join('') : html`<p class="audit-note">No vehicles yet. Search below to add one.</p>`;
 
-  if (activities.length === 0) {
-    listEl.innerHTML = `<p class="no-deals-note">No calls, texts, or notes logged yet.</p>`;
+  if (!cpWishPicker) {
+    cpWishPicker = createSearchPicker({
+      kind: 'car',
+      placeholder: 'Add a vehicle: stock #, VIN, year, make, model...',
+      clearable: false,
+      getIds: () => { const l = cpLead(); return cars.filter(c => c.status !== 'sold' && !((l && l.wishList) || []).includes(c.id)).map(c => c.id); },
+      onPick: (id) => {
+        const l = cpLead();
+        if (!id || !l) return;
+        cpWishPicker.setLabel('');
+        cpSaveLead({ wishList: [...(l.wishList || []), id], ...(l.carId ? {} : { carId: id }) });
+      }
+    });
+    document.getElementById('cpWishPicker').appendChild(cpWishPicker.element);
+  }
+}
+
+document.getElementById('cpWishList').addEventListener('click', (e) => {
+  const lead = cpLead();
+  const remove = e.target.closest('[data-remove]');
+  const primary = e.target.closest('[data-primary]');
+  if (remove) {
+    const id = remove.dataset.remove;
+    const wishList = (lead.wishList || []).filter(x => x !== id);
+    cpSaveLead({ wishList, ...(lead.carId === id ? { carId: wishList[0] || null } : {}) });
+  } else if (primary) {
+    cpSaveLead({ carId: primary.dataset.primary });
+  }
+});
+
+// Which way they've actually answered: counts what's in their log.
+function suggestedContact(lead) {
+  const counts = { text: 0, call: 0, email: 0 };
+  for (const a of lead.activities || []) if (a.type in counts) counts[a.type] += 1;
+  const [best, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return n ? { method: best, n } : null;
+}
+
+function renderBestContact(lead) {
+  const labels = { text: '💬 Text', call: '📞 Call', email: '✉️ Email' };
+  const hint = suggestedContact(lead);
+  document.getElementById('cpBestContact').innerHTML = html`
+    <div class="cp-segment">
+      ${['text', 'call', 'email'].map(m => html`<button type="button" data-method="${m}" class="${lead.bestContact === m ? 'on' : ''}">${labels[m]}</button>`)}
+    </div>
+    <div class="audit-note">${lead.bestContact
+      ? html`Reach them by ${lead.bestContact}${lead.bestContact === 'email' ? (lead.email ? ` at ${lead.email}` : '') : (lead.phone ? ` at ${lead.phone}` : '')}.`
+      : hint ? html`Not set. Most contact so far has been by ${hint.method} (${hint.n}).` : 'Not set yet.'}</div>`;
+}
+
+document.getElementById('cpBestContact').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-method]');
+  if (!btn) return;
+  const lead = cpLead();
+  cpSaveLead({ bestContact: lead.bestContact === btn.dataset.method ? '' : btn.dataset.method });
+});
+
+function renderCpDetails(lead) {
+  const lastContact = (lead.activities || [])[0];
+  const staffOptions = (selected) => html`<option value="">-- None --</option>
+    ${staffList.map(u => html`<option value="${u.id}" ${u.id === selected ? html`selected` : ''}>${u.name}</option>`)}
+    ${selected && !staffList.some(u => u.id === selected) ? html`<option value="${selected}" selected>Former employee</option>` : ''}`;
+  document.getElementById('cpDetails').innerHTML = html`
+    ${ASSIGNMENT_SLOTS.map(([field, label]) => html`
+      <label class="cp-detail-row"><span>${label}</span>
+        <select data-assign="${field}">${staffOptions(lead[field])}</select></label>`)}
+    <div class="cp-detail-row"><span>Customer #</span><strong>${lead.customerNumber ? `C-${lead.customerNumber}` : '--'}</strong></div>
+    <div class="cp-detail-row"><span>Source</span><strong>${formatSource(lead.source)}</strong></div>
+    <div class="cp-detail-row"><span>Added</span><strong>${new Date(lead.dateAdded).toLocaleDateString()}</strong></div>
+    <div class="cp-detail-row"><span>Last contact</span><strong>${lastContact ? new Date(lastContact.date).toLocaleDateString() : 'Never'}</strong></div>
+    ${lead.status === 'lost' && lead.lostReason ? html`<div class="cp-detail-row"><span>Dead reason</span><strong>${lead.lostReason}</strong></div>` : ''}
+    ${lead.notes ? html`<div class="cp-detail-notes">${lead.notes}</div>` : ''}`;
+}
+
+document.getElementById('cpDetails').addEventListener('change', (e) => {
+  const select = e.target.closest('select[data-assign]');
+  if (select) cpSaveLead({ [select.dataset.assign]: select.value || null });
+});
+
+// ----- Middle tabs -----
+
+function cpSwitchTab(name) {
+  document.querySelectorAll('.cp-tab').forEach(t => t.classList.toggle('active', t.dataset.cptab === name));
+  document.querySelectorAll('.cp-tabpanel').forEach(p => { p.hidden = p.dataset.cptab !== name; });
+  if (name === 'conversation') {
+    const thread = document.getElementById('cpThread');
+    thread.scrollTop = thread.scrollHeight;
+  }
+}
+document.querySelector('.cp-tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.cp-tab');
+  if (tab) cpSwitchTab(tab.dataset.cptab);
+});
+
+// ----- Composer: note, call, text, email, task, appointment -----
+
+// A sensible default time: on the hour, and within business hours
+// (9am-7pm) -- after hours it rolls to 10am the next morning.
+function nextHour(hoursAhead = 1) {
+  const d = new Date(Date.now() + hoursAhead * 3600000);
+  d.setMinutes(0, 0, 0);
+  if (d.getHours() >= 19) { d.setDate(d.getDate() + 1); d.setHours(10); }
+  else if (d.getHours() < 9) d.setHours(10);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+}
+
+function sendTextBoxHtml(idPrefix) {
+  return html`
+    <textarea id="${idPrefix}Input" rows="3" placeholder="Type a text message..."></textarea>
+    <div id="${idPrefix}Photos" class="cp-photo-picker"></div>
+    <div class="cp-composer-actions">
+      <button type="button" class="btn-secondary btn-small" data-ai-reply="${idPrefix}">✨ Suggest a reply</button>
+      <span class="cp-composer-status" id="${idPrefix}Status"></span>
+      <button type="button" class="btn-primary btn-small" data-send-text="${idPrefix}">Send Text</button>
+    </div>`;
+}
+
+function renderComposer() {
+  document.querySelectorAll('#cpComposerTabs button').forEach(b => b.classList.toggle('active', b.dataset.kind === cpComposerKind));
+  const el = document.getElementById('cpComposer');
+  const lead = cpLead();
+  const kind = cpComposerKind;
+  el.className = `cp-composer-body kind-${kind}`;
+  const me = currentUser && currentUser.id;
+  const staffOptions = staffList.map(u => html`<option value="${u.id}" ${u.id === me ? html`selected` : ''}>${u.name}</option>`);
+
+  if (kind === 'text') {
+    el.innerHTML = lead.phone ? sendTextBoxHtml('cpText') : html`<p class="audit-note">Add a phone number to text this customer.</p>`;
+    if (lead.phone) renderTextPhotos('cpTextPhotos', lead);
+  } else if (kind === 'task' || kind === 'appointment') {
+    const appt = kind === 'appointment';
+    el.innerHTML = html`
+      <div class="cp-task-form">
+        ${appt ? '' : html`<label>Type
+          <select id="cpTaskType">
+            <option value="call">📞 Call</option><option value="text">💬 Text</option>
+            <option value="email">✉️ Email</option><option value="todo">☑️ To-do</option>
+          </select></label>`}
+        <label class="${appt ? 'wide' : ''}">${appt ? 'What' : 'About'} <input type="text" id="cpTaskTitle" placeholder="${appt ? 'e.g. Test drive the Odyssey' : 'e.g. Follow up on financing'}" /></label>
+        <label>When <input type="datetime-local" id="cpTaskDue" value="${appt ? nextHour(24) : nextHour(1)}" /></label>
+        <label>Assigned to <select id="cpTaskAssignee">${staffOptions}</select></label>
+        <label class="wide">Notes <input type="text" id="cpTaskNotes" placeholder="Optional" /></label>
+      </div>
+      <div class="cp-composer-actions">
+        <span class="cp-composer-status" id="cpTaskStatus"></span>
+        <button type="button" class="btn-primary btn-small" id="cpTaskSave">${appt ? 'Set Appointment' : 'Schedule Task'}</button>
+      </div>`;
+    document.getElementById('cpTaskSave').onclick = () => scheduleTask(appt ? 'appointment' : document.getElementById('cpTaskType').value);
+  } else if (kind === 'video') {
+    el.innerHTML = html`<div class="cp-placeholder"><strong>Video messages -- not available yet</strong>
+      <p>Record a quick walkaround video and text it to the customer. This needs a video messaging service connected first.</p></div>`;
+  } else {
+    const prompts = {
+      note: 'Type a note about this customer...',
+      call: 'How did the call go? e.g. Left voicemail about financing',
+      email: 'What did you email them? (logged here -- sending email from the CRM comes later)'
+    };
+    el.innerHTML = html`
+      <textarea id="cpNoteText" rows="3" placeholder="${prompts[kind]}"></textarea>
+      <div class="cp-composer-actions">
+        <span class="cp-composer-status" id="cpNoteStatus"></span>
+        <button type="button" class="btn-primary btn-small" id="cpNoteSave">${kind === 'note' ? 'Save Note' : kind === 'call' ? 'Log Call' : 'Log Email'}</button>
+      </div>`;
+    document.getElementById('cpNoteSave').onclick = async () => {
+      const text = document.getElementById('cpNoteText').value.trim();
+      if (!text) return document.getElementById('cpNoteText').focus();
+      if (await cpLogActivity(kind, text)) await cpRefresh();
+    };
+  }
+}
+
+document.getElementById('cpComposerTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-kind]');
+  if (!btn) return;
+  cpComposerKind = btn.dataset.kind;
+  renderComposer();
+  const first = document.querySelector('#cpComposer textarea, #cpComposer input');
+  if (first) first.focus();
+});
+
+async function scheduleTask(type) {
+  const due = document.getElementById('cpTaskDue').value;
+  const res = await fetch(`${API}/tasks`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      leadId: currentProfileLeadId, type,
+      title: document.getElementById('cpTaskTitle').value,
+      notes: document.getElementById('cpTaskNotes').value,
+      dueAt: due ? new Date(due).toISOString() : '',
+      assignedToId: document.getElementById('cpTaskAssignee').value
+    })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { document.getElementById('cpTaskStatus').innerHTML = html`<span class="send-text-status-error">${body.error || 'Could not schedule it.'}</span>`; return; }
+  await cpRefresh();
+}
+
+// Photos of the cars they're interested in, to attach to a text.
+function renderTextPhotos(containerId, lead) {
+  selectedSendTextPhoto = null;
+  const carIds = [...new Set([lead.carId, ...(lead.wishList || [])].filter(Boolean))];
+  const photos = carIds.flatMap(id => { const c = cars.find(x => x.id === id); return c ? (c.photos || []).map(p => ({ p, c })) : []; });
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = photos.length ? html`
+    <div class="audit-note">Attach a photo (optional):</div>
+    <div class="photo-picker-grid">${photos.slice(0, 24).map(({ p, c }) => html`<img src="${photoThumb(p, 56, 42)}" class="photo-picker-thumb" data-photo="${p}" title="${cpCarLabel(c)}" loading="lazy" />`)}</div>` : '';
+}
+
+// Clicks shared by both text boxes (composer and Conversation tab).
+leadProfileModal.addEventListener('click', async (e) => {
+  const thumb = e.target.closest('.photo-picker-thumb');
+  if (thumb) {
+    const same = selectedSendTextPhoto === thumb.dataset.photo;
+    leadProfileModal.querySelectorAll('.photo-picker-thumb').forEach(t => t.classList.remove('selected'));
+    selectedSendTextPhoto = same ? null : thumb.dataset.photo;
+    if (!same) thumb.classList.add('selected');
     return;
   }
+  const send = e.target.closest('[data-send-text]');
+  if (send) return sendCustomerText(send.dataset.sendText);
+  const ai = e.target.closest('[data-ai-reply]');
+  if (ai) return suggestReply(ai.dataset.aiReply);
+});
 
-  listEl.innerHTML = activities.map(a => html`
+async function sendCustomerText(prefix) {
+  const input = document.getElementById(`${prefix}Input`);
+  const status = document.getElementById(`${prefix}Status`);
+  const text = input.value.trim();
+  if (!text && !selectedSendTextPhoto) return input.focus();
+  status.textContent = 'Sending...';
+  try {
+    const res = await fetch(`${API}/leads/${currentProfileLeadId}/send-text`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, photoPath: selectedSendTextPhoto })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { status.innerHTML = html`<span class="send-text-status-error">Couldn't send: ${data.error}</span>`; return; }
+    selectedSendTextPhoto = null;
+    await cpRefresh();
+    const again = document.getElementById(`${prefix}Status`);
+    if (again) again.innerHTML = html`<span class="send-text-status-success">✓ Sent</span>`;
+  } catch (err) {
+    status.innerHTML = html`<span class="send-text-status-error">Could not reach the server.</span>`;
+  }
+}
+
+async function suggestReply(prefix) {
+  const input = document.getElementById(`${prefix}Input`);
+  const status = document.getElementById(`${prefix}Status`);
+  status.textContent = 'Writing a suggestion...';
+  try {
+    const res = await fetch(`${API}/ai/suggest-reply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: currentProfileLeadId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { status.innerHTML = html`<span class="send-text-status-error">Couldn't suggest one: ${data.error}</span>`; return; }
+    input.value = data.suggestion;
+    status.textContent = 'Suggestion ready -- edit it, then send.';
+    input.focus();
+  } catch (err) {
+    status.innerHTML = html`<span class="send-text-status-error">Could not reach the AI assistant.</span>`;
+  }
+}
+
+document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
+  const box = document.getElementById('aiSnapshotBox');
+  box.style.display = 'block';
+  box.innerHTML = html`<div class="ai-snapshot-box">Reading through their history...</div>`;
+  try {
+    const res = await fetch(`${API}/ai/lead-snapshot`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: currentProfileLeadId })
+    });
+    const data = await res.json().catch(() => ({}));
+    box.innerHTML = res.ok
+      ? html`<div class="ai-snapshot-box"><p>${data.snapshot}</p></div>`
+      : html`<div class="ai-snapshot-box">Couldn't generate a summary: ${data.error}</div>`;
+  } catch (err) {
+    box.innerHTML = html`<div class="ai-snapshot-box">Could not reach the AI assistant.</div>`;
+  }
+});
+
+// ----- Planned: open tasks and appointments -----
+
+function renderPlanned() {
+  const el = document.getElementById('cpPlanned');
+  const open = cpTasks.filter(t => t.status === 'open');
+  if (!open.length) {
+    el.innerHTML = html`<div class="cp-empty">Nothing scheduled.
+      <button type="button" class="link-btn" data-schedule="task">+ Schedule a task</button> or
+      <button type="button" class="link-btn" data-schedule="appointment">set an appointment</button></div>`;
+    return;
+  }
+  const now = new Date();
+  el.innerHTML = open.map(t => {
+    const due = new Date(t.dueAt);
+    const overdue = due < now;
+    const today = due.toDateString() === now.toDateString();
+    return html`
+      <div class="cp-task ${overdue ? 'overdue' : ''}" data-task="${t.id}">
+        <div class="cp-task-icon">${TASK_ICONS[t.type] || '☑️'}</div>
+        <div class="cp-task-body">
+          <div class="cp-task-title">${TASK_LABELS[t.type] || 'Task'}${t.title ? html` -- ${t.title}` : ''}</div>
+          <div class="cp-task-meta">${overdue ? 'Overdue · ' : today ? 'Today · ' : ''}${due.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })} · ${t.assignedTo ? t.assignedTo.name : '--'}</div>
+          ${t.notes ? html`<div class="cp-task-notes">${t.notes}</div>` : ''}
+          <div class="cp-task-inline" hidden></div>
+        </div>
+        <div class="cp-task-buttons">
+          <button type="button" class="btn-primary btn-small" data-task-action="done">Done</button>
+          <button type="button" class="btn-secondary btn-small" data-task-action="move">Reschedule</button>
+          <button type="button" class="link-btn" data-task-action="cancel">Cancel</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+document.getElementById('cpPlanned').addEventListener('click', async (e) => {
+  const schedule = e.target.closest('[data-schedule]');
+  if (schedule) {
+    cpComposerKind = schedule.dataset.schedule;
+    renderComposer();
+    document.getElementById('cpComposer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const btn = e.target.closest('[data-task-action]');
+  if (!btn) return;
+  const row = btn.closest('[data-task]');
+  const id = row.dataset.task;
+  const inline = row.querySelector('.cp-task-inline');
+  const action = btn.dataset.taskAction;
+  if (action === 'done') {
+    inline.hidden = false;
+    inline.innerHTML = html`<input type="text" placeholder="What happened? (optional)" class="cp-inline-input" />
+      <button type="button" class="btn-primary btn-small" data-confirm="complete">Save</button>`;
+    inline.querySelector('input').focus();
+  } else if (action === 'move') {
+    const t = cpTasks.find(x => x.id === id);
+    const d = new Date(t.dueAt);
+    const pad = n => String(n).padStart(2, '0');
+    inline.hidden = false;
+    inline.innerHTML = html`<input type="datetime-local" class="cp-inline-input" value="${`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}" />
+      <button type="button" class="btn-primary btn-small" data-confirm="move">Save</button>`;
+  } else if (action === 'cancel') {
+    if (confirm('Cancel this task?')) await taskRequest(`/tasks/${id}/cancel`, 'POST', {});
+  }
+});
+document.getElementById('cpPlanned').addEventListener('click', async (e) => {
+  const confirmBtn = e.target.closest('[data-confirm]');
+  if (!confirmBtn) return;
+  const row = confirmBtn.closest('[data-task]');
+  const value = row.querySelector('.cp-task-inline input').value;
+  if (confirmBtn.dataset.confirm === 'complete') await taskRequest(`/tasks/${row.dataset.task}/complete`, 'POST', { outcome: value });
+  else if (value) await taskRequest(`/tasks/${row.dataset.task}`, 'PUT', { dueAt: new Date(value).toISOString() });
+});
+document.getElementById('cpPlanned').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.closest('.cp-task-inline')) e.target.closest('.cp-task-inline').querySelector('[data-confirm]').click();
+});
+
+async function taskRequest(path, method, body) {
+  const res = await fetch(`${API}${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); if (res.status !== 403) alert(b.error || 'Could not update the task.'); return; }
+  await cpRefresh();
+}
+
+// ----- History -----
+
+function renderHistory() {
+  const lead = cpLead();
+  if (!lead) return;
+  const activities = lead.activities || [];
+  document.getElementById('cpHistoryFilters').innerHTML = HISTORY_FILTERS.map(([key, label, match]) => {
+    const n = activities.filter(match).length;
+    return key !== 'all' && !n ? '' : html`<button type="button" data-filter="${key}" class="${cpHistoryFilter === key ? 'active' : ''}">${label} ${n}</button>`;
+  }).join('');
+  const match = (HISTORY_FILTERS.find(f => f[0] === cpHistoryFilter) || HISTORY_FILTERS[0])[2];
+  const shown = activities.filter(match);
+  const canDelete = userCan('deleteRecords');
+  document.getElementById('activityLogList').innerHTML = shown.length ? shown.map(a => html`
     <div class="activity-entry">
       <div class="activity-icon">${ACTIVITY_ICONS[a.type] || '📝'}</div>
       <div class="activity-body">
         <div class="activity-meta">
-          <span>${ACTIVITY_LABELS[a.type] || 'Note'} -- ${new Date(a.date).toLocaleString()}</span>
-          <button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>
+          <span><strong>${ACTIVITY_LABELS[a.type] || 'Note'}</strong>${a.by ? ` · ${a.by.name}` : ''} · ${new Date(a.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+          ${canDelete ? html`<button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>` : ''}
         </div>
         <div class="activity-text">${a.text}</div>
       </div>
-    </div>
-  `).join('');
+    </div>`).join('') : html`<div class="cp-empty">Nothing logged yet.</div>`;
 }
 
-document.getElementById('activityForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const type = document.getElementById('activityType').value;
-  const text = document.getElementById('activityText').value;
-  if (!text.trim()) return;
-
-  await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type, text })
-  });
-
-  document.getElementById('activityText').value = '';
-  await loadAll();
-  // Re-render just the log in place so the modal doesn't visibly reopen
-  const lead = leads.find(l => l.id === currentProfileLeadId);
-  if (lead) renderActivityLog(lead);
+document.getElementById('cpHistoryFilters').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-filter]');
+  if (!btn) return;
+  cpHistoryFilter = btn.dataset.filter;
+  renderHistory();
 });
 
 window.deleteActivity = async function(leadId, activityId) {
+  if (!confirm('Delete this entry from their history?')) return;
   await fetch(`${API}/leads/${leadId}/activities/${activityId}`, { method: 'DELETE' });
-  await loadAll();
-  const lead = leads.find(l => l.id === leadId);
-  if (lead) renderActivityLog(lead);
+  await cpRefresh();
 };
 
+// ----- Conversation: texts as a thread -----
+
+function renderThread(lead) {
+  const texts = (lead.activities || []).filter(a => a.type === 'text').slice().reverse(); // oldest first
+  document.getElementById('cpThread').innerHTML = texts.length ? texts.map(t => html`
+    <div class="cp-bubble ${t.direction === 'in' ? 'in' : 'out'}">
+      <div>${t.message !== undefined ? (t.message || '(photo)') : t.text}</div>
+      ${t.photo ? html`<img src="${photoThumb(t.photo, 160, 120)}" alt="" loading="lazy" />` : ''}
+      <div class="cp-bubble-meta">${t.by ? `${t.by.name} · ` : ''}${new Date(t.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+    </div>`).join('') : html`<div class="cp-empty">No texts yet.</div>`;
+  document.getElementById('cpThreadCompose').innerHTML = lead.phone ? sendTextBoxHtml('cpThreadText') : html`<p class="audit-note">Add a phone number to text this customer.</p>`;
+  if (lead.phone) renderTextPhotos('cpThreadTextPhotos', lead);
+}
+
+// ----- Deals and Value -----
+
+function renderProfileDeals(lead) {
+  const related = deals.filter(d => d.leadId === lead.id);
+  document.getElementById('cpDealCount').textContent = related.length;
+  document.getElementById('profileDealsList').innerHTML = (related.length ? related.map(d => {
+    const car = cars.find(c => c.id === d.carId);
+    return html`
+      <div class="related-deal-row">
+        <span><button class="deal-number-link" onclick="closeProfileAndOpenDeal(${js(d.id)})">D-${d.dealNumber}</button>
+          -- ${car ? cpCarLabel(car) : 'No vehicle yet'}${d.vehiclePrice ? ` · ${money(d.vehiclePrice)}` : ''}</span>
+        <span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span>
+      </div>`;
+  }).join('') : html`<div class="cp-empty">No deals yet.</div>`) +
+    html`<button type="button" class="btn-primary btn-small" onclick="cpAction('new-deal')">+ New Deal</button>`;
+}
+
+function renderCpValue(lead) {
+  const trades = appraisals.filter(a => a.leadId === lead.id).slice().reverse();
+  const sold = deals.filter(d => d.leadId === lead.id && ['delivered', 'closed', 'finalized'].includes(d.status));
+  document.getElementById('cpValue').innerHTML = html`
+    <div class="retail-stats">
+      <div><span>Cars bought here</span><strong>${sold.length}</strong></div>
+      <div><span>Total purchases</span><strong>${money(sold.reduce((s, d) => s + (Number(d.vehiclePrice) || 0), 0))}</strong></div>
+      <div><span>Trades appraised</span><strong>${trades.length}</strong></div>
+    </div>
+    <div class="cp-section-head">Trades</div>
+    ${trades.length ? html`<table class="mini-table">
+      <tr><th>Appraisal</th><th>Vehicle</th><th>Miles</th><th>Appraised</th><th>Offered</th><th>Status</th></tr>
+      ${trades.map(a => {
+        const lastOffer = (a.customerOffers || []).slice(-1)[0];
+        return html`<tr>
+          <td><button class="link-btn" onclick="openAppraisal(${js(a.id)})">A-${a.appraisalNumber}</button></td>
+          <td>${appraisalVehicle(a)}</td><td>${a.mileage ? Number(a.mileage).toLocaleString() : '--'}</td>
+          <td>${money(a.offer)}</td><td>${lastOffer ? money(lastOffer.amount) : '--'}</td>
+          <td>${APPRAISAL_STATUS_LABELS[a.status]}</td></tr>`;
+      })}</table>` : html`<div class="cp-empty">No trades appraised. <button type="button" class="link-btn" onclick="cpAction('trade')">Appraise a trade</button></div>`}
+    <p class="audit-note">Equity, payoff, and service history show here once those are connected.</p>`;
+}
+
+window.closeProfileAndOpenDeal = function(dealId) {
+  closeCustomerPage();
+  openDealWorkspace(dealId);
+};
+
+// ----- Right column: Add and Actions -----
+
+function latestDeal(lead) {
+  const related = deals.filter(d => d.leadId === lead.id);
+  return related.find(d => d.status === 'working') || related.slice(-1)[0] || null;
+}
+
+async function createDealForLead(leadId, carId) {
+  const res = await fetch(`${API}/deals`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId, carId })
+  });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); if (res.status !== 403) alert(b.error || 'Could not start the deal.'); return; }
+  const deal = await res.json();
+  closeCustomerPage();
+  await loadAll();
+  openDealWorkspace(deal.id);
+}
+
+function showActionPanel(content) {
+  const panel = document.getElementById('cpActionPanel');
+  panel.hidden = false;
+  panel.innerHTML = content;
+  panel.scrollIntoView({ block: 'nearest' });
+  return panel;
+}
+
+window.cpAction = async function(action) {
+  const lead = cpLead();
+  if (!lead) return;
+  document.getElementById('cpLaterNote').hidden = true;
+  if (action === 'new-deal') {
+    const panel = showActionPanel(html`<div class="cp-panel-title">New deal -- which vehicle?</div><div id="cpDealPicker"></div>
+      <button type="button" class="link-btn" data-panel-close>Cancel</button>`);
+    const picker = createSearchPicker({
+      kind: 'car', clearable: false,
+      getIds: () => {
+        const available = cars.filter(c => c.status !== 'sold').map(c => c.id);
+        const wanted = [...(lead.wishList || [])].filter(id => available.includes(id));
+        return [...available.filter(id => !wanted.includes(id)), ...wanted]; // their cars show first
+      },
+      onPick: (id) => id && createDealForLead(lead.id, id)
+    });
+    panel.querySelector('#cpDealPicker').appendChild(picker.element);
+    picker.input.focus();
+  } else if (action === 'vehicles') {
+    cpWishPicker.input.focus();
+  } else if (action === 'trade') {
+    closeCustomerPage();
+    startAppraisal({ leadId: lead.id });
+  } else if (action === 'credit-app' || action === 'desk') {
+    const deal = latestDeal(lead);
+    if (!deal) {
+      showActionPanel(html`<div class="cp-panel-title">No deal yet</div><p class="audit-note">Start a deal first -- the ${action === 'desk' ? 'desk' : 'credit app'} lives on the deal.</p>
+        <button type="button" class="btn-primary btn-small" onclick="cpAction('new-deal')">+ New Deal</button>`);
+      return;
+    }
+    closeCustomerPage();
+    openDealWorkspace(deal.id);
+    if (action === 'credit-app') {
+      const tab = document.querySelector('.sub-tab-btn[data-subtab="creditapp"]');
+      if (tab) tab.click();
+    }
+  } else if (action === 'check-in') {
+    if (await cpLogActivity('visit', 'Checked in at the showroom')) await cpRefresh();
+  } else if (action === 'sold') {
+    if (!confirm(`Mark ${lead.name} as sold?`)) return;
+    await cpLogActivity('status', 'Marked as sold');
+    await cpSaveLead({ status: 'won', snoozedUntil: null });
+    await cpRefresh();
+  } else if (action === 'snooze') {
+    const day = n => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(8, 0, 0, 0); return d.toISOString(); };
+    showActionPanel(html`<div class="cp-panel-title">Snooze until</div>
+      <div class="cp-panel-buttons">
+        <button type="button" class="btn-secondary btn-small" data-snooze="${day(1)}">Tomorrow</button>
+        <button type="button" class="btn-secondary btn-small" data-snooze="${day(3)}">3 days</button>
+        <button type="button" class="btn-secondary btn-small" data-snooze="${day(7)}">1 week</button>
+        <button type="button" class="btn-secondary btn-small" data-snooze="${day(30)}">1 month</button>
+      </div>
+      <input type="date" id="cpSnoozeDate" class="cp-inline-input" />
+      <div class="cp-panel-buttons">
+        <button type="button" class="btn-primary btn-small" data-snooze-custom>Snooze</button>
+        ${isSnoozed(lead) ? html`<button type="button" class="btn-secondary btn-small" data-snooze="">Wake up now</button>` : ''}
+        <button type="button" class="link-btn" data-panel-close>Cancel</button>
+      </div>
+      <p class="audit-note">Snoozed customers drop off the follow-up lists until then.</p>`);
+  } else if (action === 'dead') {
+    if (lead.status === 'lost') {
+      await cpLogActivity('status', 'Brought back from dead');
+      await cpSaveLead({ status: 'contacted', lostReason: '' });
+      return cpRefresh();
+    }
+    showActionPanel(html`<div class="cp-panel-title">Mark as dead -- why?</div>
+      <div class="cp-panel-buttons">
+        ${['Bought elsewhere', 'Not in the market', 'Credit', 'Price', 'No response'].map(r => html`<button type="button" class="btn-secondary btn-small" data-dead="${r}">${r}</button>`)}
+      </div>
+      <input type="text" id="cpDeadReason" class="cp-inline-input" placeholder="Or type a reason" />
+      <div class="cp-panel-buttons"><button type="button" class="btn-primary btn-small" data-dead-custom>Mark dead</button>
+        <button type="button" class="link-btn" data-panel-close>Cancel</button></div>`);
+  } else if (action === 'transfer') {
+    showActionPanel(html`<div class="cp-panel-title">Transfer to</div>
+      <select id="cpTransferTo" class="cp-inline-input">
+        ${staffList.filter(u => u.id !== lead.sales1Id).map(u => html`<option value="${u.id}">${u.name}</option>`)}
+      </select>
+      <div class="cp-panel-buttons"><button type="button" class="btn-primary btn-small" data-transfer>Transfer</button>
+        <button type="button" class="link-btn" data-panel-close>Cancel</button></div>
+      <p class="audit-note">Makes them Sales 1. ${lead.sales1Id ? `Currently ${staffName(lead.sales1Id)}.` : 'Nobody is assigned now.'}</p>`);
+  }
+};
+
+document.querySelector('.cp-right').addEventListener('click', async (e) => {
+  const lead = cpLead();
+  const actionBtn = e.target.closest('.cp-action[data-action]');
+  if (actionBtn) return cpAction(actionBtn.dataset.action);
+  const later = e.target.closest('.cp-later');
+  if (later) {
+    const note = document.getElementById('cpLaterNote');
+    note.hidden = false;
+    note.innerHTML = html`<strong>${later.dataset.later} -- not available yet.</strong> Needs ${later.dataset.needs}.`;
+    return;
+  }
+  if (e.target.closest('[data-panel-close]')) { document.getElementById('cpActionPanel').hidden = true; return; }
+  const snooze = e.target.closest('[data-snooze]');
+  const snoozeCustom = e.target.closest('[data-snooze-custom]');
+  if (snooze || snoozeCustom) {
+    const until = snooze ? snooze.dataset.snooze : (document.getElementById('cpSnoozeDate').value ? new Date(`${document.getElementById('cpSnoozeDate').value}T08:00`).toISOString() : '');
+    if (snoozeCustom && !until) return document.getElementById('cpSnoozeDate').focus();
+    await cpLogActivity('status', until ? `Snoozed until ${new Date(until).toLocaleDateString()}` : 'Woken up from snooze');
+    await cpSaveLead({ snoozedUntil: until || null });
+    document.getElementById('cpActionPanel').hidden = true;
+    return cpRefresh();
+  }
+  const dead = e.target.closest('[data-dead]');
+  const deadCustom = e.target.closest('[data-dead-custom]');
+  if (dead || deadCustom) {
+    const reason = dead ? dead.dataset.dead : document.getElementById('cpDeadReason').value.trim();
+    if (!reason) return document.getElementById('cpDeadReason').focus();
+    await cpLogActivity('status', `Marked dead: ${reason}`);
+    await cpSaveLead({ status: 'lost', lostReason: reason });
+    document.getElementById('cpActionPanel').hidden = true;
+    return cpRefresh();
+  }
+  if (e.target.closest('[data-transfer]')) {
+    const to = document.getElementById('cpTransferTo').value;
+    if (!to) return;
+    await cpLogActivity('status', `Transferred${lead.sales1Id ? ` from ${staffName(lead.sales1Id)}` : ''} to ${staffName(to)}`);
+    await cpSaveLead({ sales1Id: to });
+    document.getElementById('cpActionPanel').hidden = true;
+    return cpRefresh();
+  }
+});
+
+// ----- Opening, editing, closing -----
+
 document.getElementById('editFromProfileBtn').addEventListener('click', () => {
-  leadProfileModal.classList.remove('active');
+  closeCustomerPage();
   returnToProfileAfterEdit = true;
   editLead(currentProfileLeadId);
 });
 
-document.getElementById('closeProfileBtn').addEventListener('click', () => {
-  leadProfileModal.classList.remove('active');
+document.getElementById('closeProfileBtn').addEventListener('click', closeCustomerPage);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && leadProfileModal.classList.contains('active') && !e.target.closest('input, textarea, select')) closeCustomerPage();
 });
 
 // ---------- Deals (Deal #, Desking, Credit App, Proposals) ----------
@@ -3313,116 +4200,6 @@ window.askExample = function(btn) {
   sendChatMessage(btn.textContent);
 };
 
-// ---------- AI Suggested Reply (on a lead's profile) ----------
-
-document.getElementById('aiSuggestReplyBtn').addEventListener('click', async () => {
-  const box = document.getElementById('aiSuggestionBox');
-  box.style.display = 'block';
-  box.innerHTML = `<div class="ai-suggestion-box">Generating a suggestion...</div>`;
-
-  try {
-    const res = await fetch(`${API}/ai/suggest-reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId: currentProfileLeadId })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      box.innerHTML = html`<div class="ai-suggestion-box">Couldn't generate a suggestion: ${data.error}</div>`;
-      return;
-    }
-
-    box.innerHTML = html`
-      <div class="ai-suggestion-box">
-        <strong>Suggested reply:</strong>
-        <textarea id="aiSuggestionText">${data.suggestion}</textarea>
-        <div class="ai-suggestion-actions">
-          <button type="button" class="btn-secondary" id="dismissSuggestionBtn">Dismiss</button>
-          <button type="button" class="btn-primary" id="logSuggestionBtn">Add as Activity</button>
-        </div>
-      </div>
-    `;
-
-    document.getElementById('dismissSuggestionBtn').addEventListener('click', () => {
-      box.style.display = 'none';
-      box.innerHTML = '';
-    });
-
-    document.getElementById('logSuggestionBtn').addEventListener('click', async () => {
-      const text = document.getElementById('aiSuggestionText').value;
-      await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'note', text: `AI-suggested reply sent: ${text}` })
-      });
-      box.style.display = 'none';
-      box.innerHTML = '';
-      await loadAll();
-      const lead = leads.find(l => l.id === currentProfileLeadId);
-      if (lead) renderActivityLog(lead);
-    });
-  } catch (err) {
-    box.innerHTML = `<div class="ai-suggestion-box">Could not reach the AI assistant. Is the server running?</div>`;
-  }
-});
-
-document.getElementById('sendTextBtn').addEventListener('click', async () => {
-  const text = document.getElementById('sendTextInput').value.trim();
-  const statusEl = document.getElementById('sendTextStatus');
-  if (!text && !selectedSendTextPhoto) return;
-
-  statusEl.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">Sending...</div>`;
-
-  try {
-    const res = await fetch(`${API}/leads/${currentProfileLeadId}/send-text`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, photoPath: selectedSendTextPhoto })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      statusEl.innerHTML = html`<div class="send-text-status-error">Couldn't send: ${data.error}</div>`;
-      return;
-    }
-
-    statusEl.innerHTML = `<div class="send-text-status-success">✓ ${selectedSendTextPhoto ? 'Picture text' : 'Text'} sent and logged.</div>`;
-    document.getElementById('sendTextInput').value = '';
-    selectedSendTextPhoto = null;
-    document.querySelectorAll('.photo-picker-thumb').forEach(el => el.classList.remove('selected'));
-    await loadAll();
-    const lead = leads.find(l => l.id === currentProfileLeadId);
-    if (lead) renderActivityLog(lead);
-  } catch (err) {
-    statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
-  }
-});
-
-document.getElementById('aiSnapshotBtn').addEventListener('click', async () => {
-  const box = document.getElementById('aiSnapshotBox');
-  box.style.display = 'block';
-  box.innerHTML = `<div class="ai-snapshot-box">Reading through their history...</div>`;
-
-  try {
-    const res = await fetch(`${API}/ai/lead-snapshot`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ leadId: currentProfileLeadId })
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      box.innerHTML = html`<div class="ai-snapshot-box">Couldn't generate a snapshot: ${data.error}</div>`;
-      return;
-    }
-
-    box.innerHTML = html`<div class="ai-snapshot-box"><strong>🔍 Snapshot</strong><p>${data.snapshot}</p></div>`;
-  } catch (err) {
-    box.innerHTML = `<div class="ai-snapshot-box">Could not reach the AI assistant. Is the server running?</div>`;
-  }
-});
-
 // ---------- Taxes & Fees (reference table admin screen) ----------
 
 const taxRatesModal = document.getElementById('taxRatesModal');
@@ -3547,6 +4324,9 @@ document.getElementById('adminFeeDefaultsBtn').addEventListener('click', async (
   document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
   document.getElementById('settingsAppraisalPack').value = settings.appraisalPack ?? 0;
   document.getElementById('settingsAppraisalTargetGross').value = settings.appraisalTargetGross ?? 2500;
+  const roadmapLabels = (settings.roadmapLabels && settings.roadmapLabels.length === 7) ? settings.roadmapLabels : DEFAULT_ROADMAP_LABELS;
+  document.getElementById('settingsRoadmapLabels').innerHTML = roadmapLabels.map((label, i) =>
+    html`<label>${i + 1} <input type="text" maxlength="24" data-roadmap-step="${i}" value="${label}" /></label>`).join('');
   document.getElementById('dmvPercentageField').style.display = (settings.dmvFeeMethod === 'percentage') ? 'block' : 'none';
   adminMenuModal.classList.remove('active');
   feeDefaultsModal.classList.add('active');
@@ -3574,6 +4354,8 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
     dmvFeePercentage: document.getElementById('settingsDmvFeePercentage').value,
     appraisalPack: Number(document.getElementById('settingsAppraisalPack').value) || 0,
     appraisalTargetGross: Number(document.getElementById('settingsAppraisalTargetGross').value) || 0,
+    roadmapLabels: [...document.querySelectorAll('[data-roadmap-step]')]
+      .map((input, i) => input.value.trim().slice(0, 24) || DEFAULT_ROADMAP_LABELS[i]),
   };
   const res = await fetch(`${API}/settings`, {
     method: 'PUT',
@@ -3693,7 +4475,7 @@ const AUDIT_ACTION_LABELS = {
   change_password: 'Changed own password', reset_password: 'Password reset by admin'
 };
 const AUDIT_TYPE_LABELS = {
-  car: 'Vehicle', lead: 'Customer', deal: 'Deal', user: 'User', tax_rate: 'Tax rate', settings: 'Fee defaults'
+  car: 'Vehicle', lead: 'Customer', deal: 'Deal', user: 'User', tax_rate: 'Tax rate', settings: 'Fee defaults', appraisal: 'Appraisal', task: 'Task'
 };
 
 // "creditApp.applicant.firstName" -> "Credit App › Applicant › First Name"

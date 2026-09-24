@@ -21,6 +21,7 @@ const LABELS = {
   tax_rate: r => [r.state, r.county || 'statewide', r.city].filter(Boolean).join(' / '),
   user: u => `${u.name} (${u.email})`,
   settings: () => 'Fee defaults',
+  task: t => `${t.title || t.type}${t.leadName ? ` · ${t.leadName}` : ''}`,
   appraisal: a => `A-${a.appraisalNumber}${[a.year, a.make, a.model].some(Boolean) ? ' · ' + [a.year, a.make, a.model].filter(Boolean).join(' ') : ''}`
 };
 
