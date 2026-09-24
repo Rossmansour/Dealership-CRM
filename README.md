@@ -21,6 +21,15 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Search and filter by make, model, VIN, or status
 - Automatic "days listed" tracking to flag cars sitting too long
 
+**Sales Pipeline (home screen)**
+- Opens on the **Sales Pipeline**: every open customer counted in one stage -- **Engaged → Visit → Proposal → Delivered**. Visit means a *Showroom Visit* was logged on their activity log; Proposal means a deal is being worked; Delivered means a delivered/closed deal, or marked Won. Lost customers aren't counted
+- Under each stage: ⚠ customers needing follow-up (no contact in 3+ days) and 🔥 hot customers (activity in the last 24 hours)
+- Filter by lead source and when the customer was added
+- Tiles for Follow-Up Due, New Today, Keys Out, and Aged Inventory (60+ days); the left rail shows the same counts (plus open proposals) as badges on every screen
+- **Every number is clickable**: it opens the customer or inventory list showing exactly those records, with a "Showing: ..." chip to clear the filter
+- **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting** (placeholder for later). Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
+- The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
+
 **VIN Decoder**
 - Type or paste a VIN when adding a car and year, make, model, trim, body style, engine, transmission, drivetrain, fuel, and doors fill in automatically (or press **Decode VIN**)
 - Same **Decode VIN** button on a deal's trade-in section fills the trade's year, make, and model, and the trade VIN is saved with the deal

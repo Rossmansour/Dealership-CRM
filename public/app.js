@@ -78,6 +78,8 @@ function applyPermissionsToUI() {
     document.body.classList.toggle(`cannot-${permission}`, !userCan(permission));
   }
   document.getElementById('currentUserName').textContent = currentUser.name;
+  document.getElementById('currentUserInitials').textContent =
+    currentUser.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   document.getElementById('adminMenuBtn').style.display =
     (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog') || userCan('manageIntegrations')) ? '' : 'none';
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
@@ -100,9 +102,14 @@ let deals = [];
 
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 
+const SUN_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M21.5 12h-2M4.5 12h-2M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4M18.7 18.7l-1.4-1.4M6.7 6.7L5.3 5.3"/></svg>';
+const MOON_ICON = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+
 function updateThemeButtonLabel() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  themeToggleBtn.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+  themeToggleBtn.innerHTML = isDark ? SUN_ICON : MOON_ICON;
+  themeToggleBtn.title = isDark ? 'Light mode' : 'Dark mode';
+  themeToggleBtn.setAttribute('aria-label', themeToggleBtn.title);
 }
 updateThemeButtonLabel();
 
@@ -118,51 +125,79 @@ themeToggleBtn.addEventListener('click', () => {
   updateThemeButtonLabel();
 });
 
-// ---------- Tab switching ----------
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
-  });
-});
-
-// Clicking the "Dealership CRM" title in the top left jumps back to the
-// CRM module's Dashboard, keeping the sidebar and visible tabs in sync.
-document.getElementById('brandHomeBtn').addEventListener('click', () => {
-  setActiveModule('crm');
-});
-
-// ---------- Module sidebar (CRM / Sales & F&I / Vehicle Management / Service) ----------
+// ---------- Navigation ----------
+// The left sidebar picks a module (CRM, Sales & F&I, Vehicle Management,
+// Service, Accounting...). The icon bar at the top shows that module's
+// screens ("views"). Adding a module = one entry here, its icons in the
+// top bar (data-module="..."), and its panel.
 //
-// The left sidebar groups the app's tabs into DMS-style modules. Switching
-// modules just filters which top-nav tab buttons are visible and jumps to
-// the first one in that module -- the underlying tab-panel mechanism above
-// is unchanged, so nothing about how pages render had to change.
+// Most views are one panel; "leads" and "board" are the same Customers
+// panel shown as a table or as a board.
 
-function setActiveModule(moduleKey) {
-  document.querySelectorAll('.sidebar-item').forEach(item => {
-    item.classList.toggle('active', item.dataset.module === moduleKey);
-  });
+const MODULES = [
+  { key: 'crm', label: 'CRM', views: ['pipeline', 'leads', 'board', 'reports', 'assistant'],
+    icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
+  { key: 'sales', label: 'Sales & F&I', views: ['deals'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
+  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
+  { key: 'service', label: 'Service', views: ['service'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
+  { key: 'accounting', label: 'Accounting', views: ['accounting'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>' }
+];
 
-  const tabsInModule = document.querySelectorAll(`.tab-btn[data-module="${moduleKey}"]`);
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.style.display = btn.dataset.module === moduleKey ? 'inline-block' : 'none';
-  });
+const VIEW_PANELS = {
+  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory',
+  reports: 'dashboard', assistant: 'assistant', service: 'service', accounting: 'accounting'
+};
+let currentView = 'pipeline';
 
-  if (tabsInModule.length > 0) {
-    tabsInModule[0].click();
-  }
+const moduleOfView = view => MODULES.find(m => m.views.includes(view));
+
+function renderModuleNav() {
+  document.getElementById('moduleNav').innerHTML = MODULES.map(m => html`
+    <button type="button" class="rail-item rail-module" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.label}">
+      ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
+    </button>`).join('');
 }
 
-document.querySelectorAll('.sidebar-item').forEach(item => {
-  item.addEventListener('click', () => setActiveModule(item.dataset.module));
+window.showModule = function(moduleKey) {
+  const module = MODULES.find(m => m.key === moduleKey);
+  if (module.views.includes('leads')) clearLeadsListFilter();
+  if (module.views.includes('inventory')) clearInventoryListFilter();
+  showView(module.views[0]);
+};
+
+function showView(view) {
+  currentView = view;
+  const module = moduleOfView(view);
+  document.querySelectorAll('.rail-module').forEach(b => b.classList.toggle('active', b.dataset.module === module.key));
+  document.querySelectorAll('.nav-icon[data-view]').forEach(b => { b.style.display = b.dataset.module === module.key ? '' : 'none'; });
+  document.getElementById('currentModuleName').textContent = module.label;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(VIEW_PANELS[view]).classList.add('active');
+  document.querySelectorAll('.nav-icon[data-view]').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === view);
+    b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false');
+  });
+  if (view === 'leads') setLeadsView('table');
+  if (view === 'board') setLeadsView('kanban');
+  window.scrollTo(0, 0);
+}
+
+document.querySelectorAll('.nav-icon[data-view]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Choosing a screen from the bar shows everything, not a leftover filter.
+    if (btn.dataset.view === 'leads' || btn.dataset.view === 'board') clearLeadsListFilter();
+    if (btn.dataset.view === 'inventory') clearInventoryListFilter();
+    showView(btn.dataset.view);
+  });
 });
 
-// Start on the CRM module's Dashboard, matching the sidebar's default active state.
-setActiveModule('crm');
+document.getElementById('brandHomeBtn').addEventListener('click', () => showView('pipeline'));
+renderModuleNav();
+showView('pipeline');
 
 // ---------- Data loading ----------
 
@@ -184,6 +219,8 @@ async function loadAll() {
   renderLeadsKanban();
   renderDeals();
   populateLeadCarOptions();
+  renderPipeline();
+  renderRail();
 }
 
 // ---------- Needs-follow-up detection ----------
@@ -241,7 +278,8 @@ function renderCars() {
       (c.vin || '').toLowerCase().includes(search) ||
       (c.stockNumber || '').toLowerCase().includes(search);
     const matchesStatus = !statusFilter || c.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesListFilter = !inventoryListFilter || inventoryListFilter.ids.has(c.id);
+    return matchesSearch && matchesStatus && matchesListFilter;
   });
 
   document.getElementById('carTableBody').innerHTML = filtered.map(c => {
@@ -277,7 +315,8 @@ document.getElementById('statusFilter').addEventListener('change', renderCars);
 
 function renderLeads() {
   const statusFilter = document.getElementById('leadStatusFilter').value;
-  let filtered = leads.filter(l => !statusFilter || l.status === statusFilter);
+  let filtered = leads.filter(l =>
+    (!statusFilter || l.status === statusFilter) && (!leadsListFilter || leadsListFilter.ids.has(l.id)));
 
   document.getElementById('leadTableBody').innerHTML = filtered.map(l => {
     const car = cars.find(c => c.id === l.carId);
@@ -337,7 +376,7 @@ function renderLeadsKanban() {
   const board = document.getElementById('leadsKanbanView');
 
   board.innerHTML = LEAD_PIPELINE_STAGES.map(stage => {
-    const stageLeads = leads.filter(l => l.status === stage.key);
+    const stageLeads = leads.filter(l => l.status === stage.key && (!leadsListFilter || leadsListFilter.ids.has(l.id)));
     return html`
       <div class="kanban-column" data-status="${stage.key}">
         <div class="kanban-column-header"><span>${stage.label}</span><span>${stageLeads.length}</span></div>
@@ -452,9 +491,307 @@ async function refreshKeys() {
   if (!res.ok) return;
   vehicleKeys = await res.json();
   renderCars();
+  renderPipelineTiles();
+  renderRail();
 }
 setInterval(refreshKeys, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshKeys(); });
+
+// ---------- Sales Pipeline (home screen) ----------
+// Every open customer sits in exactly one stage, from how far along they
+// are: Engaged (in contact) -> Visit (came to the showroom) -> Proposal
+// (a deal is being worked) -> Delivered (bought -- a delivered/closed deal,
+// or marked Won). Lost customers aren't in the pipeline.
+
+const ICONS = {
+  chat: '<svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.5H10l-4.5 3.5V16H4z"/><path d="M8 9.5h8M8 12.5h5"/></svg>',
+  pin: '<svg viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>',
+  calc: '<svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 6.5h7v3h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/></svg>',
+  flag: '<svg viewBox="0 0 24 24"><path d="M5 21.5V4"/><path d="M5 4.5h11l-2 3.5 2 3.5H5"/></svg>',
+  bell: '<svg viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>',
+  userPlus: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6 1.6 0 3 .5 4.1 1.3"/><path d="M18.5 13v7M15 16.5h7"/></svg>',
+  key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3M16.5 6.5l2.5 2.5M14.5 8.5l2 2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24"><path d="M6 4l7 8-7 8M12 4l7 8-7 8"/></svg>'
+};
+
+const PIPELINE_STAGES = [
+  { key: 'engaged', label: 'Engaged', icon: ICONS.chat },
+  { key: 'visit', label: 'Visit', icon: ICONS.pin },
+  { key: 'proposal', label: 'Proposal', icon: ICONS.calc },
+  { key: 'delivered', label: 'Delivered', icon: ICONS.flag }
+];
+const AGED_INVENTORY_DAYS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function pipelineStageOf(lead) {
+  const leadDeals = deals.filter(d => d.leadId === lead.id);
+  if (lead.status === 'won' || leadDeals.some(d => ['delivered', 'closed', 'finalized'].includes(d.status))) return 'delivered';
+  if (lead.status === 'lost') return null;
+  if (leadDeals.some(d => d.status === 'working')) return 'proposal';
+  if ((lead.activities || []).some(a => a.type === 'visit')) return 'visit';
+  return 'engaged';
+}
+
+function lastTouch(lead) {
+  const activities = lead.activities || [];
+  return new Date(activities.length ? activities[0].date : lead.dateAdded);
+}
+
+const isHot = lead => Date.now() - lastTouch(lead) < DAY_MS;
+const isToday = iso => new Date(iso).toDateString() === new Date().toDateString();
+
+// Customers in the pipeline after the Source / "Customers added" filters.
+function pipelineLeads() {
+  const source = document.getElementById('pipelineSourceFilter').value;
+  const period = document.getElementById('pipelinePeriodFilter').value;
+  const now = new Date();
+  return leads.filter(l => {
+    if (source && l.source !== source) return false;
+    const added = new Date(l.dateAdded);
+    if (period === 'today') return isToday(l.dateAdded);
+    if (period === 'week') return now - added < 7 * DAY_MS;
+    if (period === 'month') return added.getFullYear() === now.getFullYear() && added.getMonth() === now.getMonth();
+    if (period === '30' || period === '90') return now - added < Number(period) * DAY_MS;
+    return true;
+  });
+}
+
+function stageGroups() {
+  const groups = Object.fromEntries(PIPELINE_STAGES.map(st => [st.key, []]));
+  for (const lead of pipelineLeads()) {
+    const stage = pipelineStageOf(lead);
+    if (stage) groups[stage].push(lead);
+  }
+  return groups;
+}
+
+function renderPipeline() {
+  const groups = stageGroups();
+  document.getElementById('pipelineStages').innerHTML = PIPELINE_STAGES.map((st, i) => {
+    const list = groups[st.key];
+    const attention = list.filter(needsFollowUp).length;
+    const hot = list.filter(isHot).length;
+    const open = st.key !== 'delivered';
+    return html`
+      ${i > 0 ? html`<div class="pipeline-chevron ${i === PIPELINE_STAGES.length - 1 ? 'into-delivered' : ''}" aria-hidden="true">${new SafeHtml(ICONS.chevron)}</div>` : ''}
+      <div class="pipeline-stage stage-${st.key}">
+        <div class="pipeline-stage-icon">${new SafeHtml(st.icon)}</div>
+        <button type="button" class="pipeline-count" onclick="openPipelineList(${js(st.key)}, 'all')" title="Show these customers">${list.length.toLocaleString()}</button>
+        <div class="pipeline-stage-label">${st.label}</div>
+        <div class="pipeline-stage-sub">
+          ${open ? html`
+            <button type="button" class="pipeline-sub attention" onclick="openPipelineList(${js(st.key)}, 'attention')" title="Need follow-up: no contact in 3+ days">⚠ ${attention}</button>
+            <button type="button" class="pipeline-sub hot" onclick="openPipelineList(${js(st.key)}, 'hot')" title="Hot: activity in the last 24 hours">🔥 ${hot}</button>`
+          : html`<span class="pipeline-sub muted">bought</span>`}
+        </div>
+      </div>`;
+  }).join('');
+  renderPipelineTiles();
+}
+
+window.openPipelineList = function(stageKey, kind) {
+  const stage = PIPELINE_STAGES.find(st => st.key === stageKey);
+  let list = stageGroups()[stageKey];
+  let label = stage.label;
+  if (kind === 'attention') { list = list.filter(needsFollowUp); label += ' · needs follow-up'; }
+  if (kind === 'hot') { list = list.filter(isHot); label += ' · hot'; }
+  setLeadsListFilter(label, list.map(l => l.id));
+  showView('leads');
+};
+
+// Store-wide counts used by the tiles and the left rail. Each one knows
+// how to open the list behind its number.
+function attentionCounts() {
+  const followUp = leads.filter(needsFollowUp);
+  const newToday = leads.filter(l => isToday(l.dateAdded));
+  const keysOutCarIds = new Set(vehicleKeys.filter(k => k.status === 'out').map(k => k.carId));
+  const keysOut = cars.filter(c => keysOutCarIds.has(c.id));
+  const aged = cars.filter(c => c.status !== 'sold' && (Date.now() - new Date(c.dateAdded)) / DAY_MS >= AGED_INVENTORY_DAYS);
+  const proposals = deals.filter(d => d.status === 'working');
+  return [
+    { key: 'followup', label: 'Follow-Up Due', icon: ICONS.bell, color: 'amber', count: followUp.length,
+      open: () => { setLeadsListFilter('Follow-up due', followUp.map(l => l.id)); showView('leads'); } },
+    { key: 'newtoday', label: 'New Today', icon: ICONS.userPlus, color: 'blue', count: newToday.length,
+      open: () => { setLeadsListFilter('New today', newToday.map(l => l.id)); showView('leads'); } },
+    { key: 'proposals', label: 'Open Proposals', icon: ICONS.calc, color: 'violet', count: proposals.length, railOnly: true,
+      open: () => { showView('deals'); document.getElementById('dealStatusFilter').value = 'working'; renderDeals(); } },
+    { key: 'keysout', label: 'Keys Out', icon: ICONS.key, color: 'teal', count: keysOut.length,
+      open: () => { setInventoryListFilter('Keys out', keysOut.map(c => c.id)); showView('inventory'); } },
+    { key: 'aged', label: `Aged Inventory (${AGED_INVENTORY_DAYS}+ days)`, icon: ICONS.clock, color: 'red', count: aged.length,
+      open: () => { setInventoryListFilter(`On the lot ${AGED_INVENTORY_DAYS}+ days`, aged.map(c => c.id)); showView('inventory'); } }
+  ];
+}
+
+window.openAttention = function(key) {
+  const item = attentionCounts().find(a => a.key === key);
+  if (item) item.open();
+};
+
+function renderPipelineTiles() {
+  document.getElementById('pipelineTiles').innerHTML = attentionCounts().filter(a => !a.railOnly).map(a => html`
+    <button type="button" class="pipeline-tile" onclick="openAttention(${js(a.key)})">
+      <span class="pipeline-tile-icon tile-${a.color}">${new SafeHtml(a.icon)}</span>
+      <span class="pipeline-tile-text"><strong>${a.count.toLocaleString()}</strong><span>${a.label}</span></span>
+    </button>`).join('');
+}
+
+function renderRail() {
+  document.getElementById('appRail').innerHTML = attentionCounts().map(a => html`
+    <button type="button" class="rail-item" onclick="openAttention(${js(a.key)})" title="${a.label}: ${a.count}" aria-label="${a.label}: ${a.count}">
+      ${new SafeHtml(a.icon)}
+      ${a.count ? html`<span class="rail-badge rail-${a.color}">${a.count > 99 ? '99+' : a.count}</span>` : ''}
+      <span class="rail-label">${a.label}</span>
+    </button>`).join('');
+}
+
+document.getElementById('pipelineSourceFilter').addEventListener('change', renderPipeline);
+document.getElementById('pipelinePeriodFilter').addEventListener('change', renderPipeline);
+
+// ---------- Filtered lists ----------
+// Clicking a number (a pipeline stage, a tile, a rail badge) opens the
+// Customers or Inventory list showing exactly those records, with a chip
+// that says what's filtered and an x to show everything again.
+
+let leadsListFilter = null;     // { label, ids: Set }
+let inventoryListFilter = null;
+
+function renderFilterChip(elementId, filter, clearFnName) {
+  const chip = document.getElementById(elementId);
+  chip.style.display = filter ? 'inline-flex' : 'none';
+  chip.innerHTML = filter
+    ? html`Showing: <strong>${filter.label}</strong> (${filter.ids.size}) <button type="button" onclick="${new SafeHtml(clearFnName)}()" title="Show all" aria-label="Clear filter">✕</button>`
+    : '';
+}
+
+function setLeadsListFilter(label, ids) {
+  leadsListFilter = { label, ids: new Set(ids) };
+  document.getElementById('leadStatusFilter').value = '';
+  renderFilterChip('leadsFilterChip', leadsListFilter, 'clearLeadsListFilter');
+  renderLeads();
+  renderLeadsKanban();
+}
+
+function clearLeadsListFilter(rerender = true) {
+  leadsListFilter = null;
+  renderFilterChip('leadsFilterChip', null);
+  if (rerender) { renderLeads(); renderLeadsKanban(); }
+}
+window.clearLeadsListFilter = clearLeadsListFilter;
+
+function setInventoryListFilter(label, ids) {
+  inventoryListFilter = { label, ids: new Set(ids) };
+  document.getElementById('carSearch').value = '';
+  document.getElementById('statusFilter').value = '';
+  renderFilterChip('inventoryFilterChip', inventoryListFilter, 'clearInventoryListFilter');
+  renderCars();
+}
+
+function clearInventoryListFilter(rerender = true) {
+  inventoryListFilter = null;
+  renderFilterChip('inventoryFilterChip', null);
+  if (rerender) renderCars();
+}
+window.clearInventoryListFilter = clearInventoryListFilter;
+
+// ---------- Quick search (top bar) ----------
+// Finds customers (name, phone, email), deals (deal #), and vehicles
+// (stock #, VIN, year/make/model) as you type. Press "/" to jump here.
+
+const quickSearchInput = document.getElementById('quickSearchInput');
+const quickSearchResultsEl = document.getElementById('quickSearchResults');
+let quickResults = [];
+let quickActive = 0;
+
+const digitsOnly = v => String(v || '').replace(/\D/g, '');
+
+function quickSearch(query) {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const qDigits = digitsOnly(q);
+  const results = [];
+
+  for (const l of leads) {
+    const phoneMatch = qDigits.length >= 3 && digitsOnly(l.phone).includes(qDigits);
+    if (l.name.toLowerCase().includes(q) || (l.email || '').toLowerCase().includes(q) || phoneMatch) {
+      results.push({ type: 'Customer', title: l.name, sub: [l.phone, l.email].filter(Boolean).join(' · '), run: () => openLeadProfile(l.id) });
+    }
+  }
+  for (const d of deals) {
+    const lead = leads.find(l => l.id === d.leadId);
+    if (`d-${d.dealNumber}`.includes(q) || (qDigits && String(d.dealNumber).includes(qDigits) && qDigits.length >= 3)) {
+      results.push({ type: 'Deal', title: `D-${d.dealNumber}`, sub: lead ? lead.name : 'No customer yet', run: () => openDealWorkspace(d.id) });
+    }
+  }
+  for (const c of cars) {
+    const label = [c.year, c.make, c.model, c.trim].filter(Boolean).join(' ');
+    if ((c.stockNumber || '').toLowerCase().includes(q) || (c.vin || '').toLowerCase().includes(q) || label.toLowerCase().includes(q)) {
+      results.push({
+        type: 'Vehicle', title: label, sub: [c.stockNumber && `Stock ${c.stockNumber}`, c.vin].filter(Boolean).join(' · '),
+        run: () => {
+          if (userCan('editInventory')) return editCar(c.id);
+          clearInventoryListFilter(false);
+          document.getElementById('carSearch').value = c.stockNumber || c.vin || c.model;
+          showView('inventory');
+          renderCars();
+        }
+      });
+    }
+  }
+  return results.slice(0, 12);
+}
+
+function renderQuickResults() {
+  if (!quickSearchInput.value.trim() || document.activeElement !== quickSearchInput) {
+    quickSearchResultsEl.classList.remove('open');
+    return;
+  }
+  quickSearchResultsEl.classList.add('open');
+  quickSearchResultsEl.innerHTML = quickResults.length
+    ? quickResults.map((r, i) => html`
+        <button type="button" class="quick-result ${i === quickActive ? 'active' : ''}" data-index="${i}" role="option">
+          <span class="quick-result-type">${r.type}</span>
+          <span class="quick-result-main"><strong>${r.title}</strong>${r.sub ? html`<span>${r.sub}</span>` : ''}</span>
+        </button>`).join('')
+    : html`<div class="quick-empty">No matches</div>`;
+}
+
+function runQuickResult(index) {
+  const result = quickResults[index];
+  if (!result) return;
+  quickSearchInput.value = '';
+  quickSearchInput.blur();
+  quickResults = [];
+  renderQuickResults();
+  result.run();
+}
+
+quickSearchInput.addEventListener('input', () => {
+  quickResults = quickSearch(quickSearchInput.value);
+  quickActive = 0;
+  renderQuickResults();
+});
+quickSearchInput.addEventListener('focus', renderQuickResults);
+quickSearchInput.addEventListener('blur', () => setTimeout(renderQuickResults, 150));
+quickSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { quickActive = Math.min(quickActive + 1, quickResults.length - 1); renderQuickResults(); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { quickActive = Math.max(quickActive - 1, 0); renderQuickResults(); e.preventDefault(); }
+  if (e.key === 'Enter') { runQuickResult(quickActive); e.preventDefault(); }
+  if (e.key === 'Escape') { quickSearchInput.value = ''; quickSearchInput.blur(); }
+});
+// mousedown (not click) so it fires before the input's blur hides the list.
+quickSearchResultsEl.addEventListener('mousedown', (e) => {
+  const item = e.target.closest('.quick-result');
+  if (item) { e.preventDefault(); runQuickResult(Number(item.dataset.index)); }
+});
+document.addEventListener('keydown', (e) => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if (e.key === '/' && !typing) { e.preventDefault(); quickSearchInput.focus(); }
+});
+
+document.getElementById('newCustomerBtn').addEventListener('click', () => {
+  document.getElementById('addLeadBtn').click();
+});
 
 // ---------- Photo thumbnails ----------
 // Photos stored in Cloudinary can be resized on the fly by adding a size
@@ -809,8 +1146,8 @@ let returnToProfileAfterEdit = false;
 let currentProfileLeadId = null;
 const leadProfileModal = document.getElementById('leadProfileModal');
 
-const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝' };
-const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note' };
+const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '🏢' };
+const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit' };
 
 window.openLeadProfile = function(leadId) {
   const lead = leads.find(l => l.id === leadId);
@@ -1201,8 +1538,8 @@ window.openDealWorkspace = function(dealId) {
 
   // Full page takeover: hide the normal app chrome so the deal gets the
   // whole screen (this is a lot of fields -- a modal was too cramped).
-  document.querySelector('.main-sidebar').style.display = 'none';
-  document.querySelector('.topbar').style.display = 'none';
+  document.querySelector('.rail').style.display = 'none';
+  document.querySelector('.appbar').style.display = 'none';
   document.querySelector('main').style.display = 'none';
   document.body.style.marginLeft = '0';
   dealFullPage.classList.add('active');
@@ -1210,8 +1547,9 @@ window.openDealWorkspace = function(dealId) {
 
 function closeDealFullPage() {
   dealFullPage.classList.remove('active');
-  document.querySelector('.main-sidebar').style.display = 'flex';
-  document.querySelector('.topbar').style.display = 'flex';
+  // Back to the stylesheet's own display (which hides the rail on phones).
+  document.querySelector('.rail').style.display = '';
+  document.querySelector('.appbar').style.display = '';
   document.querySelector('main').style.display = 'block';
   document.body.style.marginLeft = '';
 }
@@ -1219,7 +1557,7 @@ function closeDealFullPage() {
 document.getElementById('backToDealsBtn').addEventListener('click', async () => {
   closeDealFullPage();
   await loadAll();
-  setActiveModule('sales-fi');
+  showView('deals');
 });
 
 // Switching deal type shows/hides the panels that only apply to that type,

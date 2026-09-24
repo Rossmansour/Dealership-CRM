@@ -17,46 +17,113 @@
 </head>
 <body>
 
-<!-- MODULE SIDEBAR -->
-<nav class="main-sidebar" id="mainSidebar">
-  <button class="sidebar-item active" data-module="crm">
-    <span class="sidebar-icon">👥</span>
-    <span class="sidebar-label">CRM</span>
+<!-- APP BAR: icon navigation, new customer, quick search, account -->
+<header class="appbar">
+  <button type="button" class="appbar-brand" id="brandHomeBtn" title="Sales Pipeline">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8"/><path d="M9 20l5-8 4 5 5-7" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span class="brand-name">Dealership CRM</span>
   </button>
-  <button class="sidebar-item" data-module="sales-fi">
-    <span class="sidebar-icon">🤝</span>
-    <span class="sidebar-label">Sales &amp; F&amp;I</span>
-  </button>
-  <button class="sidebar-item" data-module="vehicle-mgmt">
-    <span class="sidebar-icon">🚗</span>
-    <span class="sidebar-label">Vehicle Management System</span>
-  </button>
-  <button class="sidebar-item" data-module="service">
-    <span class="sidebar-icon">🔧</span>
-    <span class="sidebar-label">Service</span>
-  </button>
-</nav>
+  <span class="appbar-module" id="currentModuleName"></span>
 
-<header class="topbar">
-  <h1 id="brandHomeBtn">🚗 Dealership CRM</h1>
-  <nav>
-    <button class="tab-btn active" data-tab="dashboard" data-module="crm">Dashboard</button>
-    <button class="tab-btn" data-tab="leads" data-module="crm">Leads</button>
-    <button class="tab-btn" data-tab="assistant" data-module="crm">AI Assistant</button>
-    <button class="tab-btn" data-tab="inventory" data-module="vehicle-mgmt">Inventory</button>
-    <button class="tab-btn" data-tab="deals" data-module="sales-fi">Deals</button>
-    <button class="tab-btn" data-tab="service" data-module="service">Service</button>
-    <button id="themeToggleBtn" type="button">🌙 Dark Mode</button>
-    <button id="adminMenuBtn" type="button" style="display:none;">⚙️ Admin</button>
-    <button id="userMenuBtn" type="button" title="My account">👤 <span id="currentUserName"></span></button>
-    <button id="signOutBtn" type="button">Sign Out</button>
+  <nav class="appbar-nav" aria-label="Main">
+    <button type="button" class="nav-icon" data-view="pipeline" data-module="crm" title="Sales Pipeline" aria-label="Sales Pipeline">
+      <svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="leads" data-module="crm" title="Customers" aria-label="Customers">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="board" data-module="crm" title="Customer Board" aria-label="Customer Board">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.2"/><rect x="10" y="4" width="5" height="11" rx="1.2"/><rect x="17" y="4" width="4" height="14" rx="1.2"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="deals" data-module="sales" title="Deals &amp; Desking" aria-label="Deals and Desking">
+      <svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8.5 6.5h7v3h-7z"/><path d="M8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17.5h.01M12 17.5h.01M15.5 17.5h.01"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="inventory" data-module="vehicles" title="Inventory" aria-label="Inventory">
+      <svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="reports" data-module="crm" title="Reports" aria-label="Reports">
+      <svg viewBox="0 0 24 24"><path d="M3 20.5h18"/><path d="M6 17V11M11 17V6M16 17v-8"/><path d="M20 17v-3"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="assistant" data-module="crm" title="AI Assistant" aria-label="AI Assistant">
+      <svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.5H10l-4.5 3.5V16H4z"/><path d="M12 8.2l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="accounting" data-module="accounting" title="Accounting" aria-label="Accounting">
+      <svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="service" data-module="service" title="Service" aria-label="Service">
+      <svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>
+    </button>
   </nav>
+
+  <div class="appbar-right">
+    <button type="button" class="nav-icon" id="newCustomerBtn" title="New Customer" aria-label="New Customer">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6 1.6 0 3 .5 4.1 1.3"/><path d="M18.5 13v7M15 16.5h7"/></svg>
+    </button>
+    <div class="quick-search" id="quickSearchWrap">
+      <svg class="quick-search-icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
+      <input type="search" id="quickSearchInput" placeholder="Search name, phone, stock #, VIN, deal #" autocomplete="off" spellcheck="false" aria-label="Quick search" />
+      <div class="quick-search-results" id="quickSearchResults" role="listbox"></div>
+    </div>
+    <button type="button" class="nav-icon" id="themeToggleBtn" title="Dark mode" aria-label="Dark mode"></button>
+    <button type="button" class="nav-icon" id="adminMenuBtn" title="Admin" aria-label="Admin" style="display:none;">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.1a7.6 7.6 0 0 0 0-2.2l2-1.5-2-3.5-2.3 1a7.6 7.6 0 0 0-1.9-1.1L14.9 3.4h-4l-.3 2.4a7.6 7.6 0 0 0-1.9 1.1l-2.3-1-2 3.5 2 1.5a7.6 7.6 0 0 0 0 2.2l-2 1.5 2 3.5 2.3-1a7.6 7.6 0 0 0 1.9 1.1l.3 2.4h4l.3-2.4a7.6 7.6 0 0 0 1.9-1.1l2.3 1 2-3.5z"/></svg>
+    </button>
+    <button type="button" class="account-btn" id="userMenuBtn" title="My account"><span class="account-avatar" id="currentUserInitials"></span><span class="account-name" id="currentUserName"></span></button>
+    <button type="button" class="nav-icon" id="signOutBtn" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24"><path d="M14 4.5h4.5a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H14"/><path d="M10 16.5L5.5 12 10 7.5M5.5 12H15"/></svg>
+    </button>
+  </div>
 </header>
+
+<!-- LEFT SIDEBAR: modules (CRM, Sales & F&I, Vehicle Management, Service,
+     Accounting...) and, below them, live counts that jump to the list behind
+     them. Expands on hover to show names. -->
+<aside class="rail" id="appSidebar">
+  <nav class="rail-modules" id="moduleNav" aria-label="Modules"></nav>
+  <div class="rail-divider"></div>
+  <div class="rail-attention" id="appRail" aria-label="Needs attention"></div>
+</aside>
 
 <main>
 
-  <!-- DASHBOARD -->
-  <section id="dashboard" class="tab-panel active">
+  <!-- SALES PIPELINE (home) -->
+  <section id="pipeline" class="tab-panel active">
+    <div class="pipeline-header">
+      <h1 class="pipeline-title">Sales Pipeline</h1>
+      <div class="pipeline-filters">
+        <label>Source
+          <select id="pipelineSourceFilter">
+            <option value="">All sources</option>
+            <option value="walk-in">Walk-in</option>
+            <option value="phone">Phone</option>
+            <option value="website">Website</option>
+            <option value="referral">Referral</option>
+            <option value="autotrader">Autotrader</option>
+            <option value="cargurus">CarGurus</option>
+            <option value="facebook">Facebook</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>Customers added
+          <select id="pipelinePeriodFilter">
+            <option value="all">Any time</option>
+            <option value="today">Today</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">This month</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="pipeline-stages" id="pipelineStages"></div>
+    <div class="pipeline-legend"><span>⚠ needs follow-up (no contact in 3+ days)</span><span>🔥 hot (activity in the last 24 hours)</span></div>
+    <div class="pipeline-tiles" id="pipelineTiles"></div>
+  </section>
+
+  <!-- REPORTS (store numbers) -->
+  <section id="dashboard" class="tab-panel">
+    <h1 class="pipeline-title">Reports</h1>
     <div class="stats-grid" id="statsGrid"></div>
   </section>
 
@@ -70,6 +137,7 @@
         <option value="pending">Pending</option>
         <option value="sold">Sold</option>
       </select>
+      <span class="list-filter-chip" id="inventoryFilterChip" style="display:none;"></span>
       <button class="btn-primary" id="addCarBtn">+ Add Car</button>
     </div>
     <table class="data-table">
@@ -88,7 +156,7 @@
     <div class="panel-header">
       <div class="view-toggle">
         <button type="button" class="view-toggle-btn active" id="leadsViewTableBtn">Table</button>
-        <button type="button" class="view-toggle-btn" id="leadsViewKanbanBtn">Pipeline</button>
+        <button type="button" class="view-toggle-btn" id="leadsViewKanbanBtn">Board</button>
       </div>
       <select id="leadStatusFilter">
         <option value="">All statuses</option>
@@ -98,6 +166,7 @@
         <option value="won">Won</option>
         <option value="lost">Lost</option>
       </select>
+      <span class="list-filter-chip" id="leadsFilterChip" style="display:none;"></span>
       <button class="btn-primary" id="addLeadBtn">+ Add Lead</button>
     </div>
 
@@ -174,6 +243,25 @@
           <li>Technician assignment &amp; workload view</li>
           <li>Parts lookup &amp; ordering</li>
           <li>Service-to-sales handoff (linking service customers back to the CRM)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ACCOUNTING (placeholder -- a later module) -->
+  <section id="accounting" class="tab-panel">
+    <div class="module-placeholder">
+      <div class="module-placeholder-icon">📒</div>
+      <h2>Accounting Module</h2>
+      <p>Planned for later -- the sidebar already has its place, so it slots in without changing anything else.</p>
+      <div class="module-placeholder-list">
+        <div class="ca-section-title">Planned for this module</div>
+        <ul>
+          <li>Posting deals to the books automatically</li>
+          <li>General ledger, payables, and receivables</li>
+          <li>Floor plan tracking</li>
+          <li>Month-end close and financial statements</li>
+          <li>Import and export for switching from another system</li>
         </ul>
       </div>
     </div>
@@ -343,6 +431,7 @@
         <option value="text">Text</option>
         <option value="email">Email</option>
         <option value="note">Note</option>
+        <option value="visit">Showroom Visit</option>
       </select>
       <textarea id="activityText" rows="3" placeholder="What happened? e.g. Left voicemail about financing options" required></textarea>
       <button type="submit" class="btn-primary">Add</button>
