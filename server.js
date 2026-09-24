@@ -17,6 +17,7 @@ const encryption = require('./encryption');
 const vinDecoder = require('./vin');
 const photos = require('./photos');
 const keys = require('./keys');
+const providers = require('./providers');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -101,10 +102,13 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // the activity routes, so it (and its audit trail) can't be rewritten by
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
-  cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold'],
+  cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
   leads: ['id', 'activities', 'dateAdded'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
-  tax_rates: ['id']
+  tax_rates: ['id'],
+  // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
+  appraisals: ['id', 'appraisalNumber', 'dateCreated', 'appraisedBy', 'status', 'recalls',
+    'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt']
 };
 
 function editableFields(table, body) {
@@ -139,7 +143,10 @@ function defaultFeeSettings() {
     // or age-based depreciation tables. "flat" uses registrationFee as-is
     // (the default); "percentage" calculates it from the vehicle's price.
     dmvFeeMethod: 'flat', // 'flat' | 'percentage'
-    dmvFeePercentage: 1.5
+    dmvFeePercentage: 1.5,
+    // Appraisal offer calculator: max offer = target retail - recon - pack - target gross
+    appraisalPack: 0,
+    appraisalTargetGross: 2500
   };
 }
 
@@ -382,30 +389,37 @@ app.get('/api/cars/:id', wrap(async (req, res) => {
 }));
 
 // POST a new car
-app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
-  const { make, model, year, vin, stockNumber, mileage, cost, price, status } = req.body;
-
-  if (!make || !model || !year || !price) {
-    return res.status(400).json({ error: 'make, model, year, and price are required' });
-  }
-
-  const newCar = {
+// A new inventory car from form fields. Shared by "+ Add Car" and by
+// acquiring an appraisal, so both create cars exactly the same way.
+function buildCar(fields) {
+  const { make, model, year, vin, stockNumber, mileage, cost, price, status } = fields;
+  return {
     id: crypto.randomUUID(),
     make,
     model,
     year: Number(year),
-    ...carDetails(req.body),
+    ...carDetails(fields),
     vin: vinDecoder.normalizeVin(vin),
     stockNumber: stockNumber || '',
     mileage: Number(mileage) || 0,
     cost: Number(cost) || 0,
-    price: Number(price),
+    price: Number(price) || 0,
     status: status || 'available', // available | pending | sold
     photos: [], // array of paths like /uploads/cars/abc123.jpg
     openROs: [], // groundwork for the future Service module -- empty until Service exists
     dateAdded: new Date().toISOString(),
     dateSold: null
   };
+}
+
+app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
+  const { make, model, year, price } = req.body;
+
+  if (!make || !model || !year || !price) {
+    return res.status(400).json({ error: 'make, model, year, and price are required' });
+  }
+
+  const newCar = buildCar(req.body);
 
   await store.tx(async q => {
     await store.insert(q, 'cars', req.dealershipId, newCar);
@@ -1427,6 +1441,199 @@ app.delete('/api/integrations/tokens/:id', allow('manageIntegrations'), wrap(asy
 app.get('/api/integrations/keys/unmatched', allow('manageIntegrations'), wrap(async (req, res) => {
   res.json(await keys.listUnmatched(req.dealershipId));
 }));
+
+// ---------- APPRAISALS (trade / purchase "book outs") ----------
+// A car being considered for purchase (usually a trade-in). If the store
+// buys it, "acquire" turns it into an inventory car with everything filled
+// in; otherwise it's marked lost. Every appraisal is kept -- over time
+// that's the store's own record of what cars were worth and what it paid.
+
+const APPRAISAL_CONDITIONS = ['excellent', 'very_good', 'good', 'fair', 'poor'];
+
+// Cleans up the fields an appraiser edits: numbers as numbers, VIN in
+// standard form, recon lines and equipment as tidy lists.
+function appraisalFields(body) {
+  const b = editableFields('appraisals', body);
+  const out = { ...b };
+  // People type "41,000" or "$19,500" -- accept those as numbers.
+  const toNumber = v => Number(String(v).replace(/[$,\s]/g, '')) || 0;
+  for (const f of ['year', 'mileage', 'targetRetail', 'targetGross', 'offer']) {
+    if (f in b) out[f] = b[f] === '' || b[f] === null ? null : toNumber(b[f]);
+  }
+  if ('vin' in b) out.vin = vinDecoder.normalizeVin(b.vin);
+  if ('condition' in b && !APPRAISAL_CONDITIONS.includes(b.condition)) out.condition = '';
+  if ('equipment' in b) {
+    out.equipment = Array.isArray(b.equipment)
+      ? [...new Set(b.equipment.map(e => String(e).trim()).filter(Boolean))].slice(0, 100) : [];
+  }
+  if ('recon' in b) {
+    out.recon = Array.isArray(b.recon)
+      ? b.recon.slice(0, 50).map(r => ({ description: String((r && r.description) || '').trim().slice(0, 120), cost: Number(r && r.cost) || 0 }))
+        .filter(r => r.description || r.cost)
+      : [];
+  }
+  for (const f of ['make', 'model', 'trim', 'bodyStyle', 'engine', 'drivetrain', 'transmission', 'fuelType',
+    'exteriorColor', 'interiorColor', 'notes', 'leadId', 'dealId']) {
+    if (f in b) out[f] = b[f] === null ? null : String(b[f]).trim().slice(0, f === 'notes' ? 4000 : 200);
+  }
+  return out;
+}
+
+app.get('/api/appraisals', wrap(async (req, res) => {
+  res.json(await store.list(store.pool, 'appraisals', req.dealershipId));
+}));
+
+app.get('/api/appraisals/:id', wrap(async (req, res) => {
+  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
+  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
+  res.json(appraisal);
+}));
+
+app.post('/api/appraisals', wrap(async (req, res) => {
+  const created = await store.tx(async q => {
+    const settings = await getSettings(q, req.dealershipId);
+    const appraisal = {
+      vin: '', year: null, make: '', model: '', trim: '', bodyStyle: '', engine: '', drivetrain: '',
+      transmission: '', fuelType: '', exteriorColor: '', interiorColor: '', mileage: null, condition: '',
+      equipment: [], recon: [], notes: '', leadId: null, dealId: null,
+      targetRetail: null, targetGross: Number(settings.appraisalTargetGross) || 0, offer: null,
+      ...appraisalFields(req.body || {}),
+      id: crypto.randomUUID(),
+      appraisalNumber: await store.takeNextAppraisalNumber(q, req.dealershipId),
+      status: 'open', // open | acquired | lost
+      appraisedBy: { id: req.user.id, name: req.user.name },
+      recalls: null,
+      carId: null,
+      dateCreated: new Date().toISOString()
+    };
+    await store.insert(q, 'appraisals', req.dealershipId, appraisal);
+    await audit.created(q, req, 'appraisal', appraisal);
+    return appraisal;
+  });
+  res.status(201).json(created);
+}));
+
+app.put('/api/appraisals/:id', wrap(async (req, res) => {
+  const updated = await store.tx(async q => {
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!appraisal) return null;
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id,
+      { ...appraisal, ...appraisalFields(req.body || {}), dateUpdated: new Date().toISOString() });
+    await audit.updated(q, req, 'appraisal', { ...appraisal, dateUpdated: undefined }, { ...saved, dateUpdated: undefined });
+    return saved;
+  });
+  if (!updated) return res.status(404).json({ error: 'Appraisal not found' });
+  res.json(updated);
+}));
+
+app.delete('/api/appraisals/:id', allow('deleteRecords'), wrap(async (req, res) => {
+  const deleted = await store.tx(async q => {
+    const removed = await store.remove(q, 'appraisals', req.dealershipId, req.params.id);
+    if (removed) await audit.deleted(q, req, 'appraisal', removed);
+    return removed;
+  });
+  if (!deleted) return res.status(404).json({ error: 'Appraisal not found' });
+  res.status(204).send();
+}));
+
+// Looks up open safety recalls (NHTSA, free) and saves them on the appraisal.
+app.post('/api/appraisals/:id/recalls', wrap(async (req, res) => {
+  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
+  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
+  let recalls;
+  try {
+    recalls = await providers.fetchRecalls(appraisal);
+  } catch (err) {
+    if (err instanceof providers.ProviderError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+  const saved = await store.tx(async q => {
+    const current = await store.get(q, 'appraisals', req.dealershipId, appraisal.id, { forUpdate: true });
+    if (!current) return null;
+    return store.save(q, 'appraisals', req.dealershipId, current.id, { ...current, recalls });
+  });
+  if (!saved) return res.status(404).json({ error: 'Appraisal not found' });
+  res.json(saved);
+}));
+
+// The store bought it: create the inventory car from the appraisal and
+// link the two both ways.
+app.post('/api/appraisals/:id/acquire', allow('editInventory'), wrap(async (req, res) => {
+  const { acquiredFor, stockNumber, askingPrice } = req.body || {};
+  if (!(Number(acquiredFor) > 0)) return res.status(400).json({ error: 'Enter what the store paid (the ACV).' });
+
+  const result = await store.tx(async q => {
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!appraisal) return { status: 404, error: 'Appraisal not found' };
+    if (appraisal.status === 'acquired') return { status: 409, error: 'This appraisal was already acquired.' };
+    if (!appraisal.year || !appraisal.make || !appraisal.model) {
+      return { status: 400, error: 'Year, make, and model are needed before it can go into inventory.' };
+    }
+
+    const car = {
+      ...buildCar({
+        ...appraisal,
+        stockNumber,
+        cost: acquiredFor,
+        price: Number(askingPrice) || appraisal.targetRetail || 0,
+        status: 'available'
+      }),
+      equipment: appraisal.equipment || [],
+      sourceAppraisalId: appraisal.id
+    };
+    await store.insert(q, 'cars', req.dealershipId, car);
+    await audit.created(q, req, 'car', car, `From appraisal A-${appraisal.appraisalNumber}`);
+
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
+      ...appraisal, status: 'acquired', acquiredFor: Number(acquiredFor), acquiredAt: new Date().toISOString(),
+      carId: car.id, closedAt: new Date().toISOString()
+    });
+    await audit.record(q, req, {
+      action: 'acquire', entityType: 'appraisal', entityId: appraisal.id, label: audit.labelFor('appraisal', saved),
+      details: `Acquired for $${Number(acquiredFor).toLocaleString()} -- added to inventory${stockNumber ? ` as stock #${stockNumber}` : ''}`
+    });
+    return { appraisal: saved, car };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+}));
+
+app.post('/api/appraisals/:id/lost', wrap(async (req, res) => {
+  const reason = String((req.body && req.body.reason) || '').trim().slice(0, 300);
+  const result = await store.tx(async q => {
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!appraisal) return { status: 404, error: 'Appraisal not found' };
+    if (appraisal.status !== 'open') return { status: 409, error: 'Only open appraisals can be marked lost.' };
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id,
+      { ...appraisal, status: 'lost', lostReason: reason, closedAt: new Date().toISOString() });
+    await audit.record(q, req, {
+      action: 'lost', entityType: 'appraisal', entityId: appraisal.id, label: audit.labelFor('appraisal', saved),
+      details: reason ? `Lost: ${reason}` : 'Lost'
+    });
+    return { appraisal: saved };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.appraisal);
+}));
+
+app.post('/api/appraisals/:id/reopen', wrap(async (req, res) => {
+  const result = await store.tx(async q => {
+    const appraisal = await store.get(q, 'appraisals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!appraisal) return { status: 404, error: 'Appraisal not found' };
+    if (appraisal.status !== 'lost') return { status: 409, error: 'Only lost appraisals can be reopened.' };
+    const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id,
+      { ...appraisal, status: 'open', lostReason: null, closedAt: null });
+    await audit.record(q, req, { action: 'reopen', entityType: 'appraisal', entityId: appraisal.id, label: audit.labelFor('appraisal', saved) });
+    return { appraisal: saved };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result.appraisal);
+}));
+
+// Which outside data sources are live and which are "not available yet".
+app.get('/api/providers', (req, res) => {
+  res.json(providers.listProviders());
+});
 
 // ---------- AUDIT LOG ----------
 // Read-only: entries are written by the routes above as changes happen,

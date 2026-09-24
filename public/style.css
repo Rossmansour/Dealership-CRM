@@ -1437,3 +1437,104 @@ body.cannot-deleteRecords .activity-delete { display: none; }
   .pipeline-chevron { display: none; }
   .pipeline-stage { min-width: 44%; }
 }
+
+/* ---------- Appraisals ---------- */
+.btn-small { padding: 6px 12px; font-size: 13px; margin: 0; }
+.link-btn { border: none; background: none; padding: 0; color: var(--blue); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.badge.appraisal-open { background: var(--blue); }
+.badge.appraisal-acquired { background: var(--green); }
+.badge.appraisal-lost { background: #888; }
+#appraisalSearch { flex: 1; min-width: 200px; }
+
+.appraisal-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.appraisal-topbar h2 { margin: 0; font-size: 22px; color: var(--heading); }
+.appraisal-topbar #appraisalPrintBtn { margin-left: auto; }
+.appraisal-topbar .btn-primary { margin-left: 0; }
+.appraisal-dirty { font-size: 12px; color: var(--amber); font-weight: 600; }
+
+/* Wider than the normal 1100px page: three columns need the room */
+body.wide-page main { max-width: 1400px; }
+.appraisal-layout { display: grid; grid-template-columns: 1.25fr 1fr 0.9fr; gap: 16px; align-items: start; }
+.appraisal-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.appraisal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.appraisal-card label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.appraisal-card input, .appraisal-card select, .appraisal-card textarea {
+  width: 100%; box-sizing: border-box; margin-top: 3px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px;
+}
+.appraisal-card input:disabled, .appraisal-card select:disabled, .appraisal-card textarea:disabled { background: var(--surface-alt); color: var(--text-secondary); }
+.appraisal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 10px; }
+.appraisal-grid .span-3 { grid-column: span 3; }
+.appraisal-notes textarea { resize: vertical; }
+.live-chip { font-size: 10px; background: var(--green); color: #fff; padding: 2px 6px; border-radius: 8px; margin-left: 6px; letter-spacing: 0; text-transform: none; vertical-align: middle; }
+
+.equipment-group { margin-top: 10px; }
+.equipment-group-name { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.equipment-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.equipment-chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 14px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.equipment-chip:hover:not(:disabled) { border-color: var(--blue); }
+.equipment-chip.selected { background: var(--blue); border-color: var(--blue); color: #fff; }
+.equipment-chip:disabled { cursor: default; opacity: 0.8; }
+
+.plug-list { display: flex; flex-direction: column; gap: 6px; }
+.plug { border: 1px dashed var(--border); border-radius: 8px; }
+.plug-big .plug-head { padding: 16px 12px; }
+.plug-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 9px 12px; cursor: pointer; font: inherit; color: var(--text); text-align: left; }
+.plug-head:hover { background: var(--surface-alt); border-radius: 8px; }
+.plug-name { font-weight: 600; font-size: 14px; }
+.plug-status { font-size: 11px; color: var(--text-muted); background: var(--surface-alt); border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
+.plug-status.live { background: var(--green); color: #fff; }
+.plug-info { padding: 0 12px 10px; font-size: 12px; color: var(--text-secondary); }
+.plug-info p { margin: 4px 0; }
+.plug-needs { color: var(--text-muted); }
+#apOptionsPlug .plug { margin-bottom: 4px; }
+
+.recall-summary { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+.recall-summary.has-recalls { color: var(--amber); }
+.recall-summary.no-recalls { color: var(--green); }
+.recall-item { font-size: 13px; border-top: 1px solid var(--border); padding: 6px 0; }
+.recall-item summary { cursor: pointer; }
+.recall-item p { margin: 6px 0; color: var(--text-secondary); }
+
+.recon-line { display: grid; grid-template-columns: 1fr 90px 28px; gap: 6px; margin-bottom: 6px; align-items: center; }
+.recon-line input { margin: 0; }
+.recon-remove { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+.recon-remove:hover:not(:disabled) { color: var(--red); }
+.recon-total { margin-top: 10px; font-size: 14px; text-align: right; }
+
+.offer-calc label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--text); }
+.offer-calc label input { width: 120px; margin: 0; text-align: right; }
+.offer-line { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0 8px; color: var(--text-secondary); }
+.offer-max { border-top: 2px solid var(--border); padding-top: 8px; font-size: 16px; font-weight: 700; color: var(--text); }
+.offer-yours { margin-top: 8px; font-weight: 700; }
+.offer-note { font-size: 12px; min-height: 16px; text-align: right; }
+.offer-over { color: var(--red); }
+.offer-under { color: var(--green); }
+
+#apOutcome label { margin-bottom: 8px; }
+.outcome-acquire { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px; }
+.outcome-acquire .btn-primary { width: 100%; margin: 4px 0 0; }
+.outcome-lost { display: flex; gap: 6px; margin-bottom: 10px; }
+.outcome-lost input { margin: 0; }
+.outcome-lost .btn-secondary { margin: 0; white-space: nowrap; }
+.outcome-done { font-weight: 700; margin-bottom: 8px; }
+.outcome-done.acquired { color: var(--green); }
+.outcome-done.lost { color: var(--text-secondary); }
+.outcome-link { font-size: 13px; margin-top: 6px; }
+
+.trade-appraisal { margin-top: 10px; }
+.trade-appraisal-linked { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13px; background: var(--highlight-bg); border-radius: 8px; padding: 8px 10px; }
+.car-source { font-size: 12px; color: var(--text-secondary); margin: -6px 0 10px; }
+.car-source:empty { display: none; }
+
+@media (max-width: 1100px) {
+  .appraisal-layout { grid-template-columns: 1fr 1fr; }
+  .appraisal-layout .appraisal-col:last-child { grid-column: span 2; }
+}
+@media (max-width: 760px) {
+  .appraisal-layout { grid-template-columns: 1fr; }
+  .appraisal-layout .appraisal-col:last-child { grid-column: auto; }
+  .appraisal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .appraisal-grid .span-3 { grid-column: span 2; }
+}
+#apRecalls p.audit-note { font-size: 12px; margin: 8px 0 0; }

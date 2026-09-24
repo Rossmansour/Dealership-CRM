@@ -30,6 +30,16 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting** (placeholder for later). Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
 - The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
 
+**Appraisals ("book outs") -- Vehicle Management → Appraisals**
+- Start one from **+ New Appraisal**, a customer's profile (**Appraise a Trade**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
+- VIN decode fills year, make, model, trim, body, engine, drivetrain, transmission, and fuel; then mileage, colors, condition, and equipment (clickable options by group)
+- **Safety recalls** for the year/make/model come live from NHTSA
+- Slots for **Market Comparables** (comparables, market day supply, suggested retail), **Factory Options**, **Kelley Blue Book, J.D. Power, Black Book, Manheim MMR, Carfax, AutoCheck,** and the **window sticker**. Each shows **"Not available yet"** until that source is licensed and connected in `providers.js` -- then it fills in automatically
+- Recon line items, and the offer calculator: **max offer = target retail - recon - pack - target gross** (pack and default target gross are store settings under Admin → Fee Defaults), with how your offer compares
+- **Acquire → add to inventory** (sales managers and admins) creates the inventory car with everything filled in, linked both ways; or **Mark lost** with a reason (and reopen)
+- A deal linked to an appraisal shows it in the trade-in section, with **Use offer as trade value**
+- Printable appraisal worksheet; appraisals show up in Quick Search and as an **Open Appraisals** count in the sidebar. Every appraisal is kept, with its values, offer, and outcome
+
 **VIN Decoder**
 - Type or paste a VIN when adding a car and year, make, model, trim, body style, engine, transmission, drivetrain, fuel, and doors fill in automatically (or press **Decode VIN**)
 - Same **Decode VIN** button on a deal's trade-in section fills the trade's year, make, and model, and the trade VIN is saved with the deal
@@ -377,6 +387,7 @@ car-crm/
 ├── vin.js             # VIN validation and decoding (NHTSA vPIC)
 ├── photos.js          # Car photo storage (Cloudinary, or local disk)
 ├── keys.js            # Key status from the key machine (KeyTrak etc.) + integration tokens
+├── providers.js       # Appraisal data sources: live (NHTSA recalls) and not-yet-connected slots
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)
