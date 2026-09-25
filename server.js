@@ -18,6 +18,7 @@ const vinDecoder = require('./vin');
 const photos = require('./photos');
 const alerts = require('./alerts');
 const reports = require('./reports');
+const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
 
@@ -157,8 +158,15 @@ function defaultFeeSettings() {
     appraisalTargetGross: 2500,
     // Road to the Sale: the 7 steps shown on each customer. Stores can rename them.
     roadmapLabels: ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery'],
-    // Alert managers when a new lead goes this long without any contact.
-    leadEscalationMinutes: 15
+    // Alert managers when a new lead goes this long without any contact
+    // (counted in open-store minutes).
+    leadEscalationMinutes: 15,
+    // When the store is open, in its own time zone. Response time and the
+    // "not contacted" alert only count these hours.
+    storeHours: storeHours.defaultStoreHours(),
+    // Round robin: who new leads rotate between, for Sales 1 and BDC 1.
+    // Empty sources = every lead source.
+    rotations: { sales: { enabled: false, memberIds: [], sources: [] }, bdc: { enabled: false, memberIds: [], sources: [] } }
   };
 }
 
@@ -171,6 +179,8 @@ app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
     await q.query('SELECT 1 FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
     const current = await getSettings(q, req.dealershipId);
     const incoming = { ...(req.body || {}) };
+    delete incoming.rotations; // changed through /api/rotations (managers can too)
+    if ('storeHours' in incoming) incoming.storeHours = storeHours.cleanStoreHours(incoming.storeHours);
     if ('roadmapLabels' in incoming) {
       const labels = Array.isArray(incoming.roadmapLabels) ? incoming.roadmapLabels : [];
       incoming.roadmapLabels = Array.from({ length: ROADMAP_STEPS }, (_, i) =>
@@ -637,8 +647,10 @@ async function checkLeadAssignments(q, req, fields) {
 // customer offers, so every customer gets the same fields and a number.
 async function createLead(q, req, fields) {
   const clean = leadFields(fields);
-  // A salesperson adding a customer is their salesperson unless they pick someone else.
+  // A salesperson (or BDC agent) adding a customer is their Sales 1 (or
+  // BDC 1) unless they pick someone else.
   if (!('sales1Id' in clean) && req.user.role === 'salesperson') clean.sales1Id = req.user.id;
+  if (!('bdc1Id' in clean) && req.user.role === 'bdc') clean.bdc1Id = req.user.id;
   const lead = {
     name: '', type: 'individual', phone: '', email: '', address: cleanAddress({}), carId: null, notes: '',
     mailingDifferent: false, mailingAddress: cleanAddress({}), creditApp: null, creditAppSync: null,
@@ -654,10 +666,112 @@ async function createLead(q, req, fields) {
     dateAdded: new Date().toISOString()
   };
   if (lead.carId && !lead.wishList.includes(lead.carId)) lead.wishList = [lead.carId, ...lead.wishList];
+  await assignFromRotations(q, req, lead);
   await store.insert(q, 'leads', req.dealershipId, lead);
   await alertAssignments(q, req, null, lead);
   return lead;
 }
+
+// ---------- Round robin ----------
+// Two rotations run side by side: one fills Sales 1, the other BDC 1, so a
+// new lead gets both a salesperson and a BDC agent. Each skips people who
+// are inactive or not taking leads right now, and picks up after whoever
+// got the last one. The store row is locked while picking, so two leads
+// arriving at once never go to the same person by accident.
+const ROTATIONS = [['sales', 'sales1Id', 'Sales 1'], ['bdc', 'bdc1Id', 'BDC 1']];
+
+async function assignFromRotations(q, req, lead) {
+  const { rows } = await q.query('SELECT settings, rotation_state FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
+  if (!rows.length) return;
+  const rotations = { ...defaultFeeSettings().rotations, ...((rows[0].settings || {}).rotations || {}) };
+  const state = { ...(rows[0].rotation_state || {}) };
+  const picked = [];
+  for (const [key, field, label] of ROTATIONS) {
+    const r = rotations[key];
+    if (!r || !r.enabled || lead[field] || !(r.memberIds || []).length) continue;
+    if ((r.sources || []).length && !r.sources.includes(lead.source || 'other')) continue;
+    const { rows: people } = await q.query(
+      'SELECT id::text AS id, name FROM users WHERE dealership_id = $1 AND active AND available AND id::text = ANY($2)',
+      [req.dealershipId, r.memberIds]);
+    const eligible = r.memberIds.filter(id => people.some(p => p.id === id));
+    if (!eligible.length) continue;
+    const last = r.memberIds.indexOf((state[key] || {}).lastUserId);
+    // Next in the member order after the last one assigned (wrapping around).
+    const order = [...r.memberIds.slice(last + 1), ...r.memberIds.slice(0, last + 1)];
+    const next = order.find(id => eligible.includes(id));
+    lead[field] = next;
+    state[key] = { lastUserId: next, at: new Date().toISOString() };
+    picked.push(`${label}: ${people.find(p => p.id === next).name}`);
+  }
+  if (!picked.length) return;
+  await q.query('UPDATE dealerships SET rotation_state = $2 WHERE id = $1', [req.dealershipId, state]);
+  lead.activities = [{
+    id: crypto.randomUUID(), type: 'status', date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name },
+    text: `Assigned by round robin -- ${picked.join(', ')}`
+  }, ...(lead.activities || [])];
+}
+
+// Who's in each rotation and who's next.
+app.get('/api/rotations', wrap(async (req, res) => {
+  const settings = await getSettings(store.pool, req.dealershipId);
+  const { rows } = await store.pool.query('SELECT rotation_state FROM dealerships WHERE id = $1', [req.dealershipId]);
+  const { rows: users } = await store.pool.query(
+    'SELECT id::text AS id, name, role, available, active FROM users WHERE dealership_id = $1 ORDER BY name', [req.dealershipId]);
+  const state = (rows[0] && rows[0].rotation_state) || {};
+  const out = {};
+  for (const [key] of ROTATIONS) {
+    const r = { enabled: false, memberIds: [], sources: [], ...((settings.rotations || {})[key] || {}) };
+    const eligible = r.memberIds.filter(id => users.some(u => u.id === id && u.active && u.available));
+    const last = r.memberIds.indexOf((state[key] || {}).lastUserId);
+    const order = [...r.memberIds.slice(last + 1), ...r.memberIds.slice(0, last + 1)];
+    const nextId = order.find(id => eligible.includes(id));
+    out[key] = { ...r, nextUpId: nextId || null, lastAssigned: state[key] || null };
+  }
+  res.json({ rotations: out, staff: users.filter(u => u.active).map(({ active, ...u }) => u) });
+}));
+
+app.put('/api/rotations', allow('manageRotation'), wrap(async (req, res) => {
+  const body = req.body || {};
+  const saved = await store.tx(async q => {
+    await q.query('SELECT 1 FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
+    const current = await getSettings(q, req.dealershipId);
+    const { rows: users } = await q.query('SELECT id::text AS id FROM users WHERE dealership_id = $1 AND active', [req.dealershipId]);
+    const ids = new Set(users.map(u => u.id));
+    const rotations = { ...current.rotations };
+    for (const [key] of ROTATIONS) {
+      const b = body[key];
+      if (!b || typeof b !== 'object') continue;
+      rotations[key] = {
+        enabled: !!b.enabled,
+        memberIds: [...new Set((Array.isArray(b.memberIds) ? b.memberIds : []).map(String))].filter(id => ids.has(id)),
+        sources: [...new Set((Array.isArray(b.sources) ? b.sources : []).map(x => String(x).slice(0, 40)))].slice(0, 20)
+      };
+    }
+    const next = await store.saveSettings(q, req.dealershipId, { ...current, rotations });
+    await audit.updated(q, req, 'settings', { ...current, id: 'round-robin' }, { ...next, id: 'round-robin' }, 'Round robin');
+    return next.rotations;
+  });
+  res.json(saved);
+}));
+
+// Taking new leads or not (e.g. off today, at lunch). You can change your
+// own; managers can change anyone's.
+app.put('/api/availability', wrap(async (req, res) => {
+  const b = req.body || {};
+  const userId = b.userId ? String(b.userId) : String(req.user.id);
+  if (userId !== String(req.user.id) && !auth.can(req.user, 'manageRotation')) {
+    return res.status(403).json({ error: "Your role doesn't allow this. Ask an admin if you need access." });
+  }
+  const { rows } = await store.pool.query(
+    'UPDATE users SET available = $3 WHERE id::text = $1 AND dealership_id = $2 RETURNING id, name, available',
+    [userId, req.dealershipId, !!b.available]);
+  if (!rows.length) return res.status(404).json({ error: 'User not found' });
+  await audit.record(store.pool, req, {
+    action: 'availability', entityType: 'user', entityId: String(rows[0].id), label: rows[0].name,
+    details: rows[0].available ? 'Taking new leads' : 'Not taking new leads'
+  });
+  res.json({ id: rows[0].id, available: rows[0].available });
+}));
 
 // Alerts the people newly assigned to a customer (not whoever did it).
 async function alertAssignments(q, req, before, after) {
@@ -2774,6 +2888,6 @@ if (require.main === module) {
     });
 }
 
-const runAlertSweep = () => alerts.sweep(getSettings);
+const runAlertSweep = () => alerts.sweep(getSettings, storeHours.businessMinutesBetween);
 
 module.exports = { app, bootstrap, runAlertSweep };

@@ -92,6 +92,15 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Lenders** (RouteOne, Dealertrack, CUDL) are submitted to from the deal's Credit Application tab -- "Not available yet" until those partners approve the store
 - **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
 
+**Round Robin & Store Hours** (Admin → 🔄 Round Robin & Store Hours)
+- **Two rotations at once**: every new lead gets a salesperson (Sales 1) **and** a BDC agent (BDC 1), each from its own rotation, taking turns in the order you set (▲▼ to reorder)
+- Each rotation can be turned on or off and limited to certain lead sources (e.g. BDC only for website and CarGurus leads)
+- **Taking leads**: people who are off (set by themselves in My Account, or by a manager) are skipped and come back in turn. Shows who's next up
+- A lead that already has someone picked keeps them; a salesperson adding a walk-in stays its Sales 1, a BDC agent adding a lead stays its BDC 1. Assignments are noted in the customer's history and both people get an alert. Two leads arriving at once never go to the same person by accident
+- New **BDC Agent** role
+- **Store hours** (time zone, and open/close or closed for each day): response time and the "new lead not contacted" alert count open-store minutes only -- a lead at 11pm called at 9:05am counts as 5 minutes. Reports can switch to around the clock
+- Managers and admins set up the rotation; only admins change store hours
+
 **Reports**
 - **Response Time**: how fast new leads got a first call, text, email, or showroom visit (notes don't count; completed call/text/email tasks do). Average and median, % within 5 minutes and 1 hour, a bar chart by time bucket, and tables by salesperson and by source -- including **who never got a response**
 - **Lead Source**: leads, contacted, appointments set and shown, sold, and closing % per source

@@ -204,6 +204,7 @@
             </select>
           </label>
           <label id="reportPersonLabel">Salesperson <select id="reportPerson"></select></label>
+          <label class="report-hours" id="reportHoursLabel"><span><input type="checkbox" id="reportStoreHours" checked /> Store hours only</span></label>
           <span class="reports-scope" id="reportScope"></span>
         </div>
         <div class="stats-grid" id="statsGrid"></div>
@@ -870,6 +871,26 @@
   </div>
 </div>
 
+<!-- Round robin and store hours -->
+<div class="modal" id="rotationModal">
+  <div class="modal-content modal-wide rotation-content">
+    <h2>Round Robin &amp; Store Hours</h2>
+    <p class="send-text-hint" style="margin-top:-8px;">New leads get <strong>both</strong> a salesperson (Sales 1) and a BDC agent (BDC 1), each from its own rotation. People who aren't taking leads are skipped. A lead that already has someone picked keeps them.</p>
+    <div class="rotation-grid" id="rotationGrid"></div>
+    <div id="storeHoursSection">
+      <div class="ca-section-title">Store hours</div>
+      <p class="send-text-hint" style="margin-top:-4px;">Response time and the "new lead not contacted" alert only count these hours. A lead at 11pm that gets a call at 9:05am counts as 5 minutes.</p>
+      <label class="rotation-tz">Time zone <select id="storeTimezone"></select></label>
+      <table class="store-hours-table" id="storeHoursTable"></table>
+    </div>
+    <div id="rotationMsg"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="rotationCancelBtn">Cancel</button>
+      <button type="button" class="btn-primary" id="rotationSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Report drill-down: the customers behind a number -->
 <div class="modal" id="reportDrillModal">
   <div class="modal-content modal-wide">
@@ -1142,6 +1163,7 @@
       <button type="button" class="btn-secondary admin-menu-item" id="adminUsersBtn">👤 Users &amp; Roles</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminAuditLogBtn">📜 Audit Log</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminIntegrationsBtn">🔌 Integrations (Key Machine)</button>
+      <button type="button" class="btn-secondary admin-menu-item" id="adminRotationBtn">🔄 Round Robin &amp; Store Hours</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
     </div>
@@ -1278,6 +1300,7 @@
   <div class="modal-content">
     <h2>My Account</h2>
     <p style="font-size:13px;color:var(--text-secondary);margin-top:-8px;" id="accountSummary"></p>
+    <label class="availability-toggle"><input type="checkbox" id="myAvailability" /> <span><strong>Taking new leads</strong><br><span class="audit-note">Turn off when you're out, so the round robin skips you.</span></span></label>
     <form id="changePasswordForm">
       <div class="ca-section-title">Change Password</div>
       <label>Current Password <input type="password" id="currentPassword" autocomplete="current-password" required /></label>

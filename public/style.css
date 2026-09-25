@@ -1949,3 +1949,36 @@ button.report-num.link { border: none; background: none; padding: 0; font: inher
   .bar-row { grid-template-columns: 100px minmax(0, 1fr); }
 }
 .reports-nav .audit-note { font-size: 12px; margin: 2px 10px; }
+
+/* ---------- Round robin & store hours ---------- */
+.rotation-content { max-width: 980px; }
+.rotation-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 8px; }
+.rotation-panel { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.rotation-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.modal-content .rotation-switch, .modal-content .rotation-avail, .modal-content .rotation-sources label, .modal-content .availability-toggle, .modal-content .store-hours-table label { display: inline-flex; align-items: center; gap: 5px; width: auto; margin: 0; }
+.modal-content .rotation-panel input[type="checkbox"], .modal-content .store-hours-table input[type="checkbox"], .modal-content .availability-toggle input { width: auto; margin: 0; }
+.rotation-switch { font-weight: 600; color: var(--text); font-size: 14px; }
+.rotation-next { font-size: 13px; margin: 8px 0; padding: 6px 8px; background: var(--surface-alt); border-radius: 6px; }
+.rotation-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rotation-table th { text-align: left; font-size: 11px; color: var(--text-muted); font-weight: 600; padding: 4px; }
+.rotation-table td { padding: 5px 4px; border-top: 1px solid var(--border); vertical-align: middle; }
+.rotation-table tr.not-in td:nth-child(2) { color: var(--text-muted); }
+.rotation-move { white-space: nowrap; }
+.rotation-move button { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); border-radius: 4px; font-size: 10px; padding: 2px 5px; cursor: pointer; margin-left: 2px; }
+.rotation-sources { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; font-size: 13px; color: var(--text); }
+.rotation-sources .audit-note { width: 100%; }
+.modal-content .rotation-tz { max-width: 360px; }
+.store-hours-table { border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+.store-hours-table td { padding: 4px 8px 4px 0; }
+.modal-content .store-hours-table input[type="time"] { width: 130px; margin: 0; }
+.availability-toggle { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; color: var(--text); font-size: 14px; }
+.report-hours { justify-content: flex-end; }
+.report-hours > span { display: inline-flex; align-items: center; gap: 5px; padding: 8px 0; color: var(--text); font-size: 13px; }
+.report-hours input { width: auto; }
+@media (max-width: 760px) {
+  .rotation-grid { grid-template-columns: 1fr; }
+  .store-hours-table td:first-child { font-size: 12px; }
+  .modal-content .store-hours-table input[type="time"] { width: 92px; padding: 6px 4px; }
+  .store-hours-table td { padding: 3px 4px 3px 0; }
+  .store-hours-table td:nth-child(4) { display: none; }
+}

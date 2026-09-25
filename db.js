@@ -233,6 +233,12 @@ const MIGRATIONS = [
   `
   -- Each person's saved report setups (report + filters).
   ALTER TABLE users ADD COLUMN saved_reports jsonb NOT NULL DEFAULT '[]';
+  `,
+  `
+  -- Round robin: whether each person is taking new leads right now, and
+  -- where each rotation left off.
+  ALTER TABLE users ADD COLUMN available boolean NOT NULL DEFAULT true;
+  ALTER TABLE dealerships ADD COLUMN rotation_state jsonb NOT NULL DEFAULT '{}';
   `
 ];
 
