@@ -79,7 +79,7 @@ async function notify(q, { dealershipId, type, userIds = [], useRoles = false, a
 // Time-based alerts: tasks that just came due, and new leads nobody has
 // contacted within the store's limit. Each is alerted once (marked on the
 // record), so running this on several servers at once is harmless.
-async function sweep(getSettings) {
+async function sweep(getSettings, businessMinutesBetween) {
   const now = new Date();
   // Tasks due
   await store.tx(async q => {
@@ -106,20 +106,25 @@ async function sweep(getSettings) {
     const { rows } = await q.query(
       `SELECT dealership_id, id, data FROM leads
        WHERE data->>'status' = 'new' AND NOT (data ? 'escalatedAt')
-         AND (data->>'dateAdded')::timestamptz > now() - interval '1 day'
+         AND (data->>'dateAdded')::timestamptz > now() - interval '4 days'
        FOR UPDATE SKIP LOCKED`);
     const contactTypes = ['call', 'text', 'email', 'note', 'visit', 'task', 'appointment'];
     for (const row of rows) {
       const lead = row.data;
       const settings = await getSettings(q, row.dealership_id);
       const limit = Math.max(1, Number(settings.leadEscalationMinutes) || 15);
-      if (now - new Date(lead.dateAdded) < limit * 60000) continue;
+      // Counted in open-store minutes: a lead that came in overnight is
+      // escalated 15 minutes after opening, not at 2am.
+      const waited = businessMinutesBetween
+        ? businessMinutesBetween(new Date(lead.dateAdded).getTime(), now.getTime(), settings.storeHours)
+        : (now - new Date(lead.dateAdded)) / 60000;
+      if (waited < limit) continue;
       if ((lead.activities || []).some(a => contactTypes.includes(a.type))) continue;
       await q.query(`UPDATE leads SET data = data || jsonb_build_object('escalatedAt', $3::text) WHERE dealership_id = $1 AND id = $2`,
         [row.dealership_id, row.id, now.toISOString()]);
       await notify(q, {
         dealershipId: row.dealership_id, type: 'lead_escalation', useRoles: true,
-        title: `Not contacted in ${limit}+ min: ${lead.name}`,
+        title: `Not contacted in ${limit}+ store minutes: ${lead.name}`,
         body: `New ${lead.source || ''} lead${lead.sales1Id ? '' : ', not assigned to anyone'}.`.replace('  ', ' '),
         link: { kind: 'lead', id: lead.id }
       });

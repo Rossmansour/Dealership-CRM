@@ -104,7 +104,8 @@ test('tasks: assigned by someone else, and due now (once)', async () => {
 });
 
 test('new leads nobody contacted alert managers after the store limit', async () => {
-  await as(admin, 'PUT', '/settings', { leadEscalationMinutes: 10 });
+  // Open around the clock for this test, so it doesn't depend on when the tests run.
+  await as(admin, 'PUT', '/settings', { leadEscalationMinutes: 10, storeHours: { timezone: 'America/Chicago', days: Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { closed: false, open: '00:00', close: '23:59' }])) } });
   const stale = (await as(manager, 'POST', '/leads', { name: 'Waiting Wendy', source: 'website' })).body;
   const contacted = (await as(manager, 'POST', '/leads', { name: 'Called Carl' })).body;
   await as(manager, 'POST', `/leads/${contacted.id}/activities`, { type: 'call', text: 'Talked' });
@@ -115,7 +116,7 @@ test('new leads nobody contacted alert managers after the store limit', async ()
   await runAlertSweep();
   const esc = (await myAlerts(admin)).filter(x => x.type === 'lead_escalation');
   assert.deepStrictEqual(esc.map(x => x.link.id), [stale.id], 'only the stale, uncontacted one');
-  assert.match(esc[0].title, /Not contacted in 10\+ min: Waiting Wendy/);
+  assert.match(esc[0].title, /Not contacted in 10\+ store minutes: Waiting Wendy/);
   assert.ok((await myAlerts(manager)).some(x => x.type === 'lead_escalation' && x.link.id === stale.id));
   assert.ok(!(await myAlerts(sales)).some(x => x.type === 'lead_escalation'), 'salespeople are not escalated to');
   await runAlertSweep();

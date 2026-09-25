@@ -81,7 +81,8 @@ function applyPermissionsToUI() {
   document.getElementById('currentUserInitials').textContent =
     currentUser.name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   document.getElementById('adminMenuBtn').style.display =
-    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog') || userCan('manageIntegrations')) ? '' : 'none';
+    (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog') || userCan('manageIntegrations') || userCan('manageRotation')) ? '' : 'none';
+  document.getElementById('adminRotationBtn').style.display = (userCan('manageRotation') || userCan('editSettings')) ? '' : 'none';
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
   document.getElementById('adminAuditLogBtn').style.display = userCan('viewAuditLog') ? '' : 'none';
   document.getElementById('adminIntegrationsBtn').style.display = userCan('manageIntegrations') ? '' : 'none';
@@ -351,6 +352,7 @@ function selectReport(key) {
   document.getElementById('reportDesc').textContent = REPORT_INFO[key].desc;
   const overview = key === 'overview';
   document.getElementById('reportFilters').hidden = overview;
+  document.getElementById('reportHoursLabel').hidden = !['response-time', 'lead-source'].includes(key);
   document.getElementById('reportActions').hidden = overview;
   document.getElementById('statsGrid').hidden = !overview;
   document.getElementById('reportBody').innerHTML = '';
@@ -366,6 +368,7 @@ async function runReport() {
   const person = document.getElementById('reportPerson').value;
   if (source) params.set('source', source);
   if (person && userCan('viewAllReports')) params.set('userId', person);
+  if (!document.getElementById('reportStoreHours').checked) params.set('hours', 'all');
   const body = document.getElementById('reportBody');
   body.innerHTML = html`<p class="audit-note">Running the report...</p>`;
   const res = await fetch(`${API}/reports/${key}?${params}`);
@@ -375,7 +378,8 @@ async function runReport() {
   reportData = data;
   const toLabel = new Date(to.getTime() - 1);
   document.getElementById('reportScope').textContent =
-    `${from.toLocaleDateString()} – ${toLabel.toLocaleDateString()}${data.scope === 'mine' ? ' · your numbers' : ''}`;
+    `${from.toLocaleDateString()} – ${toLabel.toLocaleDateString()}${data.scope === 'mine' ? ' · your numbers' : ''}` +
+    (['response-time', 'lead-source'].includes(key) ? (data.storeHoursOnly ? ' · response in store hours' : ' · response around the clock') : '');
   reportTables = [];
   body.innerHTML = REPORT_RENDERERS[key](data);
 }
@@ -531,7 +535,7 @@ document.getElementById('reportRange').addEventListener('change', (e) => {
   document.querySelectorAll('.report-custom').forEach(l => { l.hidden = e.target.value !== 'custom'; });
   runReport();
 });
-['reportFrom', 'reportTo', 'reportSource', 'reportPerson'].forEach(id => document.getElementById(id).addEventListener('change', runReport));
+['reportFrom', 'reportTo', 'reportSource', 'reportPerson', 'reportStoreHours'].forEach(id => document.getElementById(id).addEventListener('change', runReport));
 
 // ----- Export, print, save -----
 function reportFilterSummary() {
@@ -5031,11 +5035,182 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
   feeDefaultsModal.classList.remove('active');
 });
 
+// ---------- Round robin & store hours ----------
+
+const LEAD_SOURCES = [['walk-in', 'Walk-in'], ['phone', 'Phone'], ['website', 'Website'], ['referral', 'Referral'],
+  ['autotrader', 'Autotrader'], ['cargurus', 'CarGurus'], ['facebook', 'Facebook'], ['other', 'Other']];
+const WEEK = [['mon', 'Monday'], ['tue', 'Tuesday'], ['wed', 'Wednesday'], ['thu', 'Thursday'], ['fri', 'Friday'], ['sat', 'Saturday'], ['sun', 'Sunday']];
+const US_TIMEZONES = [['America/New_York', 'Eastern'], ['America/Chicago', 'Central'], ['America/Denver', 'Mountain'],
+  ['America/Phoenix', 'Arizona (no daylight saving)'], ['America/Los_Angeles', 'Pacific'], ['America/Anchorage', 'Alaska'], ['Pacific/Honolulu', 'Hawaii']];
+let rotationData = null;
+let rotationOrder = { sales: [], bdc: [] }; // member order as arranged on screen
+
+function rotationPanelHtml(key, title, subtitle) {
+  const r = rotationData.rotations[key];
+  const canEdit = userCan('manageRotation');
+  const staff = rotationData.staff;
+  const members = rotationOrder[key];
+  // Members first (in rotation order), then everyone else.
+  const rows = [...members.map(id => staff.find(u => u.id === id)).filter(Boolean), ...staff.filter(u => !members.includes(u.id))];
+  const next = staff.find(u => u.id === r.nextUpId);
+  return html`
+    <div class="rotation-panel" data-rotation="${key}">
+      <div class="rotation-head">
+        <div><strong>${title}</strong><div class="audit-note">${subtitle}</div></div>
+        <label class="rotation-switch"><input type="checkbox" data-field="enabled" ${r.enabled ? html`checked` : ''} ${canEdit ? '' : html`disabled`} /> On</label>
+      </div>
+      <div class="rotation-next">${r.enabled ? (next ? html`Next up: <strong>${next.name}</strong>` : html`<span class="report-warn">Nobody in this rotation is taking leads</span>`) : 'Off -- leads are assigned by hand'}</div>
+      <table class="rotation-table">
+        <tr><th>In</th><th>Person</th><th>Taking leads</th><th></th></tr>
+        ${rows.map(u => {
+          const inRot = members.includes(u.id);
+          return html`<tr class="${inRot ? '' : 'not-in'}" data-user="${u.id}">
+            <td><input type="checkbox" data-member ${inRot ? html`checked` : ''} ${canEdit ? '' : html`disabled`} aria-label="In rotation" /></td>
+            <td>${u.name}<div class="audit-note">${u.role === 'bdc' ? 'BDC Agent' : { salesperson: 'Salesperson', sales_manager: 'Sales Manager', admin: 'Admin', finance: 'F&I' }[u.role] || u.role}</div></td>
+            <td><label class="rotation-avail"><input type="checkbox" data-available ${u.available ? html`checked` : ''} ${canEdit ? '' : html`disabled`} /> ${u.available ? 'Yes' : 'Off'}</label></td>
+            <td class="rotation-move">${inRot && canEdit ? html`<button type="button" data-move="-1" title="Earlier in the rotation" aria-label="Move up">▲</button><button type="button" data-move="1" title="Later in the rotation" aria-label="Move down">▼</button>` : ''}</td>
+          </tr>`;
+        })}
+      </table>
+      <div class="rotation-sources">
+        <div class="audit-note">Lead sources (none checked = every source)</div>
+        ${LEAD_SOURCES.map(([v, label]) => html`<label><input type="checkbox" data-source="${v}" ${(r.sources || []).includes(v) ? html`checked` : ''} ${canEdit ? '' : html`disabled`} /> ${label}</label>`)}
+      </div>
+    </div>`;
+}
+
+// Keeps unsaved switches and source choices when the panels redraw.
+function captureRotationDraft() {
+  for (const key of ['sales', 'bdc']) {
+    const panel = document.querySelector(`[data-rotation="${key}"]`);
+    if (!panel) continue;
+    rotationData.rotations[key].enabled = panel.querySelector('[data-field="enabled"]').checked;
+    rotationData.rotations[key].sources = [...panel.querySelectorAll('[data-source]:checked')].map(c => c.dataset.source);
+  }
+}
+
+function renderRotationGrid() {
+  captureRotationDraft();
+  document.getElementById('rotationGrid').innerHTML =
+    rotationPanelHtml('sales', 'Salespeople → Sales 1', 'Who gets each new lead as its salesperson') +
+    rotationPanelHtml('bdc', 'BDC agents → BDC 1', 'Who follows up on each new lead from the BDC');
+}
+
+function renderStoreHours(h) {
+  const tzSel = document.getElementById('storeTimezone');
+  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zones = [...US_TIMEZONES];
+  if (!zones.some(z => z[0] === h.timezone)) zones.push([h.timezone, h.timezone]);
+  if (browserTz && !zones.some(z => z[0] === browserTz)) zones.push([browserTz, browserTz]);
+  tzSel.innerHTML = zones.map(([v, label]) => html`<option value="${v}" ${v === h.timezone ? html`selected` : ''}>${label}${label === v ? '' : ` (${v})`}</option>`).join('');
+  const canEdit = userCan('editSettings');
+  tzSel.disabled = !canEdit;
+  document.getElementById('storeHoursTable').innerHTML = WEEK.map(([d, label]) => {
+    const day = h.days[d] || { closed: true, open: '09:00', close: '18:00' };
+    return html`<tr data-day="${d}">
+      <td>${label}</td>
+      <td><label><input type="checkbox" data-closed ${day.closed ? html`checked` : ''} ${canEdit ? '' : html`disabled`} /> Closed</label></td>
+      <td><input type="time" data-open value="${day.open}" ${day.closed || !canEdit ? html`disabled` : ''} /></td>
+      <td>to</td>
+      <td><input type="time" data-close value="${day.close}" ${day.closed || !canEdit ? html`disabled` : ''} /></td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('adminRotationBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  const [rotRes, setRes] = await Promise.all([fetch(`${API}/rotations`), fetch(`${API}/settings`)]);
+  if (!rotRes.ok || !setRes.ok) return;
+  rotationData = await rotRes.json();
+  appSettings = await setRes.json();
+  rotationOrder = { sales: [...rotationData.rotations.sales.memberIds], bdc: [...rotationData.rotations.bdc.memberIds] };
+  document.getElementById('rotationGrid').innerHTML = ''; // fresh: nothing to carry over
+  renderRotationGrid();
+  renderStoreHours(appSettings.storeHours);
+  document.getElementById('rotationMsg').innerHTML = userCan('editSettings') ? ''
+    : html`<p class="audit-note">Only admins can change store hours.</p>`;
+  document.getElementById('rotationModal').classList.add('active');
+});
+
+document.getElementById('rotationGrid').addEventListener('change', async (e) => {
+  const panel = e.target.closest('[data-rotation]');
+  const row = e.target.closest('[data-user]');
+  if (!panel) return;
+  const key = panel.dataset.rotation;
+  if (e.target.matches('[data-member]')) {
+    const id = row.dataset.user;
+    rotationOrder[key] = e.target.checked ? [...rotationOrder[key], id] : rotationOrder[key].filter(x => x !== id);
+    renderRotationGrid();
+  } else if (e.target.matches('[data-available]')) {
+    // Availability saves right away -- it's about today, not the setup.
+    const res = await fetch(`${API}/availability`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: row.dataset.user, available: e.target.checked }) });
+    if (res.ok) {
+      rotationData.staff.find(u => u.id === row.dataset.user).available = e.target.checked;
+      const fresh = await (await fetch(`${API}/rotations`)).json();
+      rotationData.rotations.sales.nextUpId = fresh.rotations.sales.nextUpId;
+      rotationData.rotations.bdc.nextUpId = fresh.rotations.bdc.nextUpId;
+      renderRotationGrid();
+    }
+  }
+});
+document.getElementById('rotationGrid').addEventListener('click', (e) => {
+  const move = e.target.closest('[data-move]');
+  if (!move) return;
+  const key = move.closest('[data-rotation]').dataset.rotation;
+  const id = move.closest('[data-user]').dataset.user;
+  const list = rotationOrder[key];
+  const i = list.indexOf(id);
+  const j = i + Number(move.dataset.move);
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  renderRotationGrid();
+});
+document.getElementById('storeHoursTable').addEventListener('change', (e) => {
+  if (!e.target.matches('[data-closed]')) return;
+  const row = e.target.closest('[data-day]');
+  row.querySelectorAll('input[type="time"]').forEach(i => { i.disabled = e.target.checked; });
+});
+
+document.getElementById('rotationSaveBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('rotationMsg');
+  const requests = [];
+  if (userCan('manageRotation')) {
+    const body = {};
+    for (const key of ['sales', 'bdc']) {
+      const panel = document.querySelector(`[data-rotation="${key}"]`);
+      body[key] = {
+        enabled: panel.querySelector('[data-field="enabled"]').checked,
+        memberIds: rotationOrder[key],
+        sources: [...panel.querySelectorAll('[data-source]:checked')].map(c => c.dataset.source)
+      };
+    }
+    requests.push(fetch(`${API}/rotations`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+  }
+  if (userCan('editSettings')) {
+    const days = {};
+    document.querySelectorAll('#storeHoursTable [data-day]').forEach(row => {
+      days[row.dataset.day] = {
+        closed: row.querySelector('[data-closed]').checked,
+        open: row.querySelector('[data-open]').value, close: row.querySelector('[data-close]').value
+      };
+    });
+    requests.push(fetch(`${API}/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storeHours: { timezone: document.getElementById('storeTimezone').value, days } }) }));
+  }
+  const results = await Promise.all(requests);
+  if (results.some(r => !r.ok)) { msg.innerHTML = html`<p class="send-text-status-error">Some changes couldn't be saved.</p>`; return; }
+  document.getElementById('rotationModal').classList.remove('active');
+  const setRes = await fetch(`${API}/settings`);
+  if (setRes.ok) appSettings = await setRes.json();
+});
+document.getElementById('rotationCancelBtn').addEventListener('click', () => document.getElementById('rotationModal').classList.remove('active'));
+
 // ---------- Users & Roles (admins) ----------
 
 const usersModal = document.getElementById('usersModal');
 const ROLE_OPTIONS = [
   ['salesperson', 'Salesperson'],
+  ['bdc', 'BDC Agent'],
   ['finance', 'F&I Manager'],
   ['sales_manager', 'Sales Manager'],
   ['admin', 'Admin']
@@ -5317,7 +5492,12 @@ const accountModal = document.getElementById('accountModal');
 document.getElementById('userMenuBtn').addEventListener('click', () => {
   document.getElementById('accountSummary').textContent =
     `${currentUser.name} · ${currentUser.email} · ${currentUser.roleLabel}`;
+  document.getElementById('myAvailability').checked = currentUser.available !== false;
   accountModal.classList.add('active');
+});
+document.getElementById('myAvailability').addEventListener('change', async (e) => {
+  const res = await fetch(`${API}/availability`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: e.target.checked }) });
+  if (res.ok) currentUser.available = e.target.checked; else e.target.checked = !e.target.checked;
 });
 
 document.getElementById('closeAccountBtn').addEventListener('click', () => {

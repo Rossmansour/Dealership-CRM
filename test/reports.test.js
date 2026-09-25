@@ -149,6 +149,26 @@ test('completed call tasks count as a response', async () => {
   assert.ok(row && row.responseMinutes !== null);
 });
 
+test('response time counts store hours only (unless asked for around the clock)', async () => {
+  // Store: Chicago, Mon-Sat 9-8. A lead at 11pm Monday, called 9:05am Tuesday.
+  await as(admin, 'PUT', '/settings', { storeHours: { timezone: 'America/Chicago', days: {
+    sun: { closed: true, open: '11:00', close: '17:00' }, mon: { open: '09:00', close: '20:00' }, tue: { open: '09:00', close: '20:00' },
+    wed: { open: '09:00', close: '20:00' }, thu: { open: '09:00', close: '20:00' }, fri: { open: '09:00', close: '20:00' }, sat: { open: '09:00', close: '19:00' } } } });
+  const added = Date.parse('2031-03-18T04:00:00Z'); // Mon Mar 17, 11pm CDT
+  const l = (await as(manager, 'POST', '/leads', { name: 'Night Owl', sales1Id: sales.id })).body;
+  await h.store.pool.query(`UPDATE leads SET data = data || jsonb_build_object('dateAdded', $2::text, 'activities', $3::jsonb) WHERE id = $1`,
+    [l.id, new Date(added).toISOString(), JSON.stringify([{ id: 'n1', type: 'call', text: 'x', date: '2031-03-18T14:05:00Z', by: { id: sales.id, name: 'x' } }])]);
+  const q = `from=2031-03-17T00:00:00Z&to=2031-03-19T00:00:00Z`;
+  const store = (await as(manager, 'GET', `/reports/response-time?${q}`)).body;
+  assert.strictEqual(store.storeHoursOnly, true);
+  assert.strictEqual(Math.round(store.leads.find(x => x.id === l.id).responseMinutes), 5, 'answered 5 minutes after opening');
+  const clock = (await as(manager, 'GET', `/reports/response-time?${q}&hours=all`)).body;
+  assert.strictEqual(Math.round(clock.leads.find(x => x.id === l.id).responseMinutes), 605);
+  const bad = (await as(admin, 'PUT', '/settings', { storeHours: { timezone: 'Mars/Olympus', days: { mon: { open: '25:00', close: '08:00' } } } })).body;
+  assert.strictEqual(bad.storeHours.timezone, 'America/Chicago', 'bad time zones fall back to the default');
+  assert.deepStrictEqual(bad.storeHours.days.mon, { closed: true, open: '09:00', close: '08:00' }, 'a bad time falls back; closing before opening means closed');
+});
+
 test('saved reports are per person', async () => {
   assert.strictEqual((await as(sales, 'POST', '/reports/saved', { name: '', report: 'response-time' })).status, 400);
   assert.strictEqual((await as(sales, 'POST', '/reports/saved', { name: 'x', report: 'nope' })).status, 400);

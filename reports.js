@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const express = require('express');
 const store = require('./db');
 const auth = require('./auth');
+const storeHours = require('./hours');
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
@@ -21,13 +22,16 @@ const isContact = a => CONTACT_TYPES.includes(a.type) ||
   (a.type === 'task' && a.taskStatus !== 'cancelled' && ['call', 'text', 'email'].includes(a.taskType));
 
 // Response time: from when the lead came in to the first call, text,
-// email, or showroom visit. null = nobody has reached out yet.
-function firstResponse(lead) {
+// email, or showroom visit. null = nobody has reached out yet. With store
+// hours, only open-store minutes count (an 11pm lead called at 9:05am
+// took 5 minutes).
+function firstResponse(lead, hours = null) {
   const added = new Date(lead.dateAdded).getTime();
   const times = (lead.activities || []).filter(isContact).map(a => new Date(a.date).getTime()).filter(t => !Number.isNaN(t));
   if (!times.length) return null;
   const first = Math.min(...times);
-  return { at: new Date(first).toISOString(), minutes: Math.max(0, (first - added) / MIN), by: null };
+  const minutes = hours ? storeHours.businessMinutesBetween(added, first, hours) : Math.max(0, (first - added) / MIN);
+  return { at: new Date(first).toISOString(), minutes };
 }
 
 const RESPONSE_BUCKETS = [
@@ -69,7 +73,7 @@ function isSold(lead, deals) {
 
 function responseTime({ leads }, f) {
   const inScope = leads.filter(l => inRange(l.dateAdded, f.from, f.to) && f.leadMatch(l));
-  const rows = inScope.map(l => ({ lead: l, resp: firstResponse(l) }));
+  const rows = inScope.map(l => ({ lead: l, resp: firstResponse(l, f.hours) }));
   const responded = rows.filter(r => r.resp);
   const mins = responded.map(r => r.resp.minutes);
   const buckets = RESPONSE_BUCKETS.map((b, i) => {
@@ -127,9 +131,9 @@ function leadSource({ leads, deals, tasks }, f) {
     const ids = new Set(list.map(l => l.id));
     const appts = tasks.filter(t => t.type === 'appointment' && ids.has(t.leadId) && t.status !== 'cancelled');
     const shownLeads = [...new Set(appts.filter(t => t.status === 'done').map(t => t.leadId))];
-    const contacted = list.filter(l => firstResponse(l));
+    const contacted = list.filter(l => firstResponse(l, f.hours));
     const sold = list.filter(l => isSold(l, deals));
-    const m = contacted.map(l => firstResponse(l).minutes);
+    const m = contacted.map(l => firstResponse(l, f.hours).minutes);
     return {
       key: source, label: source,
       leads: cell(list.map(l => l.id)),
@@ -295,7 +299,7 @@ const REPORTS = {
 const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-function parseFilters(req, users) {
+function parseFilters(req, users, settings) {
   const seeAll = auth.can(req.user, 'viewAllReports');
   const from = new Date(req.query.from || Date.now() - 30 * 24 * HOUR).getTime();
   const to = new Date(req.query.to || Date.now() + MIN).getTime();
@@ -305,8 +309,10 @@ function parseFilters(req, users) {
   const source = req.query.source ? String(req.query.source) : '';
   const names = new Map(users.map(u => [u.id, u.name]));
   const assigned = l => [l.sales1Id, l.sales2Id, l.bdc1Id, l.bdc2Id].includes(person);
+  const useStoreHours = req.query.hours !== 'all';
   return {
-    from, to, person, source, seeAll,
+    from, to, person, source, seeAll, useStoreHours,
+    hours: useStoreHours ? storeHours.cleanStoreHours(settings.storeHours) : null,
     userName: id => names.get(String(id)) || (id ? 'Former employee' : ''),
     includesUser: id => !person || id === person,
     leadMatch: l => (!source || (l.source || 'other') === source) && (!person || assigned(l)),
@@ -319,14 +325,15 @@ router.get('/reports/:key', wrap(async (req, res, next) => {
   const report = REPORTS[req.params.key];
   if (!report) return res.status(404).json({ error: 'Report not found' });
   const data = await loadData(store.pool, req.dealershipId);
-  const f = parseFilters(req, data.users);
+  const dealership = await store.getDealership(store.pool, req.dealershipId);
+  const f = parseFilters(req, data.users, (dealership && dealership.settings) || {});
   if (f.error) return res.status(400).json({ error: f.error });
   const result = report.run(data, f);
   // The customers behind the numbers, for the drill-down lists.
   const ids = new Set();
   JSON.stringify(result, (k, v) => { if (k === 'ids' && Array.isArray(v)) v.forEach(id => ids.add(id)); return v; });
   const leadInfo = data.leads.filter(l => ids.has(l.id)).map(l => {
-    const r = firstResponse(l);
+    const r = firstResponse(l, f.hours);
     return {
       id: l.id, name: l.name, source: l.source, status: l.status, dateAdded: l.dateAdded, phone: l.phone,
       salesperson: f.userName(l.sales1Id) || 'Unassigned', responseMinutes: r ? r.minutes : null, sold: isSold(l, data.deals)
@@ -334,7 +341,7 @@ router.get('/reports/:key', wrap(async (req, res, next) => {
   });
   res.json({
     report: req.params.key, name: report.name, from: new Date(f.from).toISOString(), to: new Date(f.to).toISOString(),
-    scope: f.seeAll ? (f.person ? 'person' : 'store') : 'mine', ...result, leads: leadInfo
+    scope: f.seeAll ? (f.person ? 'person' : 'store') : 'mine', storeHoursOnly: f.useStoreHours, ...result, leads: leadInfo
   });
 }));
 

@@ -24,6 +24,7 @@ const ROLES = {
   admin: 'Admin',
   sales_manager: 'Sales Manager',
   salesperson: 'Salesperson',
+  bdc: 'BDC Agent',
   finance: 'F&I Manager'
 };
 
@@ -37,6 +38,7 @@ const PERMISSIONS = {
   manageUsers: ['admin'],
   viewAuditLog: ['admin', 'sales_manager'],
   viewAllReports: ['admin', 'sales_manager', 'finance'], // everyone else sees their own numbers
+  manageRotation: ['admin', 'sales_manager'],  // round robin members, and who's taking leads
   manageIntegrations: ['admin']               // connect outside systems like the key machine
 };
 
@@ -133,6 +135,7 @@ function publicUser(u) {
     role: u.role,
     roleLabel: ROLES[u.role] || u.role,
     active: u.active,
+    available: u.available !== false,
     lastLoginAt: u.last_login_at,
     createdAt: u.created_at,
     permissions: Object.keys(PERMISSIONS).filter(p => can(u, p))
@@ -348,10 +351,10 @@ router.post('/auth/change-password', wrap(async (req, res) => {
 // emails or login details.
 router.get('/staff', wrap(async (req, res) => {
   const { rows } = await store.pool.query(
-    'SELECT id, name, role FROM users WHERE dealership_id = $1 AND active ORDER BY name',
+    'SELECT id, name, role, available FROM users WHERE dealership_id = $1 AND active ORDER BY name',
     [req.dealershipId]
   );
-  res.json(rows.map(u => ({ id: u.id, name: u.name, role: u.role, roleLabel: ROLES[u.role] || u.role })));
+  res.json(rows.map(u => ({ id: u.id, name: u.name, role: u.role, roleLabel: ROLES[u.role] || u.role, available: u.available })));
 }));
 
 // ----- User management (admins only, within their own dealership) -----
