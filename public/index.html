@@ -67,6 +67,28 @@
       <input type="search" id="quickSearchInput" placeholder="Search name, phone, stock #, VIN, deal #" autocomplete="off" spellcheck="false" aria-label="Quick search" />
       <div class="quick-search-results" id="quickSearchResults" role="listbox"></div>
     </div>
+    <div class="alerts-wrap">
+      <button type="button" class="nav-icon alerts-bell" id="alertsBellBtn" title="Alerts" aria-label="Alerts" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>
+        <span class="alerts-badge" id="alertsBadge" hidden></span>
+      </button>
+      <div class="alerts-panel" id="alertsPanel" hidden>
+        <div class="alerts-head">
+          <strong>Alerts</strong>
+          <div class="view-toggle">
+            <button type="button" class="view-toggle-btn active" data-alert-filter="unread">Unread</button>
+            <button type="button" class="view-toggle-btn" data-alert-filter="all">All</button>
+          </div>
+          <button type="button" class="link-btn" id="alertsReadAllBtn">Mark all read</button>
+          <button type="button" class="alerts-gear" id="alertsSettingsBtn" title="Alert settings" aria-label="Alert settings">⚙</button>
+        </div>
+        <div class="alerts-list" id="alertsList"></div>
+        <div class="alerts-foot">
+          <label class="alerts-select-all"><input type="checkbox" id="alertsSelectAll" /> Select all</label>
+          <button type="button" class="btn-secondary btn-small" id="alertsDismissSelectedBtn" disabled>Dismiss selected</button>
+        </div>
+      </div>
+    </div>
     <button type="button" class="nav-icon" id="themeToggleBtn" title="Dark mode" aria-label="Dark mode"></button>
     <button type="button" class="nav-icon" id="adminMenuBtn" title="Admin" aria-label="Admin" style="display:none;">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.1a7.6 7.6 0 0 0 0-2.2l2-1.5-2-3.5-2.3 1a7.6 7.6 0 0 0-1.9-1.1L14.9 3.4h-4l-.3 2.4a7.6 7.6 0 0 0-1.9 1.1l-2.3-1-2 3.5 2 1.5a7.6 7.6 0 0 0 0 2.2l-2 1.5 2 3.5 2.3-1a7.6 7.6 0 0 0 1.9 1.1l.3 2.4h4l.3-2.4a7.6 7.6 0 0 0 1.9-1.1l2.3 1 2-3.5z"/></svg>
@@ -789,6 +811,19 @@
   </div>
 </div>
 
+<!-- My alert settings -->
+<div class="modal" id="alertSettingsModal">
+  <div class="modal-content modal-wide">
+    <h2>My Alerts</h2>
+    <p class="send-text-hint" style="margin-top:-8px;">Pick what you want to hear about. High priority alerts stand out in red; sound plays a chime when one arrives.</p>
+    <div id="alertSettingsList"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="alertSettingsCancelBtn">Cancel</button>
+      <button type="button" class="btn-primary" id="alertSettingsSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Deal Full Page (Desking + Credit Application) -->
 <div class="deal-fullpage" id="dealFullPage">
   <div class="deal-fullpage-header">
@@ -1220,6 +1255,9 @@
       <p class="send-text-hint" style="margin-top:-4px;">Used by the appraisal calculator: asking price - recon - pack - other - profit = appraisal.</p>
       <label>Pack (added to every car's cost) <input type="number" id="settingsAppraisalPack" /></label>
       <label>Default profit <input type="number" id="settingsAppraisalTargetGross" /></label>
+
+      <div class="ca-section-title">Alerts</div>
+      <label>Alert managers when a new lead isn't contacted within (minutes) <input type="number" min="1" id="settingsLeadEscalationMinutes" /></label>
 
       <div class="ca-section-title">Road to the Sale</div>
       <p class="send-text-hint" style="margin-top:-4px;">The 7 steps on every customer's page. Rename them to match how your store sells. Greet, Vehicle, Trade, Write-up, and Delivery also check themselves off automatically.</p>

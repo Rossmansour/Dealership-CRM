@@ -16,6 +16,7 @@ const audit = require('./audit');
 const encryption = require('./encryption');
 const vinDecoder = require('./vin');
 const photos = require('./photos');
+const alerts = require('./alerts');
 const keys = require('./keys');
 const providers = require('./providers');
 
@@ -84,6 +85,7 @@ const TAX_RATES_SEED_VERSION = 2;
 // for that user's dealership (req.dealershipId).
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
+app.use('/api', alerts.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -152,7 +154,9 @@ function defaultFeeSettings() {
     appraisalPack: 0,
     appraisalTargetGross: 2500,
     // Road to the Sale: the 7 steps shown on each customer. Stores can rename them.
-    roadmapLabels: ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery']
+    roadmapLabels: ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery'],
+    // Alert managers when a new lead goes this long without any contact.
+    leadEscalationMinutes: 15
   };
 }
 
@@ -649,7 +653,21 @@ async function createLead(q, req, fields) {
   };
   if (lead.carId && !lead.wishList.includes(lead.carId)) lead.wishList = [lead.carId, ...lead.wishList];
   await store.insert(q, 'leads', req.dealershipId, lead);
+  await alertAssignments(q, req, null, lead);
   return lead;
+}
+
+// Alerts the people newly assigned to a customer (not whoever did it).
+async function alertAssignments(q, req, before, after) {
+  const newlyAssigned = LEAD_ASSIGNMENTS.map(f => after[f]).filter(id => id && !LEAD_ASSIGNMENTS.some(f => before && before[f] === id));
+  if (!newlyAssigned.length) return;
+  const transferred = before && before.sales1Id && after.sales1Id && before.sales1Id !== after.sales1Id;
+  await alerts.notify(q, {
+    dealershipId: req.dealershipId, type: 'lead_assigned', userIds: newlyAssigned, actorId: req.user.id,
+    title: `${transferred ? 'Customer transferred to you' : 'Customer assigned to you'}: ${after.name}`,
+    body: [after.phone, after.source && after.source !== 'other' ? after.source : '', `by ${req.user.name}`].filter(Boolean).join(' · '),
+    link: { kind: 'lead', id: after.id }
+  });
 }
 
 app.post('/api/leads', wrap(async (req, res) => {
@@ -678,6 +696,7 @@ app.put('/api/leads/:id', wrap(async (req, res) => {
     if (next.carId && !(next.wishList || []).includes(next.carId)) next.wishList = [next.carId, ...(next.wishList || [])];
     const saved = await store.save(q, 'leads', req.dealershipId, lead.id, next);
     await audit.updated(q, req, 'lead', lead, saved);
+    await alertAssignments(q, req, lead, saved);
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Lead not found' });
@@ -931,6 +950,12 @@ app.post('/api/leads/:id/push-deal', wrap(async (req, res) => {
       ...(car && !lead.carId ? { carId: car.id, wishList: [car.id, ...(lead.wishList || []).filter(id => id !== car.id)] } : {}),
       creditAppSync: { ...(lead.creditAppSync || {}), pushedAt: new Date().toISOString(), pushedBy: { id: req.user.id, name: req.user.name }, dealId: deal.id }
     });
+    await alerts.notify(q, {
+      dealershipId: req.dealershipId, type: 'deal_pushed', useRoles: true, actorId: req.user.id,
+      title: `Deal D-${deal.dealNumber} pushed: ${lead.name}`,
+      body: [car ? [car.year, car.make, car.model].join(' ') : 'No vehicle yet', trade ? 'with trade' : '', `by ${req.user.name}`].filter(Boolean).join(' · '),
+      link: { kind: 'deal', id: deal.id }
+    });
     return { deal };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
@@ -952,6 +977,11 @@ app.post('/api/leads/:id/push-credit', wrap(async (req, res) => {
     });
     await audit.updated(q, req, 'deal', deal, saved, 'Credit app pushed from the customer page');
     const updatedLead = await noteOnLead(q, req, lead, `Credit app pushed to D-${deal.dealNumber}`);
+    await alerts.notify(q, {
+      dealershipId: req.dealershipId, type: 'credit_pushed', useRoles: true, actorId: req.user.id,
+      title: `Credit app pushed: ${lead.name}`, body: `Deal D-${deal.dealNumber} · by ${req.user.name}`,
+      link: { kind: 'deal', id: deal.id }
+    });
     await store.save(q, 'leads', req.dealershipId, lead.id, {
       ...updatedLead, creditAppSync: { ...(lead.creditAppSync || {}), pushedAt: new Date().toISOString(), pushedBy: { id: req.user.id, name: req.user.name }, dealId: deal.id }
     });
@@ -977,7 +1007,14 @@ app.post('/api/leads/:id/trades', wrap(async (req, res) => {
     const appraisal = await createAppraisal(q, req, { ...fields, leadId: lead.id, source: 'trade_in', dealId: null }, {
       appraisedBy: null, requestedBy: { id: req.user.id, name: req.user.name }
     });
-    await noteOnLead(q, req, lead, `Trade added: ${[appraisal.year, appraisal.make, appraisal.model].filter(Boolean).join(' ') || appraisal.vin} -- sent to Appraisals (A-${appraisal.appraisalNumber})`);
+    const vehicle = [appraisal.year, appraisal.make, appraisal.model].filter(Boolean).join(' ') || appraisal.vin;
+    await noteOnLead(q, req, lead, `Trade added: ${vehicle} -- sent to Appraisals (A-${appraisal.appraisalNumber})`);
+    await alerts.notify(q, {
+      dealershipId: req.dealershipId, type: 'trade_needs_appraisal', useRoles: true, actorId: req.user.id,
+      title: `Trade to appraise: ${vehicle}`,
+      body: [`For ${lead.name}`, appraisal.mileage ? `${Number(appraisal.mileage).toLocaleString('en-US')} mi` : '', `from ${req.user.name}`].filter(Boolean).join(' · '),
+      link: { kind: 'appraisal', id: appraisal.id }
+    });
     return { appraisal };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
@@ -1028,6 +1065,15 @@ async function taskFields(q, req, body, current = {}) {
   return { fields: out };
 }
 
+async function alertTaskAssigned(q, req, task) {
+  await alerts.notify(q, {
+    dealershipId: req.dealershipId, type: 'task_assigned', userIds: [task.assignedTo.id], actorId: req.user.id,
+    title: `${TASK_TYPE_LABELS[task.type] || 'Task'} for you: ${task.leadName}`,
+    body: [task.title, `from ${req.user.name}`].filter(Boolean).join(' · '),
+    link: { kind: 'lead', id: task.leadId }, dueAt: task.dueAt
+  });
+}
+
 app.get('/api/tasks', wrap(async (req, res) => {
   let tasks = await store.list(store.pool, 'tasks', req.dealershipId);
   const { leadId, status, assignedTo } = req.query;
@@ -1055,6 +1101,7 @@ app.post('/api/tasks', wrap(async (req, res) => {
     };
     await store.insert(q, 'tasks', req.dealershipId, task);
     await audit.created(q, req, 'task', task);
+    await alertTaskAssigned(q, req, task);
     return { task };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
@@ -1068,8 +1115,13 @@ app.put('/api/tasks/:id', wrap(async (req, res) => {
     if (task.status !== 'open') return { status: 409, error: 'Only open tasks can be changed.' };
     const { fields, error } = await taskFields(q, req, req.body, task);
     if (error) return { status: 400, error };
-    const saved = await store.save(q, 'tasks', req.dealershipId, task.id, { ...task, ...fields });
+    const saved = await store.save(q, 'tasks', req.dealershipId, task.id, {
+      ...task, ...fields,
+      // Moved to a new time: it can alert again when that time comes.
+      ...(fields.dueAt && fields.dueAt !== task.dueAt ? { dueAlertedAt: undefined } : {})
+    });
     await audit.updated(q, req, 'task', task, saved);
+    if (saved.assignedTo.id !== task.assignedTo.id) await alertTaskAssigned(q, req, saved);
     return { task: saved };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
@@ -1817,6 +1869,16 @@ async function pushCreditAppBackToCustomer(q, req, deal, before, after) {
   }, ...(lead.activities || [])];
   await store.save(q, 'leads', req.dealershipId, lead.id, updated);
   await audit.updated(q, req, 'lead', lead, updated, `Pushed back from deal D-${deal.dealNumber}`);
+  if (statusChanged) {
+    const labels = { not_submitted: 'not submitted', pending: 'pending', approved: 'approved', conditional: 'conditional', declined: 'declined' };
+    await alerts.notify(q, {
+      dealershipId: req.dealershipId, type: 'credit_status', actorId: req.user.id,
+      userIds: [lead.sales1Id, lead.sales2Id, lead.creditAppSync && lead.creditAppSync.pushedBy && lead.creditAppSync.pushedBy.id],
+      title: `Credit ${labels[after.status] || after.status}: ${lead.name}`,
+      body: `Deal D-${deal.dealNumber} · by ${req.user.name}`,
+      link: { kind: 'lead', id: lead.id }
+    });
+  }
 }
 
 app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
@@ -2036,6 +2098,18 @@ app.put('/api/appraisals/:id', wrap(async (req, res) => {
     if (!next.appraisedBy && next.offer && next.offer !== appraisal.offer) next.appraisedBy = { id: req.user.id, name: req.user.name };
     trackOfferChange(appraisal, next, req);
     const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, next);
+    if (saved.offer && saved.offer !== appraisal.offer && saved.leadId) {
+      const lead = await store.get(q, 'leads', req.dealershipId, saved.leadId);
+      if (lead) {
+        await alerts.notify(q, {
+          dealershipId: req.dealershipId, type: 'trade_appraised', actorId: req.user.id,
+          userIds: [saved.requestedBy && saved.requestedBy.id, lead.sales1Id, lead.sales2Id],
+          title: `Trade appraised at $${Number(saved.offer).toLocaleString('en-US')}: ${[saved.year, saved.make, saved.model].filter(Boolean).join(' ')}`,
+          body: `For ${lead.name} · by ${req.user.name}`,
+          link: { kind: 'lead', id: lead.id }
+        });
+      }
+    }
     await audit.updated(q, req, 'appraisal',
       { ...appraisal, dateUpdated: undefined, offerHistory: undefined },
       { ...saved, dateUpdated: undefined, offerHistory: undefined });
@@ -2688,6 +2762,8 @@ if (require.main === module) {
         }
         console.log(`Car CRM server running at http://localhost:${PORT}`);
       });
+      // Time-based alerts (tasks coming due, leads nobody has contacted).
+      setInterval(() => runAlertSweep().catch(err => console.error('Alert check failed:', err.message)), 60 * 1000);
     })
     .catch(err => {
       console.error('Failed to start:', err);
@@ -2695,4 +2771,6 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, bootstrap };
+const runAlertSweep = () => alerts.sweep(getSettings);
+
+module.exports = { app, bootstrap, runAlertSweep };
