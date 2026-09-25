@@ -92,6 +92,17 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Lenders** (RouteOne, Dealertrack, CUDL) are submitted to from the deal's Credit Application tab -- "Not available yet" until those partners approve the store
 - **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
 
+**Alerts (the bell)**
+- A bell in the top bar with an unread count (red when something is high priority). It checks every 30 seconds, rings when something new arrives, and can chime
+- Alerts go to the people who need to act, never to whoever caused them:
+  - **Customer assigned or transferred to you** (Sales 1/2, BDC 1/2)
+  - **New lead not contacted** within the store's limit (Admin → Fee Defaults, default 15 minutes) -- to managers
+  - **Task or appointment assigned to you**, and **due now**
+  - **Trade waiting for appraisal** (managers) and **your trade was appraised** (the salesperson)
+  - **Deal / credit app pushed** (F&I and managers) and **credit status changed** by F&I (the salesperson)
+- Click an alert to open the customer, appraisal, or deal. Snooze (1 hour, 3 hours, tomorrow -- it comes back unread), dismiss, select all, dismiss selected, mark all read; Unread / All
+- **My Alerts** (⚙ in the panel): each person turns each type on or off and sets priority and sound. Email, text, and phone push delivery -- and alerts for customer text replies, internet leads, and opened emails -- show "Not available yet" until those services are connected
+
 **Tasks & Appointments**
 - Each is for a customer, assigned to a staff member, with a due time. Completing one notes the outcome in the customer's history
 - The Sales Pipeline home lists **my tasks due today** (overdue first, in red; managers can switch to everyone's), and **My Tasks Due** is a badge on the left rail

@@ -214,6 +214,21 @@ const MIGRATIONS = [
   );
   -- Customer numbers (C-10001...). Existing customers are numbered on startup.
   ALTER TABLE dealerships ADD COLUMN next_customer_number integer NOT NULL DEFAULT 10001;
+  `,
+  `
+  -- Alerts (the bell): one row per alert per person. Each person's alert
+  -- preferences (which types, priority, sound) live on their user row.
+  CREATE TABLE alerts (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    seq bigserial,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE INDEX alerts_user ON alerts (user_id, seq DESC);
+  ALTER TABLE users ADD COLUMN alert_settings jsonb NOT NULL DEFAULT '{}';
   `
 ];
 

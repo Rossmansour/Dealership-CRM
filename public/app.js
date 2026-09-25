@@ -4644,6 +4644,7 @@ document.getElementById('adminFeeDefaultsBtn').addEventListener('click', async (
   document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
   document.getElementById('settingsAppraisalPack').value = settings.appraisalPack ?? 0;
   document.getElementById('settingsAppraisalTargetGross').value = settings.appraisalTargetGross ?? 2500;
+  document.getElementById('settingsLeadEscalationMinutes').value = settings.leadEscalationMinutes ?? 15;
   const roadmapLabels = (settings.roadmapLabels && settings.roadmapLabels.length === 7) ? settings.roadmapLabels : DEFAULT_ROADMAP_LABELS;
   document.getElementById('settingsRoadmapLabels').innerHTML = roadmapLabels.map((label, i) =>
     html`<label>${i + 1} <input type="text" maxlength="24" data-roadmap-step="${i}" value="${label}" /></label>`).join('');
@@ -4674,6 +4675,7 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
     dmvFeePercentage: document.getElementById('settingsDmvFeePercentage').value,
     appraisalPack: Number(document.getElementById('settingsAppraisalPack').value) || 0,
     appraisalTargetGross: Number(document.getElementById('settingsAppraisalTargetGross').value) || 0,
+    leadEscalationMinutes: Math.max(1, Number(document.getElementById('settingsLeadEscalationMinutes').value) || 15),
     roadmapLabels: [...document.querySelectorAll('[data-roadmap-step]')]
       .map((input, i) => input.value.trim().slice(0, 24) || DEFAULT_ROADMAP_LABELS[i]),
   };
@@ -5022,6 +5024,212 @@ async function init() {
   if (staffRes.ok) staffList = await staffRes.json();
   if (settingsRes.ok) appSettings = await settingsRes.json();
   loadAll();
+  startAlertPolling();
 }
+
+// ---------- Alerts (the bell) ----------
+// Checks for new alerts every 30 seconds. New ones light up the bell;
+// high priority ones shake it, and ones set to make a sound chime.
+
+const ALERT_ICONS = {
+  lead_assigned: '👤', lead_escalation: '⏱', task_assigned: '📋', task_due: '⏰', trade_needs_appraisal: '🚗',
+  trade_appraised: '💲', deal_pushed: '📄', credit_pushed: '📝', credit_status: '✅'
+};
+let alertsFilter = 'unread';
+let alertsShown = [];
+let lastAlertSeq = null;
+let alertPollTimer = null;
+
+function startAlertPolling() {
+  refreshAlertCount(true);
+  clearInterval(alertPollTimer);
+  alertPollTimer = setInterval(() => refreshAlertCount(false), 30000);
+}
+
+async function refreshAlertCount(first) {
+  let data;
+  try {
+    const res = await fetch(`${API}/alerts/count`);
+    if (!res.ok) return;
+    data = await res.json();
+  } catch (err) { return; }
+  const badge = document.getElementById('alertsBadge');
+  badge.hidden = !data.unread;
+  badge.textContent = data.unread > 99 ? '99+' : data.unread;
+  badge.classList.toggle('high', !!data.high);
+  const isNew = !first && data.latest && data.latest !== lastAlertSeq && data.unread > 0;
+  lastAlertSeq = data.latest;
+  if (isNew) {
+    const bell = document.getElementById('alertsBellBtn');
+    bell.classList.remove('ring'); void bell.offsetWidth; bell.classList.add('ring');
+    const newest = await fetchAlerts('unread');
+    const fresh = newest[0];
+    if (fresh && fresh.sound) playAlertChime();
+    if (!document.getElementById('alertsPanel').hidden) renderAlerts();
+    // Things behind the alert (a new lead, a task) are likely new too.
+    loadAll();
+  }
+}
+
+function playAlertChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    [880, 1175].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + i * 0.16 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.16 + 0.3);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.16);
+      osc.stop(ctx.currentTime + i * 0.16 + 0.32);
+    });
+  } catch (err) { /* sound is a nice-to-have */ }
+}
+
+async function fetchAlerts(filter) {
+  const res = await fetch(`${API}/alerts?filter=${filter}`);
+  return res.ok ? res.json() : [];
+}
+
+function timeAgo(iso) {
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+async function renderAlerts() {
+  const list = document.getElementById('alertsList');
+  alertsShown = await fetchAlerts(alertsFilter);
+  document.querySelectorAll('[data-alert-filter]').forEach(b => b.classList.toggle('active', b.dataset.alertFilter === alertsFilter));
+  document.getElementById('alertsSelectAll').checked = false;
+  updateAlertSelection();
+  list.innerHTML = alertsShown.length ? alertsShown.map(a => html`
+    <div class="alert-item ${a.readAt ? '' : 'unread'} ${a.priority === 'high' ? 'high' : ''}" data-alert="${a.id}">
+      <input type="checkbox" class="alert-check" aria-label="Select" />
+      <button type="button" class="alert-main" data-open-alert="${a.id}">
+        <span class="alert-icon">${ALERT_ICONS[a.type] || '🔔'}</span>
+        <span class="alert-text">
+          <span class="alert-title">${a.title}</span>
+          ${a.body ? html`<span class="alert-body">${a.body}</span>` : ''}
+          ${a.dueAt ? html`<span class="alert-body">Due ${new Date(a.dueAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>` : ''}
+          <span class="alert-time">${timeAgo(a.createdAt)}</span>
+        </span>
+      </button>
+      <div class="alert-actions">
+        <select class="alert-snooze" aria-label="Snooze" title="Snooze">
+          <option value="">Snooze</option><option value="1">1 hour</option><option value="3">3 hours</option><option value="tomorrow">Tomorrow 8am</option>
+        </select>
+        <button type="button" class="alert-dismiss" data-dismiss-alert="${a.id}" title="Dismiss" aria-label="Dismiss">✕</button>
+      </div>
+    </div>`).join('') : html`<div class="alerts-empty">${alertsFilter === 'unread' ? "You're all caught up." : 'No alerts.'}</div>`;
+}
+
+function updateAlertSelection() {
+  const any = document.querySelectorAll('#alertsList .alert-check:checked').length;
+  document.getElementById('alertsDismissSelectedBtn').disabled = !any;
+}
+
+async function alertRequest(path, body) {
+  await fetch(`${API}/alerts/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  await Promise.all([renderAlerts(), refreshAlertCount(true)]);
+}
+
+// Opens whatever the alert is about.
+async function openAlertTarget(link) {
+  if (!link) return;
+  const find = () => (link.kind === 'lead' ? leads : link.kind === 'deal' ? deals : appraisals).some(r => r.id === link.id);
+  if (!find()) await loadAll();
+  if (!find()) { alert('That record is no longer there.'); return; }
+  document.getElementById('alertsPanel').hidden = true;
+  if (link.kind === 'lead') openLeadProfile(link.id);
+  else if (link.kind === 'appraisal') { closeCustomerPage(); openAppraisal(link.id); }
+  else if (link.kind === 'deal') { closeCustomerPage(); openDealWorkspace(link.id); }
+}
+
+document.getElementById('alertsBellBtn').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const panel = document.getElementById('alertsPanel');
+  panel.hidden = !panel.hidden;
+  document.getElementById('alertsBellBtn').setAttribute('aria-expanded', String(!panel.hidden));
+  if (!panel.hidden) await renderAlerts();
+});
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('alertsPanel');
+  if (!panel.hidden && !e.target.closest('.alerts-wrap')) panel.hidden = true;
+});
+document.getElementById('alertsPanel').addEventListener('click', async (e) => {
+  const filter = e.target.closest('[data-alert-filter]');
+  if (filter) { alertsFilter = filter.dataset.alertFilter; return renderAlerts(); }
+  const open = e.target.closest('[data-open-alert]');
+  if (open) {
+    const a = alertsShown.find(x => x.id === open.dataset.openAlert);
+    if (a && !a.readAt) fetch(`${API}/alerts/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [a.id] }) }).then(() => refreshAlertCount(true));
+    return openAlertTarget(a && a.link);
+  }
+  const dismiss = e.target.closest('[data-dismiss-alert]');
+  if (dismiss) return alertRequest('dismiss', { ids: [dismiss.dataset.dismissAlert] });
+});
+document.getElementById('alertsList').addEventListener('change', (e) => {
+  if (e.target.classList.contains('alert-check')) return updateAlertSelection();
+  if (e.target.classList.contains('alert-snooze') && e.target.value) {
+    const id = e.target.closest('[data-alert]').dataset.alert;
+    let until;
+    if (e.target.value === 'tomorrow') { until = new Date(); until.setDate(until.getDate() + 1); until.setHours(8, 0, 0, 0); }
+    else until = new Date(Date.now() + Number(e.target.value) * 3600000);
+    alertRequest('snooze', { ids: [id], until: until.toISOString() });
+  }
+});
+document.getElementById('alertsSelectAll').addEventListener('change', (e) => {
+  document.querySelectorAll('#alertsList .alert-check').forEach(c => { c.checked = e.target.checked; });
+  updateAlertSelection();
+});
+document.getElementById('alertsDismissSelectedBtn').addEventListener('click', () => {
+  const ids = [...document.querySelectorAll('#alertsList .alert-check:checked')].map(c => c.closest('[data-alert]').dataset.alert);
+  if (ids.length) alertRequest('dismiss', { ids });
+});
+document.getElementById('alertsReadAllBtn').addEventListener('click', () => alertRequest('read', { all: true }));
+
+// ----- My alert settings -----
+let alertSettings = [];
+document.getElementById('alertsSettingsBtn').addEventListener('click', async () => {
+  document.getElementById('alertsPanel').hidden = true;
+  const res = await fetch(`${API}/alerts/settings`);
+  if (!res.ok) return;
+  alertSettings = await res.json();
+  const groups = [...new Set(alertSettings.map(t => t.category))];
+  document.getElementById('alertSettingsList').innerHTML = groups.map(g => html`
+    <div class="ca-section-title">${g}</div>
+    <table class="alert-settings-table">
+      <tr><th>On</th><th>Alert</th><th>Priority</th><th>Sound</th><th>How</th></tr>
+      ${alertSettings.filter(t => t.category === g).map(t => html`
+        <tr data-alert-type="${t.key}" class="${t.available ? '' : 'unavailable'}">
+          <td><input type="checkbox" data-field="enabled" ${t.enabled ? html`checked` : ''} ${t.available ? '' : html`disabled`} aria-label="On" /></td>
+          <td><strong>${t.label}</strong><div class="audit-note">${t.description}</div></td>
+          <td>${t.available ? html`<select data-field="priority"><option value="normal" ${t.priority === 'normal' ? html`selected` : ''}>Normal</option><option value="high" ${t.priority === 'high' ? html`selected` : ''}>High</option></select>` : html`<span class="audit-note">Not available yet</span>`}</td>
+          <td><input type="checkbox" data-field="sound" ${t.sound ? html`checked` : ''} ${t.available ? '' : html`disabled`} aria-label="Sound" /></td>
+          <td class="alert-delivery"><span class="on">In app</span>${t.delivery.later.map(d => html`<span class="later" title="Not available yet">${{ email: 'Email', text: 'Text', push: 'Phone' }[d]}</span>`)}</td>
+        </tr>`)}
+    </table>`).join('') + html`<p class="audit-note">Email, text, and phone alerts are not available yet -- they need those services connected.</p>`;
+  document.getElementById('alertSettingsModal').classList.add('active');
+});
+document.getElementById('alertSettingsCancelBtn').addEventListener('click', () => document.getElementById('alertSettingsModal').classList.remove('active'));
+document.getElementById('alertSettingsSaveBtn').addEventListener('click', async () => {
+  const payload = {};
+  document.querySelectorAll('#alertSettingsList tr[data-alert-type]:not(.unavailable)').forEach(row => {
+    payload[row.dataset.alertType] = {
+      enabled: row.querySelector('[data-field="enabled"]').checked,
+      priority: row.querySelector('[data-field="priority"]').value,
+      sound: row.querySelector('[data-field="sound"]').checked
+    };
+  });
+  await fetch(`${API}/alerts/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  document.getElementById('alertSettingsModal').classList.remove('active');
+});
 
 init();
