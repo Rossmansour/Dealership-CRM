@@ -194,6 +194,7 @@ function showView(view) {
   if (view === 'leads') setLeadsView('table');
   if (view === 'board') setLeadsView('kanban');
   if (view === 'appraisals') showAppraisalList();
+  if (view === 'reports') openReportsView();
   window.scrollTo(0, 0);
 }
 
@@ -281,6 +282,348 @@ function renderStats(stats) {
       <div class="value">${c.value}</div>
     </div>
   `).join('');
+}
+
+// ---------- Reports center ----------
+// Pick a report on the left; filter by dates, lead source, and (for
+// managers) salesperson. Every number that counts customers can be
+// clicked to see exactly which ones. Salespeople see their own numbers.
+
+const REPORT_INFO = {
+  overview: { title: 'Store Snapshot', desc: 'Inventory, sales, and leads right now.' },
+  'response-time': { title: 'Response Time', desc: 'How fast new leads got a first call, text, email, or showroom visit. Notes and status changes don\'t count.' },
+  'lead-source': { title: 'Lead Source', desc: 'Where leads came from, and how many were contacted, came in for an appointment, and bought.' },
+  scorecard: { title: 'Salesperson Activity', desc: 'What each person did: calls, texts, emails, showroom visits, tasks, and sales.' },
+  appointments: { title: 'Appointments', desc: 'Appointments set for the dates picked, and how many showed. "Not marked" = the time passed and nobody marked it done or cancelled.' },
+  'sold-units': { title: 'Sold Units', desc: 'Cars delivered in the dates picked, with front gross (selling price minus cost) and days to sell.' }
+};
+let currentReport = 'overview';
+let reportData = null;
+let reportTables = []; // what Export CSV / Print use: [{ title, headers, rows }]
+
+function reportRangeDates() {
+  const key = document.getElementById('reportRange').value;
+  const now = new Date();
+  const day = (d, offset = 0) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + offset); return x; };
+  const today = day(now);
+  switch (key) {
+    case 'today': return [today, day(now, 1)];
+    case 'yesterday': return [day(now, -1), today];
+    case 'week': { const start = day(now, -((now.getDay() + 6) % 7)); return [start, day(now, 1)]; }
+    case 'last7': return [day(now, -6), day(now, 1)];
+    case 'month': return [new Date(now.getFullYear(), now.getMonth(), 1), day(now, 1)];
+    case 'lastMonth': return [new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth(), 1)];
+    case 'last30': return [day(now, -29), day(now, 1)];
+    case 'last90': return [day(now, -89), day(now, 1)];
+    case 'year': return [new Date(now.getFullYear(), 0, 1), day(now, 1)];
+    case 'custom': {
+      const f = document.getElementById('reportFrom').value;
+      const t = document.getElementById('reportTo').value;
+      const from = f ? new Date(`${f}T00:00`) : day(now, -29);
+      const to = t ? day(new Date(`${t}T00:00`), 1) : day(now, 1);
+      return [from, to];
+    }
+    default: return [day(now, -29), day(now, 1)];
+  }
+}
+
+function fmtMinutes(m) {
+  if (m === null || m === undefined) return '--';
+  if (m < 1) return '< 1 min';
+  if (m < 60) return `${Math.round(m)} min`;
+  if (m < 24 * 60) { const h = Math.floor(m / 60); const r = Math.round(m % 60); return r ? `${h} hr ${r} min` : `${h} hr`; }
+  return `${(m / 1440).toFixed(1)} days`;
+}
+const fmtPct = p => (p === null || p === undefined ? '--' : `${p}%`);
+
+function renderReportPersonOptions() {
+  const sel = document.getElementById('reportPerson');
+  const current = sel.value;
+  sel.innerHTML = html`<option value="">Everyone</option>` + staffList.map(u => html`<option value="${u.id}">${u.name}</option>`).join('');
+  sel.value = current;
+  document.getElementById('reportPersonLabel').hidden = !userCan('viewAllReports');
+}
+
+function selectReport(key) {
+  currentReport = key;
+  document.querySelectorAll('.reports-nav-item').forEach(b => b.classList.toggle('active', b.dataset.report === key));
+  document.getElementById('reportTitle').textContent = REPORT_INFO[key].title;
+  document.getElementById('reportDesc').textContent = REPORT_INFO[key].desc;
+  const overview = key === 'overview';
+  document.getElementById('reportFilters').hidden = overview;
+  document.getElementById('reportActions').hidden = overview;
+  document.getElementById('statsGrid').hidden = !overview;
+  document.getElementById('reportBody').innerHTML = '';
+  if (!overview) runReport();
+}
+
+async function runReport() {
+  const key = currentReport;
+  if (key === 'overview') return;
+  const [from, to] = reportRangeDates();
+  const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+  const source = document.getElementById('reportSource').value;
+  const person = document.getElementById('reportPerson').value;
+  if (source) params.set('source', source);
+  if (person && userCan('viewAllReports')) params.set('userId', person);
+  const body = document.getElementById('reportBody');
+  body.innerHTML = html`<p class="audit-note">Running the report...</p>`;
+  const res = await fetch(`${API}/reports/${key}?${params}`);
+  const data = await res.json().catch(() => ({}));
+  if (key !== currentReport) return; // they picked another report meanwhile
+  if (!res.ok) { body.innerHTML = html`<p class="send-text-status-error">${data.error || 'Could not run the report.'}</p>`; return; }
+  reportData = data;
+  const toLabel = new Date(to.getTime() - 1);
+  document.getElementById('reportScope').textContent =
+    `${from.toLocaleDateString()} – ${toLabel.toLocaleDateString()}${data.scope === 'mine' ? ' · your numbers' : ''}`;
+  reportTables = [];
+  body.innerHTML = REPORT_RENDERERS[key](data);
+}
+
+// A number that opens the customers behind it.
+function drillNum(c, label, display) {
+  const shown = display !== undefined ? display : (c ? c.n : 0);
+  if (!c || !c.ids || !c.ids.length) return html`<span class="report-num">${shown}</span>`;
+  return html`<button type="button" class="report-num link" data-drill="${JSON.stringify(c.ids)}" data-drill-label="${label}">${shown}</button>`;
+}
+
+function kpiTiles(kpis) {
+  return html`<div class="report-kpis">${kpis.map(k => {
+    const value = k.minutes !== undefined ? fmtMinutes(k.minutes) : k.percent !== undefined ? fmtPct(k.percent)
+      : k.money !== undefined ? (k.money === null ? '--' : money(Math.round(k.money))) : (k.value ?? '--');
+    const inner = html`<span class="report-kpi-value">${value}</span><span class="report-kpi-label">${k.label}</span>`;
+    return k.ids && k.ids.length
+      ? html`<button type="button" class="report-kpi ${k.warn ? 'warn' : ''}" data-drill="${JSON.stringify(k.ids)}" data-drill-label="${k.label}" title="See these customers">${inner}</button>`
+      : html`<div class="report-kpi ${k.warn ? 'warn' : ''}">${inner}</div>`;
+  })}</div>`;
+}
+
+// Horizontal bars: one series, one color; the value sits at the bar's end.
+// Hover shows the exact number; click opens the customers behind it.
+function barChart(title, items, { valueText, muted } = {}) {
+  const max = Math.max(1, ...items.map(i => i.value || 0));
+  return html`<figure class="report-chart">
+    <figcaption>${title}</figcaption>
+    ${items.map(i => {
+      const w = Math.max(i.value ? 2 : 0, Math.round(((i.value || 0) / max) * 100));
+      const text = valueText ? valueText(i) : String(i.value || 0);
+      const clickable = i.ids && i.ids.length;
+      return html`<div class="bar-row">
+        <span class="bar-label">${i.warn ? '⚠ ' : ''}${i.label}</span>
+        <${new SafeHtml(clickable ? 'button type="button"' : 'div')} class="bar-track ${clickable ? 'clickable' : ''}" ${clickable ? html`data-drill="${JSON.stringify(i.ids)}" data-drill-label="${i.label}"` : ''}
+          data-tip="${i.label}: ${text}${clickable ? ' -- click to see them' : ''}">
+          <span class="bar ${muted && muted(i) ? 'muted' : ''}" style="width:${w}%"></span>
+          <span class="bar-value">${text}</span>
+        </${new SafeHtml(clickable ? 'button' : 'div')}>
+      </div>`;
+    })}
+  </figure>`;
+}
+
+function reportTable(title, headers, rows, csvRows) {
+  reportTables.push({ title, headers, rows: csvRows });
+  return html`<div class="report-table-wrap">
+    <div class="cp-section-head">${title}</div>
+    <table class="data-table report-table">
+      <thead><tr>${headers.map(h => html`<th>${h}</th>`)}</tr></thead>
+      <tbody>${rows.length ? rows : html`<tr><td colspan="${headers.length}" class="audit-note">Nothing for these dates.</td></tr>`}</tbody>
+    </table>
+  </div>`;
+}
+
+const REPORT_RENDERERS = {
+  'response-time': (d) => {
+    const row = (g, isSource) => html`<tr><td>${isSource ? formatSource(g.label) : g.label}</td>
+      <td>${drillNum(g.leads, `${g.label}: leads`)}</td><td>${fmtMinutes(g.avgMinutes)}</td><td>${fmtMinutes(g.medianMinutes)}</td>
+      <td>${drillNum(g.within5, `${g.label}: within 5 min`)}</td><td>${drillNum(g.within60, `${g.label}: within 1 hour`, `${g.within60.n} (${fmtPct(g.pctWithin60)})`)}</td>
+      <td class="${g.none.n ? 'report-warn' : ''}">${drillNum(g.none, `${g.label}: no response yet`)}</td></tr>`;
+    const csv = (g, name) => [name, g.leads.n, fmtMinutes(g.avgMinutes), fmtMinutes(g.medianMinutes), g.within5.n, g.within60.n, fmtPct(g.pctWithin60), g.none.n];
+    const heads = ['', 'Leads', 'Average', 'Median', 'Within 5 min', 'Within 1 hour', 'No response yet'];
+    return kpiTiles(d.kpis) +
+      barChart('How fast leads got a first response', d.buckets.map(b => ({ label: b.label, value: b.n, ids: b.ids, warn: b.key === 'none' && b.n > 0 })),
+        { muted: i => i.label === 'No response yet' }) +
+      reportTable('By salesperson (Sales 1)', ['Salesperson', ...heads.slice(1)], d.bySalesperson.map(g => row(g, false)), d.bySalesperson.map(g => csv(g, g.label))) +
+      reportTable('By lead source', ['Source', ...heads.slice(1)], d.bySource.map(g => row(g, true)), d.bySource.map(g => csv(g, formatSource(g.label))));
+  },
+  'lead-source': (d) => kpiTiles(d.kpis) +
+    barChart('Leads by source', d.rows.map(r => ({ label: formatSource(r.label), value: r.leads.n, ids: r.leads.ids }))) +
+    reportTable('Sources', ['Source', 'Leads', 'Contacted', 'Appts set', 'Showed', 'Sold', 'Closing %', 'Avg response'],
+      d.rows.map(r => html`<tr><td>${formatSource(r.label)}</td><td>${drillNum(r.leads, `${formatSource(r.label)}: leads`)}</td>
+        <td>${drillNum(r.contacted, `${formatSource(r.label)}: contacted`)}</td><td>${drillNum(r.apptsSet, `${formatSource(r.label)}: appointments set`)}</td>
+        <td>${drillNum(r.apptsShown, `${formatSource(r.label)}: showed`)}</td><td>${drillNum(r.sold, `${formatSource(r.label)}: sold`)}</td>
+        <td>${fmtPct(r.closingPct)}</td><td>${fmtMinutes(r.avgMinutes)}</td></tr>`),
+      d.rows.map(r => [formatSource(r.label), r.leads.n, r.contacted.n, r.apptsSet.n, r.apptsShown.n, r.sold.n, fmtPct(r.closingPct), fmtMinutes(r.avgMinutes)])),
+  scorecard: (d) => kpiTiles(d.kpis) +
+    barChart('Calls, texts, and emails per person', d.rows.map(r => ({ label: r.label, value: r.calls.n + r.texts.n + r.emails.n }))) +
+    reportTable('Per person', ['Person', 'New leads', 'Calls', 'Texts', 'Emails', 'Visits', 'Tasks done', 'Overdue now', 'Sold'],
+      d.rows.map(r => html`<tr><td>${r.label}</td><td>${drillNum(r.newLeads, `${r.label}: new leads`)}</td>
+        <td>${drillNum(r.calls, `${r.label}: customers called`)}</td><td>${drillNum(r.texts, `${r.label}: customers texted`)}</td>
+        <td>${drillNum(r.emails, `${r.label}: customers emailed`)}</td><td>${drillNum(r.visits, `${r.label}: showroom visits`)}</td>
+        <td>${drillNum(r.tasksDone, `${r.label}: tasks done`, r.tasksDoneCount)}</td>
+        <td class="${r.overdueCount ? 'report-warn' : ''}">${drillNum(r.overdue, `${r.label}: overdue tasks`, r.overdueCount)}</td>
+        <td>${drillNum(r.sold, `${r.label}: sold`, r.soldCount)}</td></tr>`),
+      d.rows.map(r => [r.label, r.newLeads.n, r.calls.n, r.texts.n, r.emails.n, r.visits.n, r.tasksDoneCount, r.overdueCount, r.soldCount])),
+  appointments: (d) => kpiTiles(d.kpis) +
+    reportTable('Per person', ['Person', 'Set', 'Showed', 'Cancelled', 'Not marked', 'Upcoming', 'Show rate', 'Sold after showing'],
+      d.rows.map(r => html`<tr><td>${r.label}</td><td>${drillNum(r.set, `${r.label}: appointments`)}</td>
+        <td>${drillNum(r.shown, `${r.label}: showed`)}</td><td>${drillNum(r.cancelled, `${r.label}: cancelled`)}</td>
+        <td class="${r.missed.n ? 'report-warn' : ''}">${drillNum(r.missed, `${r.label}: not marked`)}</td><td>${drillNum(r.upcoming, `${r.label}: upcoming`)}</td>
+        <td>${fmtPct(r.showPct)}</td><td>${drillNum(r.sold, `${r.label}: sold after showing`)}</td></tr>`),
+      d.rows.map(r => [r.label, r.set.n, r.shown.n, r.cancelled.n, r.missed.n, r.upcoming.n, fmtPct(r.showPct), r.sold.n])),
+  'sold-units': (d) => kpiTiles(d.kpis) +
+    barChart('Units sold per salesperson', d.rows.map(r => ({ label: r.label, value: r.unitCount, ids: r.units.ids }))) +
+    reportTable('Per salesperson', ['Salesperson', 'Units', 'Total gross', 'Average gross'],
+      d.rows.map(r => html`<tr><td>${r.label}</td><td>${drillNum(r.units, `${r.label}: sold`, r.unitCount)}</td><td>${money(Math.round(r.gross))}</td><td>${money(Math.round(r.avgGross))}</td></tr>`),
+      d.rows.map(r => [r.label, r.unitCount, Math.round(r.gross), Math.round(r.avgGross)])) +
+    reportTable('Deals', ['Sold', 'Deal', 'Customer', 'Vehicle', 'Stock #', 'Price', 'Gross', 'Days to sell', 'Salesperson'],
+      d.deals.map(r => html`<tr><td>${new Date(r.dateSold).toLocaleDateString()}</td>
+        <td><button type="button" class="deal-number-link" onclick="openDealWorkspace(${js(r.dealId)})">D-${r.dealNumber}</button></td>
+        <td>${r.leadId ? html`<button type="button" class="link-btn" onclick="openLeadProfile(${js(r.leadId)})">${r.customer}</button>` : r.customer}</td>
+        <td>${r.vehicle}</td><td>${r.stockNumber}</td><td>${money(r.price)}</td><td>${money(r.gross)}</td><td>${r.daysToSell ?? '--'}</td><td>${r.salesperson}</td></tr>`),
+      d.deals.map(r => [new Date(r.dateSold).toLocaleDateString(), `D-${r.dealNumber}`, r.customer, r.vehicle, r.stockNumber, r.price, r.gross, r.daysToSell ?? '', r.salesperson]))
+};
+
+// ----- Drill-down: the customers behind a number -----
+function openReportDrill(ids, label) {
+  const list = ids.map(id => reportData.leads.find(l => l.id === id)).filter(Boolean);
+  document.getElementById('reportDrillTitle').textContent = `${label} (${list.length})`;
+  document.getElementById('reportDrillList').innerHTML = html`
+    <table class="data-table report-table">
+      <thead><tr><th>Customer</th><th>Source</th><th>Came in</th><th>First response</th><th>Salesperson</th><th>Status</th></tr></thead>
+      <tbody>${list.map(l => html`<tr>
+        <td><button type="button" class="link-btn" data-drill-open="${l.id}">${l.name}</button>${l.phone ? html`<div class="inventory-trim">${l.phone}</div>` : ''}</td>
+        <td>${formatSource(l.source)}</td><td>${new Date(l.dateAdded).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
+        <td class="${l.responseMinutes === null ? 'report-warn' : ''}">${l.responseMinutes === null ? 'None yet' : fmtMinutes(l.responseMinutes)}</td>
+        <td>${l.salesperson}</td><td>${l.sold ? 'Sold' : l.status}</td></tr>`)}</tbody>
+    </table>`;
+  document.getElementById('reportDrillModal').classList.add('active');
+}
+document.getElementById('reportBody').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-drill]');
+  if (el) openReportDrill(JSON.parse(el.dataset.drill), el.dataset.drillLabel);
+});
+document.getElementById('reportDrillList').addEventListener('click', (e) => {
+  const open = e.target.closest('[data-drill-open]');
+  if (!open) return;
+  document.getElementById('reportDrillModal').classList.remove('active');
+  openLeadProfile(open.dataset.drillOpen);
+});
+document.getElementById('reportDrillCloseBtn').addEventListener('click', () => document.getElementById('reportDrillModal').classList.remove('active'));
+
+// Bar tooltips
+const barTip = document.createElement('div');
+barTip.className = 'bar-tooltip';
+barTip.hidden = true;
+document.body.appendChild(barTip);
+document.getElementById('reportBody').addEventListener('mousemove', (e) => {
+  const track = e.target.closest('[data-tip]');
+  if (!track) { barTip.hidden = true; return; }
+  barTip.textContent = track.dataset.tip;
+  barTip.hidden = false;
+  barTip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - barTip.offsetWidth - 8)}px`;
+  barTip.style.top = `${e.clientY + 14}px`;
+});
+document.getElementById('reportBody').addEventListener('mouseleave', () => { barTip.hidden = true; });
+
+// ----- Filters -----
+document.querySelectorAll('.reports-nav-item').forEach(b => b.addEventListener('click', () => selectReport(b.dataset.report)));
+document.getElementById('reportRange').addEventListener('change', (e) => {
+  document.querySelectorAll('.report-custom').forEach(l => { l.hidden = e.target.value !== 'custom'; });
+  runReport();
+});
+['reportFrom', 'reportTo', 'reportSource', 'reportPerson'].forEach(id => document.getElementById(id).addEventListener('change', runReport));
+
+// ----- Export, print, save -----
+function reportFilterSummary() {
+  const range = document.getElementById('reportRange');
+  const source = document.getElementById('reportSource');
+  const person = document.getElementById('reportPerson');
+  return [document.getElementById('reportScope').textContent, range.options[range.selectedIndex].text,
+    source.value ? source.options[source.selectedIndex].text : 'All sources',
+    userCan('viewAllReports') ? (person.value ? person.options[person.selectedIndex].text : 'Everyone') : ''].filter(Boolean).join(' · ');
+}
+
+document.getElementById('reportCsvBtn').addEventListener('click', () => {
+  if (!reportData) return;
+  const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [[REPORT_INFO[currentReport].title], [reportFilterSummary()], []];
+  for (const k of reportData.kpis) {
+    lines.push([k.label, k.minutes !== undefined ? fmtMinutes(k.minutes) : k.percent !== undefined ? fmtPct(k.percent) : k.money !== undefined ? Math.round(k.money || 0) : k.value]);
+  }
+  for (const t of reportTables) lines.push([], [t.title], t.headers, ...t.rows);
+  const blob = new Blob([lines.map(r => r.map(esc).join(',')).join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${currentReport}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+document.getElementById('reportPrintBtn').addEventListener('click', () => {
+  if (!reportData) return;
+  const w = window.open('', '_blank');
+  if (!w) return;
+  const kpis = document.querySelector('#reportBody .report-kpis');
+  const tables = [...document.querySelectorAll('#reportBody .report-table-wrap')].map(t => t.outerHTML).join('');
+  w.document.write(`<!doctype html><title>${escapeHtml(REPORT_INFO[currentReport].title)}</title>
+    <style>body{font-family:system-ui,sans-serif;color:#111;margin:24px}h1{margin:0 0 4px}p{color:#555;margin:0 0 16px}
+    .report-kpis{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px}.report-kpi{border:1px solid #ccc;border-radius:8px;padding:8px 12px;display:flex;flex-direction:column;background:none;font:inherit;color:inherit}
+    .report-kpi-value{font-size:20px;font-weight:700}.report-kpi-label{font-size:12px;color:#555}
+    table{width:100%;border-collapse:collapse;margin:6px 0 18px;font-size:12px}th,td{border-bottom:1px solid #ddd;padding:5px;text-align:left}
+    button{border:none;background:none;font:inherit;color:inherit;padding:0}.cp-section-head{font-weight:700;margin-top:12px}.inventory-trim{color:#666;font-size:11px}</style>
+    <h1>${escapeHtml(REPORT_INFO[currentReport].title)}</h1><p>${escapeHtml(reportFilterSummary())}</p>${kpis ? kpis.outerHTML : ''}${tables}`);
+  w.document.close();
+  w.focus();
+  w.print();
+});
+
+async function loadSavedReports() {
+  const res = await fetch(`${API}/reports/saved`);
+  const saved = res.ok ? await res.json() : [];
+  document.getElementById('savedReportsList').innerHTML = saved.length ? saved.map(r => html`
+    <div class="saved-report">
+      <button type="button" class="reports-nav-item" data-saved='${JSON.stringify(r)}'>☆ ${r.name}</button>
+      <button type="button" class="recon-remove" data-delete-saved="${r.id}" title="Delete" aria-label="Delete saved report">✕</button>
+    </div>`).join('') : html`<p class="audit-note">Save a report setup to find it here.</p>`;
+}
+document.getElementById('savedReportsList').addEventListener('click', async (e) => {
+  const del = e.target.closest('[data-delete-saved]');
+  if (del) {
+    if (!confirm('Delete this saved report?')) return;
+    await fetch(`${API}/reports/saved/${del.dataset.deleteSaved}`, { method: 'DELETE' });
+    return loadSavedReports();
+  }
+  const btn = e.target.closest('[data-saved]');
+  if (!btn) return;
+  const r = JSON.parse(btn.dataset.saved);
+  document.getElementById('reportRange').value = r.filters.range || 'last30';
+  document.querySelectorAll('.report-custom').forEach(l => { l.hidden = r.filters.range !== 'custom'; });
+  document.getElementById('reportFrom').value = r.filters.from || '';
+  document.getElementById('reportTo').value = r.filters.to || '';
+  document.getElementById('reportSource').value = r.filters.source || '';
+  document.getElementById('reportPerson').value = r.filters.userId || '';
+  selectReport(r.report);
+});
+document.getElementById('reportSaveBtn').addEventListener('click', async () => {
+  const name = prompt('Name this report setup (e.g. "Internet leads this week"):', `${REPORT_INFO[currentReport].title} -- ${document.getElementById('reportRange').selectedOptions[0].text}`);
+  if (!name) return;
+  const res = await fetch(`${API}/reports/saved`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name, report: currentReport,
+      filters: {
+        range: document.getElementById('reportRange').value, from: document.getElementById('reportFrom').value, to: document.getElementById('reportTo').value,
+        source: document.getElementById('reportSource').value, userId: document.getElementById('reportPerson').value
+      }
+    })
+  });
+  if (res.ok) loadSavedReports();
+});
+
+function openReportsView() {
+  renderReportPersonOptions();
+  loadSavedReports();
+  selectReport(currentReport);
 }
 
 // ---------- Inventory table ----------

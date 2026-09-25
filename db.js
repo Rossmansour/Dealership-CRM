@@ -229,6 +229,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX alerts_user ON alerts (user_id, seq DESC);
   ALTER TABLE users ADD COLUMN alert_settings jsonb NOT NULL DEFAULT '{}';
+  `,
+  `
+  -- Each person's saved report setups (report + filters).
+  ALTER TABLE users ADD COLUMN saved_reports jsonb NOT NULL DEFAULT '[]';
   `
 ];
 

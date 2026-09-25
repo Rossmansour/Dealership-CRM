@@ -149,8 +149,67 @@
 
   <!-- REPORTS (store numbers) -->
   <section id="dashboard" class="tab-panel">
-    <h1 class="pipeline-title">Reports</h1>
-    <div class="stats-grid" id="statsGrid"></div>
+    <div class="reports-layout">
+      <aside class="reports-nav" aria-label="Reports">
+        <div class="reports-nav-title">Reports</div>
+        <button type="button" class="reports-nav-item active" data-report="overview">Store Snapshot</button>
+        <button type="button" class="reports-nav-item" data-report="response-time">Response Time</button>
+        <button type="button" class="reports-nav-item" data-report="lead-source">Lead Source</button>
+        <button type="button" class="reports-nav-item" data-report="scorecard">Salesperson Activity</button>
+        <button type="button" class="reports-nav-item" data-report="appointments">Appointments</button>
+        <button type="button" class="reports-nav-item" data-report="sold-units">Sold Units</button>
+        <div class="reports-nav-title">My saved reports</div>
+        <div id="savedReportsList"></div>
+      </aside>
+      <div class="reports-main">
+        <div class="reports-head">
+          <div>
+            <h1 class="pipeline-title" id="reportTitle">Store Snapshot</h1>
+            <p class="reports-desc" id="reportDesc"></p>
+          </div>
+          <div class="reports-actions" id="reportActions">
+            <button type="button" class="btn-secondary btn-small" id="reportSaveBtn">☆ Save report</button>
+            <button type="button" class="btn-secondary btn-small" id="reportCsvBtn">⬇ Export CSV</button>
+            <button type="button" class="btn-secondary btn-small" id="reportPrintBtn">🖨 Print</button>
+          </div>
+        </div>
+        <div class="reports-filters" id="reportFilters">
+          <label>Dates
+            <select id="reportRange">
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="week">This week</option>
+              <option value="last7">Last 7 days</option>
+              <option value="month" selected>This month</option>
+              <option value="lastMonth">Last month</option>
+              <option value="last30">Last 30 days</option>
+              <option value="last90">Last 90 days</option>
+              <option value="year">This year</option>
+              <option value="custom">Custom...</option>
+            </select>
+          </label>
+          <label class="report-custom" hidden>From <input type="date" id="reportFrom" /></label>
+          <label class="report-custom" hidden>To <input type="date" id="reportTo" /></label>
+          <label>Source
+            <select id="reportSource">
+              <option value="">All sources</option>
+              <option value="walk-in">Walk-in</option>
+              <option value="phone">Phone</option>
+              <option value="website">Website</option>
+              <option value="referral">Referral</option>
+              <option value="autotrader">Autotrader</option>
+              <option value="cargurus">CarGurus</option>
+              <option value="facebook">Facebook Marketplace</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label id="reportPersonLabel">Salesperson <select id="reportPerson"></select></label>
+          <span class="reports-scope" id="reportScope"></span>
+        </div>
+        <div class="stats-grid" id="statsGrid"></div>
+        <div id="reportBody"></div>
+      </div>
+    </div>
   </section>
 
   <!-- INVENTORY -->
@@ -808,6 +867,15 @@
         <button type="button" class="btn-primary" id="cpPushCreditBtn">Save &amp; Push Credit to DMS</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Report drill-down: the customers behind a number -->
+<div class="modal" id="reportDrillModal">
+  <div class="modal-content modal-wide">
+    <h2 id="reportDrillTitle">Customers</h2>
+    <div id="reportDrillList"></div>
+    <div class="modal-actions"><button type="button" class="btn-secondary" id="reportDrillCloseBtn">Close</button></div>
   </div>
 </div>
 

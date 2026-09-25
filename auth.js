@@ -36,6 +36,7 @@ const PERMISSIONS = {
   editSettings: ['admin'],                     // fee defaults and tax rate tables
   manageUsers: ['admin'],
   viewAuditLog: ['admin', 'sales_manager'],
+  viewAllReports: ['admin', 'sales_manager', 'finance'], // everyone else sees their own numbers
   manageIntegrations: ['admin']               // connect outside systems like the key machine
 };
 
@@ -456,6 +457,7 @@ router.put('/users/:id', requirePermission('manageUsers'), wrap(async (req, res)
 module.exports = {
   ROLES,
   PERMISSIONS,
+  can,
   router,
   requireLogin,
   requirePermission,
