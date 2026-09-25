@@ -17,6 +17,7 @@ const encryption = require('./encryption');
 const vinDecoder = require('./vin');
 const photos = require('./photos');
 const alerts = require('./alerts');
+const reports = require('./reports');
 const keys = require('./keys');
 const providers = require('./providers');
 
@@ -86,6 +87,7 @@ const TAX_RATES_SEED_VERSION = 2;
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);
+app.use('/api', reports.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -1145,7 +1147,8 @@ async function closeTask(req, res, status) {
         id: crypto.randomUUID(),
         type: task.type === 'appointment' ? 'appointment' : 'task',
         text: `${label} ${status === 'done' ? 'completed' : 'cancelled'}${task.title ? ` -- ${task.title}` : ''}${outcome ? `: ${outcome}` : ''}`,
-        date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }, taskId: task.id
+        date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }, taskId: task.id,
+        taskType: task.type, taskStatus: status // reports count completed call/text/email tasks as contact
       }, ...(lead.activities || [])];
       await store.save(q, 'leads', req.dealershipId, lead.id, lead);
     }

@@ -92,6 +92,17 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Lenders** (RouteOne, Dealertrack, CUDL) are submitted to from the deal's Credit Application tab -- "Not available yet" until those partners approve the store
 - **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
 
+**Reports**
+- **Response Time**: how fast new leads got a first call, text, email, or showroom visit (notes don't count; completed call/text/email tasks do). Average and median, % within 5 minutes and 1 hour, a bar chart by time bucket, and tables by salesperson and by source -- including **who never got a response**
+- **Lead Source**: leads, contacted, appointments set and shown, sold, and closing % per source
+- **Salesperson Activity**: new leads, calls, texts, emails, showroom visits, tasks done, overdue tasks, and sold units per person
+- **Appointments**: set, showed, cancelled, not marked, upcoming, show rate, and sold after showing
+- **Sold Units**: units, front gross, and days to sell per salesperson, with every deal listed
+- Filters for dates (today through this year, or custom), lead source, and salesperson. **Every number can be clicked** to see the customers behind it, and each opens their customer page
+- **Export CSV**, **Print**, and **Save report** (your own saved setups, listed on the left)
+- Managers, admins, and F&I see everyone; salespeople see their own numbers
+- **Store Snapshot** keeps the inventory/sales overview that was there before
+
 **Alerts (the bell)**
 - A bell in the top bar with an unread count (red when something is high priority). It checks every 30 seconds, rings when something new arrives, and can chime
 - Alerts go to the people who need to act, never to whoever caused them:
