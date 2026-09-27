@@ -83,6 +83,7 @@ function applyPermissionsToUI() {
   document.getElementById('adminMenuBtn').style.display =
     (userCan('editSettings') || userCan('manageUsers') || userCan('viewAuditLog') || userCan('manageIntegrations') || userCan('manageRotation')) ? '' : 'none';
   document.getElementById('adminRotationBtn').style.display = (userCan('manageRotation') || userCan('editSettings')) ? '' : 'none';
+  renderModuleNav();
   document.getElementById('adminUsersBtn').style.display = userCan('manageUsers') ? '' : 'none';
   document.getElementById('adminAuditLogBtn').style.display = userCan('viewAuditLog') ? '' : 'none';
   document.getElementById('adminIntegrationsBtn').style.display = userCan('manageIntegrations') ? '' : 'none';
@@ -143,6 +144,8 @@ themeToggleBtn.addEventListener('click', () => {
 // panel shown as a table or as a board.
 
 const MODULES = [
+  { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
   { key: 'crm', label: 'CRM', views: ['pipeline', 'leads', 'board', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', label: 'Sales & F&I', views: ['deals'],
@@ -157,14 +160,17 @@ const MODULES = [
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', accounting: 'accounting'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
 const moduleOfView = view => MODULES.find(m => m.views.includes(view));
 
+// Modules someone can't use (e.g. the dashboard for salespeople) aren't shown.
+const moduleVisible = m => !m.permissions || (currentUser && m.permissions.some(p => currentUser.permissions.includes(p)));
+
 function renderModuleNav() {
-  document.getElementById('moduleNav').innerHTML = MODULES.map(m => html`
+  document.getElementById('moduleNav').innerHTML = MODULES.filter(moduleVisible).map(m => html`
     <button type="button" class="rail-item rail-module" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.label}">
       ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
     </button>`).join('');
@@ -196,6 +202,7 @@ function showView(view) {
   if (view === 'board') setLeadsView('kanban');
   if (view === 'appraisals') showAppraisalList();
   if (view === 'reports') openReportsView();
+  if (view === 'execdash') openExecDashboard();
   window.scrollTo(0, 0);
 }
 
@@ -284,6 +291,308 @@ function renderStats(stats) {
     </div>
   `).join('');
 }
+
+// ---------- Dashboard (store / variable / fixed) ----------
+// Month by month: MTD, pace (from the store's open days), forecast (the
+// month's goals), last month, and last year, with Var = pace minus each.
+// The GM sees every tab; sales managers and F&I the variable tab; service
+// and parts managers the fixed tab.
+
+const EXEC_TABS = [['store', 'viewDashboardStore'], ['variable', 'viewDashboardVariable'], ['fixed', 'viewDashboardFixed']];
+let execTab = null;
+let execData = null;
+
+const fmtN = v => (v === null || v === undefined || Number.isNaN(v) ? '--' : Math.round(v).toLocaleString());
+function varCell(v) {
+  if (v === null || v === undefined || Number.isNaN(v)) return html`<td class="var-cell"></td>`;
+  const r = Math.round(v);
+  return html`<td class="var-cell ${r > 0 ? 'var-pos' : r < 0 ? 'var-neg' : ''}">${r > 0 ? '▲ ' : r < 0 ? '▼ ' : ''}${fmtN(Math.abs(r))}</td>`;
+}
+const pvr = (gross, units) => (units ? gross / units : null);
+function drillCell(v, ids, label, kind = 'deals') {
+  if (!ids || !ids.length) return html`<td>${fmtN(v)}</td>`;
+  return html`<td><button type="button" class="report-num link" data-exec-drill="${JSON.stringify(ids)}" data-exec-kind="${kind}" data-exec-label="${label}">${fmtN(v)}</button></td>`;
+}
+
+function openExecDashboard() {
+  const allowed = EXEC_TABS.filter(([, p]) => userCan(p)).map(([t]) => t);
+  document.querySelectorAll('.exec-tab').forEach(b => { b.hidden = !allowed.includes(b.dataset.exec); });
+  if (!execTab || !allowed.includes(execTab)) execTab = allowed[0];
+  const month = document.getElementById('execMonth');
+  if (!month.value) { const d = new Date(); month.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+  runExecDashboard();
+}
+
+async function runExecDashboard() {
+  if (!execTab) return;
+  document.querySelectorAll('.exec-tab').forEach(b => b.classList.toggle('active', b.dataset.exec === execTab));
+  document.getElementById('execChargebacksLabel').hidden = execTab !== 'variable';
+  const month = document.getElementById('execMonth').value;
+  const cb = document.getElementById('execChargebacks').checked ? '1' : '0';
+  const body = document.getElementById('execBody');
+  body.innerHTML = html`<p class="audit-note">Loading...</p>`;
+  const tab = execTab;
+  const res = await fetch(`${API}/dashboard/${tab}?month=${encodeURIComponent(month)}&chargebacks=${cb}`);
+  const data = await res.json().catch(() => ({}));
+  if (tab !== execTab) return;
+  if (!res.ok) { body.innerHTML = html`<p class="send-text-status-error">${data.error || 'Could not load the dashboard.'}</p>`; return; }
+  execData = data;
+  const [y, m] = data.month.split('-').map(Number);
+  const monthName = new Date(y, m - 1, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
+  document.getElementById('execTitle').textContent = `${{ store: 'Store Summary', variable: 'Variable Summary', fixed: 'Fixed Ops Summary' }[tab]} · ${monthName}`;
+  const pace = data.pace || {};
+  document.getElementById('execPace').textContent = pace.totalDays
+    ? `${pace.elapsedDays ?? 0} of ${pace.totalDays} selling days${pace.factor ? ` · pace = MTD × ${(pace.factor).toFixed(2)}` : ''} · Var = pace minus forecast, last month, or last year`
+    : '';
+  body.innerHTML = tab === 'variable' ? renderVariable(data) : tab === 'store' ? renderStoreDash(data) : renderFixed(data);
+}
+
+// A tile: rows MTD / Forecast / Last Mth / Last YR, with actual, pace, var.
+function execTile(title, sub, { mtd, forecast, lastMonth, lastYear, factor, isRate, ids, label }) {
+  const pace = isRate ? null : mtd * factor;
+  const base = isRate ? mtd : pace;
+  const row = (name, value, withVar) => html`<tr><th>${name}</th><td>${fmtN(value)}</td>${isRate ? '' : html`<td></td>`}${withVar && value !== null && value !== undefined ? varCell(base - value) : html`<td class="var-cell"></td>`}</tr>`;
+  return html`<div class="exec-tile">
+    <div class="exec-tile-title">${title}${sub ? html`<span>${sub}</span>` : ''}</div>
+    <table>
+      <tr><th></th><th>Actual</th>${isRate ? '' : html`<th>Pace</th>`}<th>Var</th></tr>
+      <tr><th>MTD</th>${ids ? drillCell(mtd, ids, label) : html`<td>${fmtN(mtd)}</td>`}${isRate ? '' : html`<td>${fmtN(pace)}</td>`}<td class="var-cell"></td></tr>
+      ${row('Forecast', forecast, true)}${row('Last Mth', lastMonth, true)}${row('Last YR', lastYear, true)}
+    </table>
+  </div>`;
+}
+
+function deptNumbers(d, t) {
+  const pick = s => ({
+    units: s[t].units, front: s[t].front, finance: s[t].finance, incentives: s[t].incentives, chargebacks: s[t].chargebacks,
+    retailGross: s[t].gross, gross: s[t].gross + s.wholesale[t].gross
+  });
+  return { mtd: pick(d.mtd), lm: pick(d.lastMonth), ly: pick(d.lastYear) };
+}
+
+function renderVariable(d) {
+  const f = d.pace.factor;
+  const g = d.plan.goals;
+  const N = deptNumbers(d, 'new');
+  const U = deptNumbers(d, 'used');
+  const goalGross = t => g[`${t}Gross`];
+  const goalUnits = t => g[`${t}Units`];
+  const sumGoal = (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0));
+  const ids = t => d.mtd[t].dealIds;
+  const deptRow = (t, X, title) => {
+    const tu = goalUnits(t), tg = goalGross(t);
+    return execTile(`${title} Retail Units`, '', { mtd: X.mtd.units, forecast: tu, lastMonth: X.lm.units, lastYear: X.ly.units, factor: f, ids: ids(t), label: `${title} retail deals` }) +
+      execTile(`${title} Front PVR`, '', { mtd: pvr(X.mtd.front, X.mtd.units), forecast: null, lastMonth: pvr(X.lm.front, X.lm.units), lastYear: pvr(X.ly.front, X.ly.units), isRate: true }) +
+      execTile(`${title} Finance PVR`, '', { mtd: pvr(X.mtd.finance, X.mtd.units), forecast: null, lastMonth: pvr(X.lm.finance, X.lm.units), lastYear: pvr(X.ly.finance, X.ly.units), isRate: true }) +
+      execTile(`${title} Total PVR`, 'incl. incentives', {
+        mtd: pvr(X.mtd.front + X.mtd.finance + X.mtd.incentives, X.mtd.units), forecast: tu && tg !== null ? tg / tu : null,
+        lastMonth: pvr(X.lm.front + X.lm.finance + X.lm.incentives, X.lm.units), lastYear: pvr(X.ly.front + X.ly.finance + X.ly.incentives, X.ly.units), isRate: true
+      }) +
+      execTile(`${title} Variable Gross`, '', { mtd: X.mtd.gross, forecast: tg, lastMonth: X.lm.gross, lastYear: X.ly.gross, factor: f, ids: ids(t), label: `${title} deals` });
+  };
+  const tiles = html`<div class="exec-grid">
+    ${new SafeHtml(execTile('Total Retail Units', '', { mtd: N.mtd.units + U.mtd.units, forecast: sumGoal(goalUnits('new'), goalUnits('used')), lastMonth: N.lm.units + U.lm.units, lastYear: N.ly.units + U.ly.units, factor: f, ids: [...ids('new'), ...ids('used')], label: 'Retail deals' }))}
+    <div class="exec-grid-gap"></div>
+    ${new SafeHtml(execTile('Total Variable Gross', '', { mtd: N.mtd.gross + U.mtd.gross, forecast: sumGoal(goalGross('new'), goalGross('used')), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, factor: f, ids: [...ids('new'), ...ids('used')], label: 'All deals' }))}
+    <div class="exec-row-label">New</div>
+    ${new SafeHtml(deptRow('new', N, 'New'))}
+    <div class="exec-row-label">Pre-Owned</div>
+    ${new SafeHtml(deptRow('used', U, 'Pre-Owned'))}
+  </div>`;
+  return tiles + renderBreakdown(d) + renderTrend(d) + renderExpenses(d, false);
+}
+
+// The detail table: units, gross, and per vehicle by department and line.
+function renderBreakdown(d) {
+  const f = d.pace.factor;
+  const g = d.plan.goals;
+  const rows = [];
+  const unitsCols = (m, ly, goal, ids, label) => html`
+    <td>${fmtN(m.notFinalUnits)}</td><td>${fmtN(m.finalUnits)}</td>${drillCell(m.units, ids, label)}<td>${fmtN(m.units * f)}</td>
+    <td>${fmtN(goal)}</td>${goal === null ? html`<td class="var-cell"></td>` : varCell(m.units * f - goal)}<td>${fmtN(ly.units)}</td>${varCell(m.units * f - ly.units)}`;
+  const grossCols = (mtd, notFinal, final, ly, goal, ids, label) => html`
+    <td>${notFinal === null ? '-' : fmtN(notFinal)}</td><td>${final === null ? '-' : fmtN(final)}</td>${drillCell(mtd, ids, label)}<td>${fmtN(mtd * f)}</td>
+    <td>${fmtN(goal)}</td>${goal === null || goal === undefined ? html`<td class="var-cell"></td>` : varCell(mtd * f - goal)}<td>${fmtN(ly)}</td>${varCell(mtd * f - ly)}`;
+  const blank = n => new SafeHtml('<td>-</td>'.repeat(n));
+  for (const [t, title] of [['new', 'New'], ['used', 'Pre-Owned']]) {
+    const m = d.mtd[t], ly = d.lastYear[t], w = d.mtd.wholesale[t], wly = d.lastYear.wholesale[t];
+    const goalU = g[`${t}Units`], goalG = g[`${t}Gross`];
+    rows.push(html`<tr class="bd-group"><th>▾ ${title} Retail</th>${unitsCols(m, ly, goalU, m.dealIds, `${title} retail`)}${grossCols(m.gross, m.notFinalGross, m.finalGross, ly.gross, goalG, m.dealIds, `${title} retail`)}
+      <td>${fmtN(pvr(m.gross, m.units))}</td><td>${fmtN(goalU && goalG !== null ? goalG / goalU : null)}</td><td>${fmtN(pvr(ly.gross, ly.units))}</td></tr>`);
+    for (const [k, label] of [['front', 'Front (retail)'], ['finance', 'Finance'], ['incentives', 'Incentives'], ['chargebacks', 'Chargebacks']]) {
+      if (k === 'chargebacks' && !d.includeChargebacks) continue;
+      rows.push(html`<tr class="bd-line"><th>${label}</th>${blank(8)}${grossCols(m[k], null, null, ly[k], null, k === 'chargebacks' ? m.chargebackDealIds : m.dealIds, `${title} ${label.toLowerCase()}`)}
+        <td>${fmtN(pvr(m[k], m.units))}</td><td>-</td><td>${fmtN(pvr(ly[k], ly.units))}</td></tr>`);
+    }
+    if (w.units || wly.units) {
+      rows.push(html`<tr class="bd-line"><th>Wholesale</th><td>-</td><td>-</td>${drillCell(w.units, w.carIds, `${title} wholesale`, 'cars')}<td>${fmtN(w.units * f)}</td><td>-</td><td class="var-cell"></td><td>${fmtN(wly.units)}</td>${varCell(w.units * f - wly.units)}
+        <td>-</td><td>-</td>${drillCell(w.gross, w.carIds, `${title} wholesale`, 'cars')}<td>${fmtN(w.gross * f)}</td><td>-</td><td class="var-cell"></td><td>${fmtN(wly.gross)}</td>${varCell(w.gross * f - wly.gross)}
+        <td>${fmtN(pvr(w.gross, w.units))}</td><td>-</td><td>${fmtN(pvr(wly.gross, wly.units))}</td></tr>`);
+    }
+    const totU = m.units, totG = m.gross + w.gross, lyG = ly.gross + wly.gross;
+    rows.push(html`<tr class="bd-total"><th>${title} Total</th><td>${fmtN(m.notFinalUnits)}</td><td>${fmtN(m.finalUnits)}</td><td>${fmtN(totU + w.units)}</td><td>${fmtN((totU + w.units) * f)}</td>
+      <td>${fmtN(goalU)}</td>${goalU === null ? html`<td class="var-cell"></td>` : varCell(totU * f - goalU)}<td>${fmtN(ly.units + wly.units)}</td>${varCell((totU + w.units) * f - ly.units - wly.units)}
+      <td>${fmtN(m.notFinalGross)}</td><td>${fmtN(m.finalGross)}</td><td>${fmtN(totG)}</td><td>${fmtN(totG * f)}</td><td>${fmtN(goalG)}</td>${goalG === null ? html`<td class="var-cell"></td>` : varCell(totG * f - goalG)}
+      <td>${fmtN(lyG)}</td>${varCell(totG * f - lyG)}<td>${fmtN(pvr(totG, totU))}</td><td></td><td>${fmtN(pvr(lyG, ly.units))}</td></tr>`);
+  }
+  const all = s => ({ units: s.new.units + s.used.units, gross: s.new.gross + s.used.gross + s.wholesale.new.gross + s.wholesale.used.gross, nf: s.new.notFinalGross + s.used.notFinalGross, fg: s.new.finalGross + s.used.finalGross });
+  const A = all(d.mtd), L = all(d.lastYear);
+  rows.push(html`<tr class="bd-total bd-grand"><th>Total</th><td>${fmtN(d.mtd.new.notFinalUnits + d.mtd.used.notFinalUnits)}</td><td>${fmtN(d.mtd.new.finalUnits + d.mtd.used.finalUnits)}</td><td>${fmtN(A.units)}</td><td>${fmtN(A.units * f)}</td><td></td><td class="var-cell"></td><td>${fmtN(L.units)}</td>${varCell(A.units * f - L.units)}
+    <td>${fmtN(A.nf)}</td><td>${fmtN(A.fg)}</td><td>${fmtN(A.gross)}</td><td>${fmtN(A.gross * f)}</td><td></td><td class="var-cell"></td><td>${fmtN(L.gross)}</td>${varCell(A.gross * f - L.gross)}
+    <td>${fmtN(pvr(A.gross, A.units))}</td><td></td><td>${fmtN(pvr(L.gross, L.units))}</td></tr>`);
+  return html`<div class="exec-section-title">Breakdown</div>
+    <div class="exec-table-wrap"><table class="exec-table">
+      <thead>
+        <tr><th></th><th colspan="8">Units</th><th colspan="8">Gross</th><th colspan="3">Per Vehicle</th></tr>
+        <tr><th></th><th>Not Final</th><th>Final</th><th>MTD</th><th>Paced</th><th>Forecast</th><th>Var</th><th>Last Year</th><th>Var</th>
+          <th>Not Final</th><th>Final</th><th>MTD</th><th>Paced</th><th>Forecast</th><th>Var</th><th>Last Year</th><th>Var</th><th>MTD</th><th>Forecast</th><th>Last Year</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+function renderTrend(d) {
+  const months = d.trend;
+  const last3 = months.slice(-3);
+  const avg = (list, k) => (list.length ? list.reduce((s, x) => s + x[k], 0) / list.length : null);
+  const label = k => { const [y, m] = k.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString([], { month: 'short', year: '2-digit' }); };
+  const row = (k, title) => {
+    const mtd = d.mtd[k].gross + d.mtd.wholesale[k].gross;
+    const ly = d.lastYear[k].gross + d.lastYear.wholesale[k].gross;
+    const a3 = avg(last3, k);
+    return html`<tr><th>${title}</th><td>${fmtN(avg(months, k))}</td>${last3.map(x => html`<td>${fmtN(x[k])}</td>`)}<td>${fmtN(a3)}</td><td>${fmtN(mtd)}</td>${varCell(a3 === null ? null : mtd - a3)}<td>${fmtN(ly)}</td>${varCell(mtd - ly)}</tr>`;
+  };
+  return html`<div class="exec-section-title">Gross trend</div>
+    <div class="exec-table-wrap"><table class="exec-table exec-trend">
+      <thead><tr><th></th><th>6 MO Avg</th>${last3.map(x => html`<th>${label(x.month)}</th>`)}<th>3 MO Avg</th><th>MTD</th><th>3 MO Var</th><th>Last Year</th><th>YOY Var</th></tr></thead>
+      <tbody>${row('new', 'New')}${row('used', 'Pre-Owned')}</tbody>
+    </table></div>`;
+}
+
+function renderExpenses(d, store) {
+  const f = d.pace.factor;
+  const e = d.plan.expenses;
+  const gross = t => d.mtd[t].gross + d.mtd.wholesale[t].gross;
+  const lines = [['New', gross('new'), e.newVariable], ['Pre-Owned', gross('used'), e.usedVariable]];
+  if (store) lines.push(['Service', null, e.service], ['Parts', null, e.parts], ['General / admin', null, e.general]);
+  const totalGross = lines.reduce((s, l) => s + (l[1] || 0), 0);
+  const totalExp = lines.reduce((s, l) => s + (l[2] || 0), 0);
+  const anyExpense = lines.some(l => l[2] !== null);
+  return html`<div class="exec-section-title">Expenses &amp; Net</div>
+    <div class="exec-table-wrap"><table class="exec-table">
+      <thead><tr><th></th><th>Gross MTD</th><th>Gross Paced</th><th>Expenses (month)</th><th>Net (paced)</th></tr></thead>
+      <tbody>
+        ${lines.map(([name, g, x]) => html`<tr><th>${name}</th><td>${g === null ? html`<span class="audit-note">Not available yet</span>` : fmtN(g)}</td><td>${g === null ? '' : fmtN(g * f)}</td><td>${fmtN(x)}</td>
+          ${g === null || x === null ? html`<td></td>` : varCell(g * f - x)}</tr>`)}
+        <tr class="bd-total"><th>Total</th><td>${fmtN(totalGross)}</td><td>${fmtN(totalGross * f)}</td><td>${anyExpense ? fmtN(totalExp) : '--'}</td>${anyExpense ? varCell(totalGross * f - totalExp) : html`<td></td>`}</tr>
+      </tbody>
+    </table></div>
+    ${anyExpense ? '' : html`<p class="audit-note">Enter this month's expenses under 🎯 Goals &amp; Expenses to see Net.</p>`}`;
+}
+
+function renderStoreDash(d) {
+  const f = d.pace.factor;
+  const g = d.plan.goals;
+  const units = d.mtd.new.units + d.mtd.used.units;
+  const gross = d.mtd.new.gross + d.mtd.used.gross + d.mtd.wholesale.new.gross + d.mtd.wholesale.used.gross;
+  const lmGross = d.lastMonth.new.gross + d.lastMonth.used.gross + d.lastMonth.wholesale.new.gross + d.lastMonth.wholesale.used.gross;
+  const lyGross = d.lastYear.new.gross + d.lastYear.used.gross + d.lastYear.wholesale.new.gross + d.lastYear.wholesale.used.gross;
+  const goal = (a, b) => (g[a] === null && g[b] === null ? null : (g[a] || 0) + (g[b] || 0));
+  const allIds = [...d.mtd.new.dealIds, ...d.mtd.used.dealIds];
+  const inv = d.inventory;
+  return html`<div class="exec-grid exec-grid-store">
+    ${new SafeHtml(execTile('Total Retail Units', '', { mtd: units, forecast: goal('newUnits', 'usedUnits'), lastMonth: d.lastMonth.new.units + d.lastMonth.used.units, lastYear: d.lastYear.new.units + d.lastYear.used.units, factor: f, ids: allIds, label: 'Retail deals' }))}
+    ${new SafeHtml(execTile('Variable Gross', 'sales & F&I', { mtd: gross, forecast: goal('newGross', 'usedGross'), lastMonth: lmGross, lastYear: lyGross, factor: f, ids: allIds, label: 'All deals' }))}
+    <div class="exec-tile exec-na"><div class="exec-tile-title">Fixed Gross<span>service & parts</span></div><p>Not available yet -- needs the Service module.</p>
+      ${g.serviceGross !== null || g.partsGross !== null ? html`<p class="audit-note">Forecast: ${fmtN((g.serviceGross || 0) + (g.partsGross || 0))}</p>` : ''}</div>
+    <div class="exec-tile"><div class="exec-tile-title">Inventory</div>
+      <table><tr><th>Units</th><td>${fmtN(inv.units)}</td></tr><tr><th>New / Pre-Owned</th><td>${fmtN(inv.newUnits)} / ${fmtN(inv.usedUnits)}</td></tr>
+      <tr><th>Cost value</th><td>${fmtN(inv.value)}</td></tr><tr><th>60+ days</th><td class="${inv.aged ? 'report-warn' : ''}">${fmtN(inv.aged)}</td></tr></table></div>
+    <div class="exec-tile"><div class="exec-tile-title">Leads this month</div>
+      <table><tr><th>New leads</th><td>${fmtN(d.leads.count)}</td></tr><tr><th>Sold</th><td>${fmtN(d.leads.sold)}</td></tr>
+      <tr><th>Closing %</th><td>${d.leads.count ? `${Math.round((d.leads.sold / d.leads.count) * 1000) / 10}%` : '--'}</td></tr></table></div>
+  </div>` + renderExpenses(d, true) + renderTrend(d);
+}
+
+function renderFixed(d) {
+  const g = d.plan.goals;
+  const tile = (title, goalValue) => html`<div class="exec-tile exec-na"><div class="exec-tile-title">${title}</div>
+    <table><tr><th>MTD</th><td>--</td></tr><tr><th>Forecast</th><td>${fmtN(goalValue)}</td></tr><tr><th>Last Mth</th><td>--</td></tr><tr><th>Last YR</th><td>--</td></tr></table></div>`;
+  return html`<div class="exec-na-banner"><strong>Service and parts numbers are not available yet.</strong> They fill in once the Service module (repair orders, labor, parts) is built. Goals can be set now.</div>
+    <div class="exec-grid exec-grid-fixed">
+      ${tile('Service Gross', g.serviceGross)}${tile('Parts Gross', g.partsGross)}${tile('Repair Orders', g.repairOrders)}
+      ${tile('Effective Labor Rate', null)}${tile('Hours per RO', null)}
+    </div>`;
+}
+
+// ----- Drill-down -----
+document.getElementById('execBody').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-exec-drill]');
+  if (!el || !execData) return;
+  const ids = new Set(JSON.parse(el.dataset.execDrill));
+  const list = document.getElementById('execDrillList');
+  document.getElementById('execDrillTitle').textContent = `${el.dataset.execLabel} (${ids.size})`;
+  if (el.dataset.execKind === 'cars') {
+    const cars = execData.wholesaleCars.filter(c => ids.has(c.id));
+    list.innerHTML = html`<table class="data-table report-table"><thead><tr><th>Sold</th><th>Vehicle</th><th>Stock #</th><th>Wholesale price</th><th>Cost</th><th>Gross</th></tr></thead>
+      <tbody>${cars.map(c => html`<tr><td>${c.soldAt ? new Date(c.soldAt).toLocaleDateString() : '--'}</td><td>${c.vehicle}</td><td>${c.stockNumber}</td><td>${fmtN(c.price)}</td><td>${fmtN(c.cost)}</td><td>${fmtN(c.gross)}</td></tr>`)}</tbody></table>`;
+  } else {
+    const rows = execData.deals.filter(x => ids.has(x.id));
+    list.innerHTML = html`<table class="data-table report-table"><thead><tr><th>Deal</th><th>Sold</th><th>Customer</th><th>Vehicle</th><th>Front</th><th>Finance</th><th>Incentives</th><th>Total</th><th>Status</th></tr></thead>
+      <tbody>${rows.map(r => html`<tr>
+        <td><button type="button" class="deal-number-link" data-exec-deal="${r.id}">D-${r.dealNumber}</button></td>
+        <td>${r.soldAt ? new Date(r.soldAt).toLocaleDateString() : '--'}</td>
+        <td>${r.leadId ? html`<button type="button" class="link-btn" data-exec-lead="${r.leadId}">${r.customer}</button>` : r.customer}</td>
+        <td>${r.vehicle}${r.stockNumber ? html`<div class="inventory-trim">#${r.stockNumber} · ${r.type === 'new' ? 'New' : 'Pre-Owned'}</div>` : ''}</td>
+        <td>${fmtN(r.front)}</td><td>${fmtN(r.finance)}</td><td>${fmtN(r.incentives)}</td><td><strong>${fmtN(r.total)}</strong>${r.chargeback ? html`<div class="inventory-trim">chargeback ${fmtN(r.chargeback)}</div>` : ''}</td>
+        <td>${r.status === 'finalized' ? 'Final' : 'Not final'}</td></tr>`)}</tbody></table>`;
+  }
+  document.getElementById('execDrillModal').classList.add('active');
+});
+document.getElementById('execDrillList').addEventListener('click', (e) => {
+  const deal = e.target.closest('[data-exec-deal]');
+  const lead = e.target.closest('[data-exec-lead]');
+  if (!deal && !lead) return;
+  document.getElementById('execDrillModal').classList.remove('active');
+  if (deal) openDealWorkspace(deal.dataset.execDeal); else openLeadProfile(lead.dataset.execLead);
+});
+document.getElementById('execDrillCloseBtn').addEventListener('click', () => document.getElementById('execDrillModal').classList.remove('active'));
+
+// ----- Tabs, month, chargebacks -----
+document.getElementById('execTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-exec]');
+  if (!b) return;
+  execTab = b.dataset.exec;
+  runExecDashboard();
+});
+document.getElementById('execMonth').addEventListener('change', runExecDashboard);
+document.getElementById('execChargebacks').addEventListener('change', runExecDashboard);
+
+// ----- Goals & expenses -----
+const PLAN_GROUPS = [
+  { title: 'Sales goals (variable)', perm: 'viewDashboardVariable', kind: 'goals', fields: [['newUnits', 'New retail units'], ['newGross', 'New variable gross'], ['usedUnits', 'Pre-owned retail units'], ['usedGross', 'Pre-owned variable gross']] },
+  { title: 'Service & parts goals (fixed)', perm: 'viewDashboardFixed', kind: 'goals', fields: [['serviceGross', 'Service gross'], ['partsGross', 'Parts gross'], ['repairOrders', 'Repair orders']] },
+  { title: 'Expenses for the month', perm: 'viewDashboardStore', kind: 'expenses', fields: [['newVariable', 'New department'], ['usedVariable', 'Pre-owned department'], ['service', 'Service'], ['parts', 'Parts'], ['general', 'General / admin']] }
+];
+document.getElementById('execPlanBtn').addEventListener('click', () => {
+  if (!execData) return;
+  const plan = execData.plan;
+  document.getElementById('planTitle').textContent = `Goals & Expenses · ${document.getElementById('execTitle').textContent.split(' · ')[1] || execData.month}`;
+  document.getElementById('planFields').innerHTML = PLAN_GROUPS.filter(grp => userCan(grp.perm)).map(grp => html`
+    <div class="ca-section-title">${grp.title}</div>
+    <div class="form-grid">${grp.fields.map(([k, label]) => html`<label>${label} <input type="number" data-plan-kind="${grp.kind}" data-plan-key="${k}" value="${plan[grp.kind][k] ?? ''}" /></label>`)}</div>`).join('');
+  document.getElementById('planMsg').innerHTML = '';
+  document.getElementById('planModal').classList.add('active');
+});
+document.getElementById('planCancelBtn').addEventListener('click', () => document.getElementById('planModal').classList.remove('active'));
+document.getElementById('planSaveBtn').addEventListener('click', async () => {
+  const body = { goals: {}, expenses: {} };
+  document.querySelectorAll('#planFields [data-plan-key]').forEach(i => { body[i.dataset.planKind][i.dataset.planKey] = i.value; });
+  const res = await fetch(`${API}/dashboard/plan/${execData.month}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); document.getElementById('planMsg').innerHTML = html`<p class="send-text-status-error">${b.error || 'Could not save.'}</p>`; return; }
+  document.getElementById('planModal').classList.remove('active');
+  runExecDashboard();
+});
 
 // ---------- Reports center ----------
 // Pick a report on the left; filter by dates, lead source, and (for
@@ -2160,9 +2469,19 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   document.getElementById('carSourceAppraisal').innerHTML = '';
   setCarPhotosMode(false);
   document.getElementById('carPhotoCount').textContent = '';
+  updateSoldAsFields();
   updateCarGross();
   carModal.classList.add('active');
 });
+
+// "Sold as" only matters once the car is sold; wholesale needs its price.
+function updateSoldAsFields() {
+  const sold = document.getElementById('carStatus').value === 'sold';
+  document.querySelector('.car-sold-as').hidden = !sold;
+  document.querySelector('.car-wholesale').hidden = !(sold && document.getElementById('carSoldAs').value === 'wholesale');
+}
+document.getElementById('carStatus').addEventListener('change', updateSoldAsFields);
+document.getElementById('carSoldAs').addEventListener('change', updateSoldAsFields);
 
 document.getElementById('cancelCarBtn').addEventListener('click', () => {
   carModal.classList.remove('active');
@@ -2191,6 +2510,10 @@ window.editCar = function(id) {
   document.getElementById('carCost').value = car.cost;
   document.getElementById('carPrice').value = car.price;
   document.getElementById('carStatus').value = car.status;
+  document.getElementById('carStockType').value = car.stockType === 'new' ? 'new' : 'used';
+  document.getElementById('carSoldAs').value = car.soldAs === 'wholesale' ? 'wholesale' : 'retail';
+  document.getElementById('carWholesalePrice').value = car.wholesalePrice || '';
+  updateSoldAsFields();
   updateCarGross();
 
   // Photos can only be attached to a car that already exists (it needs
@@ -2306,6 +2629,9 @@ document.getElementById('carForm').addEventListener('submit', async (e) => {
     cost: document.getElementById('carCost').value,
     price: document.getElementById('carPrice').value,
     status: document.getElementById('carStatus').value,
+    stockType: document.getElementById('carStockType').value,
+    soldAs: document.getElementById('carSoldAs').value,
+    wholesalePrice: document.getElementById('carWholesalePrice').value,
   };
 
   if (id) {
@@ -3917,6 +4243,12 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('dealLicenseFee').value = deal.licenseFee || 0;
   document.getElementById('dealDealerFees').value = deal.dealerFees || 0;
   document.getElementById('dealGapPremium').value = deal.gapPremium || 0;
+  document.getElementById('dealFiProductCost').value = deal.fiProductCost || 0;
+  document.getElementById('dealReserve').value = deal.reserve || 0;
+  document.getElementById('dealIncentives').value = deal.incentives || 0;
+  document.getElementById('dealChargebackAmount').value = deal.chargebackAmount || 0;
+  document.getElementById('dealChargebackDate').value = deal.chargebackDate ? deal.chargebackDate.slice(0, 10) : '';
+  document.getElementById('dealAccounting').hidden = !userCan('editDealAccounting');
   document.getElementById('dealServicePremium').value = deal.servicePremium || 0;
   document.getElementById('dealMaintenancePremium').value = deal.maintenancePremium || 0;
   document.getElementById('dealAftermarketAmount').value = deal.aftermarketAmount || 0;
@@ -4117,6 +4449,13 @@ function buildDeskingPayload() {
     licenseFee: document.getElementById('dealLicenseFee').value,
     dealerFees: document.getElementById('dealDealerFees').value,
     gapPremium: document.getElementById('dealGapPremium').value,
+    ...(userCan('editDealAccounting') ? {
+      fiProductCost: document.getElementById('dealFiProductCost').value,
+      reserve: document.getElementById('dealReserve').value,
+      incentives: document.getElementById('dealIncentives').value,
+      chargebackAmount: document.getElementById('dealChargebackAmount').value,
+      chargebackDate: document.getElementById('dealChargebackDate').value ? `${document.getElementById('dealChargebackDate').value}T12:00:00` : null
+    } : {}),
     servicePremium: document.getElementById('dealServicePremium').value,
     maintenancePremium: document.getElementById('dealMaintenancePremium').value,
     aftermarketAmount: document.getElementById('dealAftermarketAmount').value,
@@ -4990,6 +5329,7 @@ document.getElementById('adminFeeDefaultsBtn').addEventListener('click', async (
   document.getElementById('settingsDmvFeeMethod').value = settings.dmvFeeMethod || 'flat';
   document.getElementById('settingsDmvFeePercentage').value = settings.dmvFeePercentage || 1.5;
   document.getElementById('settingsAppraisalPack').value = settings.appraisalPack ?? 0;
+  document.getElementById('settingsNewCarPack').value = settings.newCarPack ?? 0;
   document.getElementById('settingsAppraisalTargetGross').value = settings.appraisalTargetGross ?? 2500;
   document.getElementById('settingsLeadEscalationMinutes').value = settings.leadEscalationMinutes ?? 15;
   const roadmapLabels = (settings.roadmapLabels && settings.roadmapLabels.length === 7) ? settings.roadmapLabels : DEFAULT_ROADMAP_LABELS;
@@ -5021,6 +5361,7 @@ document.getElementById('feeDefaultsForm').addEventListener('submit', async (e) 
     dmvFeeMethod: document.getElementById('settingsDmvFeeMethod').value,
     dmvFeePercentage: document.getElementById('settingsDmvFeePercentage').value,
     appraisalPack: Number(document.getElementById('settingsAppraisalPack').value) || 0,
+    newCarPack: Number(document.getElementById('settingsNewCarPack').value) || 0,
     appraisalTargetGross: Number(document.getElementById('settingsAppraisalTargetGross').value) || 0,
     leadEscalationMinutes: Math.max(1, Number(document.getElementById('settingsLeadEscalationMinutes').value) || 15),
     roadmapLabels: [...document.querySelectorAll('[data-roadmap-step]')]
@@ -5213,6 +5554,9 @@ const ROLE_OPTIONS = [
   ['bdc', 'BDC Agent'],
   ['finance', 'F&I Manager'],
   ['sales_manager', 'Sales Manager'],
+  ['service_manager', 'Service Manager'],
+  ['parts_manager', 'Parts Manager'],
+  ['general_manager', 'General Manager'],
   ['admin', 'Admin']
 ];
 

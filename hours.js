@@ -83,4 +83,4 @@ function businessMinutesBetween(startMs, endMs, hours) {
   return total;
 }
 
-module.exports = { DAYS, defaultStoreHours, cleanStoreHours, businessMinutesBetween, validTimezone, tzOffsetMinutes };
+module.exports = { DAYS, defaultStoreHours, cleanStoreHours, businessMinutesBetween, validTimezone, tzOffsetMinutes, zonedToUtc, localDate };
