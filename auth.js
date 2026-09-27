@@ -22,23 +22,32 @@ const MIN_PASSWORD_LENGTH = 8;
 // Role keys stored in the database, and the names shown on screen.
 const ROLES = {
   admin: 'Admin',
+  general_manager: 'General Manager',
   sales_manager: 'Sales Manager',
   salesperson: 'Salesperson',
   bdc: 'BDC Agent',
-  finance: 'F&I Manager'
+  finance: 'F&I Manager',
+  service_manager: 'Service Manager',
+  parts_manager: 'Parts Manager'
 };
 
 // Which roles can do the actions that aren't open to everyone. Anything
 // not listed here is available to every signed-in user. Changing who can
 // do what means editing this table only.
 const PERMISSIONS = {
-  editInventory: ['admin', 'sales_manager'],   // add/edit/delete cars and photos
-  deleteRecords: ['admin', 'sales_manager'],   // delete leads, deals, activity log entries
+  editInventory: ['admin', 'general_manager', 'sales_manager'],   // add/edit/delete cars and photos
+  deleteRecords: ['admin', 'general_manager', 'sales_manager'],   // delete leads, deals, activity log entries
   editSettings: ['admin'],                     // fee defaults and tax rate tables
   manageUsers: ['admin'],
-  viewAuditLog: ['admin', 'sales_manager'],
-  viewAllReports: ['admin', 'sales_manager', 'finance'], // everyone else sees their own numbers
-  manageRotation: ['admin', 'sales_manager'],  // round robin members, and who's taking leads
+  viewAuditLog: ['admin', 'general_manager', 'sales_manager'],
+  viewAllReports: ['admin', 'general_manager', 'sales_manager', 'finance'], // everyone else sees their own numbers
+  manageRotation: ['admin', 'general_manager', 'sales_manager'],  // round robin members, and who's taking leads
+  // Dashboard: the GM sees the whole store; sales & F&I the variable side;
+  // service & parts the fixed side. Goals and expenses follow the same split.
+  viewDashboardStore: ['admin', 'general_manager'],
+  viewDashboardVariable: ['admin', 'general_manager', 'sales_manager', 'finance'],
+  viewDashboardFixed: ['admin', 'general_manager', 'service_manager', 'parts_manager'],
+  editDealAccounting: ['admin', 'general_manager', 'sales_manager', 'finance'], // F&I cost, reserve, incentives, chargebacks
   manageIntegrations: ['admin']               // connect outside systems like the key machine
 };
 

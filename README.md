@@ -92,6 +92,16 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Lenders** (RouteOne, Dealertrack, CUDL) are submitted to from the deal's Credit Application tab -- "Not available yet" until those partners approve the store
 - **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
 
+**Dashboard** (top of the left sidebar)
+- **Store** (GM): retail units, variable gross, fixed gross, inventory (new/pre-owned, cost value, 60+ days), leads and closing %, expenses & net by department, gross trend
+- **Variable** (Sales & F&I): tiles for retail units, front / finance / total PVR, and variable gross -- total, new, and pre-owned -- each with MTD, pace, forecast, last month, and last year, and the variance to each; a breakdown (not final / final / MTD / paced / forecast / last year for units, gross, and per vehicle; front, finance, incentives, chargebacks, wholesale); a 6-month gross trend; expenses & net
+- **Fixed** (Service & Parts): laid out with goals now; the numbers fill in once the Service module exists
+- **Pace** = MTD ÷ open days so far × open days in the month (store hours). **Forecast** = the month's goals (🎯 Goals & Expenses). Var = pace minus forecast / last month / last year, green or red with ▲▼
+- **Gross per deal**: front = price − cost − pack (new and pre-owned packs) + doc fee − trade over-allowance; finance = F&I products − product cost + reserve; plus incentives; chargebacks count in the month they come back (toggle). Counted in the month delivered; "final" once finalized. Wholesale = wholesale price − cost
+- Click any unit count or gross to see the deals behind it
+- Who sees it: **GM** (and admins) everything; **sales managers and F&I** the variable tab; **service and parts managers** the fixed tab. New roles: General Manager, Service Manager, Parts Manager
+- New data it uses: **New / Pre-Owned** and **wholesale** on each car; **F&I product cost, reserve, incentives, and chargebacks** on each deal (managers and F&I only); a **new-car pack** in Fee Defaults
+
 **Round Robin & Store Hours** (Admin → 🔄 Round Robin & Store Hours)
 - **Two rotations at once**: every new lead gets a salesperson (Sales 1) **and** a BDC agent (BDC 1), each from its own rotation, taking turns in the order you set (▲▼ to reorder)
 - Each rotation can be turned on or off and limited to certain lead sources (e.g. BDC only for website and CarGurus leads)

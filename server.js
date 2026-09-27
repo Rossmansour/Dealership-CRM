@@ -18,6 +18,7 @@ const vinDecoder = require('./vin');
 const photos = require('./photos');
 const alerts = require('./alerts');
 const reports = require('./reports');
+const dashboard = require('./dashboard');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -89,6 +90,7 @@ app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);
 app.use('/api', reports.router);
+app.use('/api', dashboard.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -111,7 +113,7 @@ const SERVER_MANAGED_FIELDS = {
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
-  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated'],
+  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'deliveredAt', 'finalizedAt'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
@@ -154,7 +156,8 @@ function defaultFeeSettings() {
     dmvFeeMethod: 'flat', // 'flat' | 'percentage'
     dmvFeePercentage: 1.5,
     // Appraisal offer calculator: max offer = target retail - recon - pack - target gross
-    appraisalPack: 0,
+    appraisalPack: 0, // pack on pre-owned cars
+    newCarPack: 0,
     appraisalTargetGross: 2500,
     // Road to the Sale: the 7 steps shown on each customer. Stores can rename them.
     roadmapLabels: ['Greet', 'Needs', 'Vehicle', 'Demo Drive', 'Trade', 'Write-up', 'Delivery'],
@@ -180,6 +183,7 @@ app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
     const current = await getSettings(q, req.dealershipId);
     const incoming = { ...(req.body || {}) };
     delete incoming.rotations; // changed through /api/rotations (managers can too)
+    delete incoming.monthlyPlan; // changed through /api/dashboard/plan
     if ('storeHours' in incoming) incoming.storeHours = storeHours.cleanStoreHours(incoming.storeHours);
     if ('roadmapLabels' in incoming) {
       const labels = Array.isArray(incoming.roadmapLabels) ? incoming.roadmapLabels : [];
@@ -433,6 +437,9 @@ function buildCar(fields) {
     cost: Number(cost) || 0,
     price: Number(price) || 0,
     status: status || 'available', // available | pending | sold
+    stockType: fields.stockType === 'new' ? 'new' : 'used', // new | used (pre-owned)
+    soldAs: fields.soldAs === 'wholesale' ? 'wholesale' : 'retail', // when sold: to a customer, or wholesaled
+    wholesalePrice: Number(fields.wholesalePrice) || 0,
     photos: [], // array of paths like /uploads/cars/abc123.jpg
     openROs: [], // groundwork for the future Service module -- empty until Service exists
     dateAdded: new Date().toISOString(),
@@ -465,9 +472,11 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     const updates = editableFields('cars', req.body);
     // The edit form sends numbers as text; store real numbers, same as
     // when a car is added (otherwise dashboard totals add up "1" + "2" as "12").
-    for (const field of ['year', 'mileage', 'cost', 'price']) {
+    for (const field of ['year', 'mileage', 'cost', 'price', 'wholesalePrice']) {
       if (field in updates) updates[field] = Number(updates[field]) || 0;
     }
+    if ('stockType' in updates) updates.stockType = updates.stockType === 'new' ? 'new' : 'used';
+    if ('soldAs' in updates) updates.soldAs = updates.soldAs === 'wholesale' ? 'wholesale' : 'retail';
     if ('vin' in updates) updates.vin = vinDecoder.normalizeVin(updates.vin);
     if ('doors' in updates) updates.doors = Number(updates.doors) || null;
 
@@ -1883,7 +1892,23 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
 
     // The deal number, credit app, and creation date can't be changed
     // here (the credit app has its own route below).
-    const merged = { ...deal, ...editableFields('deals', req.body) };
+    const updates = editableFields('deals', req.body);
+    // Store-side money (F&I cost, reserve, incentives, chargebacks) is only
+    // changed by managers and F&I.
+    const ACCOUNTING = ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate'];
+    if (!auth.can(req.user, 'editDealAccounting')) for (const f of ACCOUNTING) delete updates[f];
+    for (const f of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount']) {
+      if (f in updates) updates[f] = Number(String(updates[f]).replace(/[$,\s]/g, '')) || 0;
+    }
+    if ('chargebackDate' in updates) {
+      const d = updates.chargebackDate ? new Date(updates.chargebackDate) : null;
+      updates.chargebackDate = d && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
+    }
+    const merged = { ...deal, ...updates };
+    // When the deal was delivered and finalized (the dashboard counts by these).
+    if (['delivered', 'closed', 'finalized'].includes(merged.status) && !merged.deliveredAt) merged.deliveredAt = new Date().toISOString();
+    if (merged.status === 'finalized' && !merged.finalizedAt) merged.finalizedAt = new Date().toISOString();
+    if (merged.status === 'working') { merged.deliveredAt = null; merged.finalizedAt = null; }
     const calculated = calculateDeal(merged);
 
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });

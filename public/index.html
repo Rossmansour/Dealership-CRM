@@ -26,6 +26,9 @@
   <span class="appbar-module" id="currentModuleName"></span>
 
   <nav class="appbar-nav" aria-label="Main">
+    <button type="button" class="nav-icon" data-view="execdash" data-module="dashboard" title="Dashboard" aria-label="Dashboard">
+      <svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>
+    </button>
     <button type="button" class="nav-icon" data-view="pipeline" data-module="crm" title="Sales Pipeline" aria-label="Sales Pipeline">
       <svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>
     </button>
@@ -112,6 +115,25 @@
 <main>
 
   <!-- SALES PIPELINE (home) -->
+  <!-- DASHBOARD (store / variable / fixed) -->
+  <section id="execDashboard" class="tab-panel">
+    <div class="exec-head">
+      <h1 class="pipeline-title" id="execTitle">Dashboard</h1>
+      <div class="exec-controls">
+        <label class="exec-chargebacks" id="execChargebacksLabel"><input type="checkbox" id="execChargebacks" checked /> Include chargebacks</label>
+        <input type="month" id="execMonth" aria-label="Month" />
+        <button type="button" class="btn-secondary btn-small" id="execPlanBtn">🎯 Goals &amp; Expenses</button>
+      </div>
+    </div>
+    <div class="exec-tabs" id="execTabs" role="tablist">
+      <button type="button" class="exec-tab" data-exec="store">Store</button>
+      <button type="button" class="exec-tab" data-exec="variable">Variable (Sales &amp; F&amp;I)</button>
+      <button type="button" class="exec-tab" data-exec="fixed">Fixed (Service &amp; Parts)</button>
+    </div>
+    <p class="exec-pace" id="execPace"></p>
+    <div id="execBody"></div>
+  </section>
+
   <section id="pipeline" class="tab-panel active">
     <div class="pipeline-header">
       <h1 class="pipeline-title">Sales Pipeline</h1>
@@ -603,6 +625,19 @@
                 <option value="sold">Sold</option>
               </select>
             </label>
+            <label>New / Pre-Owned
+              <select id="carStockType">
+                <option value="used">Pre-Owned</option>
+                <option value="new">New</option>
+              </select>
+            </label>
+            <label class="car-sold-as" hidden>Sold as
+              <select id="carSoldAs">
+                <option value="retail">Retail (to a customer)</option>
+                <option value="wholesale">Wholesale (dealer / auction)</option>
+              </select>
+            </label>
+            <label class="car-wholesale" hidden>Wholesale price <input type="number" id="carWholesalePrice" /></label>
           </div>
           <div class="car-gross" id="carGross"></div>
         </div>
@@ -891,6 +926,29 @@
   </div>
 </div>
 
+<!-- Dashboard: goals (forecast) and expenses for a month -->
+<div class="modal" id="planModal">
+  <div class="modal-content modal-wide">
+    <h2 id="planTitle">Goals &amp; Expenses</h2>
+    <p class="send-text-hint" style="margin-top:-8px;">Goals are the Forecast on the dashboard. Expenses are the month's department expenses, for Net. Leave blank for none.</p>
+    <div id="planFields"></div>
+    <div id="planMsg"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="planCancelBtn">Cancel</button>
+      <button type="button" class="btn-primary" id="planSaveBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dashboard drill-down: the deals behind a number -->
+<div class="modal" id="execDrillModal">
+  <div class="modal-content modal-wide">
+    <h2 id="execDrillTitle">Deals</h2>
+    <div id="execDrillList"></div>
+    <div class="modal-actions"><button type="button" class="btn-secondary" id="execDrillCloseBtn">Close</button></div>
+  </div>
+</div>
+
 <!-- Report drill-down: the customers behind a number -->
 <div class="modal" id="reportDrillModal">
   <div class="modal-content modal-wide">
@@ -1070,6 +1128,16 @@
               <label>Service Contract (ESC) <input type="number" id="dealServicePremium" value="0" /></label>
               <label>Maintenance Plan <input type="number" id="dealMaintenancePremium" value="0" /></label>
               <label>Aftermarket / Accessories <input type="number" id="dealAftermarketAmount" value="0" /></label>
+            </div>
+            <div class="deal-accounting" id="dealAccounting">
+              <div class="ca-section-title">Store Gross <span class="summary-hint">(managers &amp; F&amp;I; feeds the dashboard)</span></div>
+              <div class="form-grid">
+                <label>F&amp;I product cost <input type="number" id="dealFiProductCost" value="0" /></label>
+                <label>Lender reserve <input type="number" id="dealReserve" value="0" /></label>
+                <label>Incentives (dealer cash) <input type="number" id="dealIncentives" value="0" /></label>
+                <label>Chargeback amount <input type="number" id="dealChargebackAmount" value="0" /></label>
+                <label>Chargeback date <input type="date" id="dealChargebackDate" /></label>
+              </div>
             </div>
           </div>
 
@@ -1344,7 +1412,8 @@
 
       <div class="ca-section-title">Appraisals</div>
       <p class="send-text-hint" style="margin-top:-4px;">Used by the appraisal calculator: asking price - recon - pack - other - profit = appraisal.</p>
-      <label>Pack (added to every car's cost) <input type="number" id="settingsAppraisalPack" /></label>
+      <label>Pack on pre-owned cars (added to every car's cost) <input type="number" id="settingsAppraisalPack" /></label>
+      <label>Pack on new cars <input type="number" id="settingsNewCarPack" /></label>
       <label>Default profit <input type="number" id="settingsAppraisalTargetGross" /></label>
 
       <div class="ca-section-title">Alerts</div>
