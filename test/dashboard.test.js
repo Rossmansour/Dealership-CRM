@@ -72,8 +72,15 @@ test('variable: gross per deal, new vs pre-owned, final vs not final, wholesale'
   assert.deepStrictEqual([r.lastMonth.used.units, r.lastMonth.used.front], [1, 500]);
   assert.deepStrictEqual([r.lastYear.used.units, r.lastYear.used.front], [1, 2000]);
   assert.strictEqual(r.pace.totalDays, 27, 'May 2031: 31 days minus 4 closed Sundays');
-  assert.strictEqual(r.trend.length, 6);
-  assert.strictEqual(r.trend[5].month, '2031-04');
+  assert.strictEqual(r.trend.length, 12, 'the 12 months before, for trend lines');
+  assert.strictEqual(r.trend[11].month, '2031-04');
+  assert.strictEqual(r.trend[11].usedUnits, 1);
+  // Review lists: finished deals worth a second look
+  assert.strictEqual(r.exceptions.noProducts.ids.length, 1, 'the pre-owned deal had no F&I products');
+  assert.strictEqual(r.exceptions.chargebacks.ids.length, 1);
+  assert.strictEqual(r.exceptions.negativeFront.ids.length, 0);
+  assert.strictEqual(r.exceptions.overAllowance.ids.length, 0, '$1,000 over is not over the $1,000 limit');
+  assert.ok(r.exceptions.noProducts.ids.every(id => r.deals.some(d => d.id === id)), 'the deals behind them come along');
   assert.strictEqual(r.deals.length, 2);
   const noCb = (await as(manager, 'GET', `/dashboard/variable?month=${MONTH}&chargebacks=0`)).body;
   assert.strictEqual(noCb.mtd.used.gross, 1500);

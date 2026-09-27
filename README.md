@@ -93,10 +93,13 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Outside DMS** (Reynolds, CDK, Tekion, Dealertrack DMS) connection slots under Admin → Integrations, for stores that keep their current DMS -- "Not available yet" until approved
 
 **Dashboard** (top of the left sidebar)
-- **Store** (GM): retail units, variable gross, fixed gross, inventory (new/pre-owned, cost value, 60+ days), leads and closing %, expenses & net by department, gross trend
-- **Variable** (Sales & F&I): tiles for retail units, front / finance / total PVR, and variable gross -- total, new, and pre-owned -- each with MTD, pace, forecast, last month, and last year, and the variance to each; a breakdown (not final / final / MTD / paced / forecast / last year for units, gross, and per vehicle; front, finance, incentives, chargebacks, wholesale); a 6-month gross trend; expenses & net
-- **Fixed** (Service & Parts): laid out with goals now; the numbers fill in once the Service module exists
-- **Pace** = MTD ÷ open days so far × open days in the month (store hours). **Forecast** = the month's goals (🎯 Goals & Expenses). Var = pace minus forecast / last month / last year, green or red with ▲▼
+- **Month pulse** on top: the month in plain English -- how each department is doing, on pace vs goal, gross per car vs last month, and how many selling days are left
+- **Goal bars**: each number is one bar showing what's been made so far, where the month lands on pace, the goal line, and last month / last year ticks, plus a 12-month trend line. Under each, **"What it takes"** to hit the goal (e.g. 9 more cars → 3.0 a day)
+- **Review**: delivered deals worth a second look -- no F&I products, negative front gross, trade over-allowance over $1,000, delivered but not finalized after 3 days, chargebacks this month. Click a count to see the deals
+- **Store** (GM): units and variable gross bars, net on pace after expenses, inventory (new/pre-owned, cost value, 60+ days), leads and closing %, review list, expenses & net by department
+- **Sales & F&I**: units, gross, and gross per car (with front / finance split) for total, new, and pre-owned; review list; expenses & net; a full **detail table** behind a button (not final / final / so far / on pace / goal / last year, front, finance, incentives, chargebacks, wholesale)
+- **Service & Parts**: laid out with goals now; the numbers fill in once the Service module exists
+- **On pace** = so far ÷ open days gone by × open days in the month (store hours). **Goals** and expenses are set under 🎯 Goals & Expenses
 - **Gross per deal**: front = price − cost − pack (new and pre-owned packs) + doc fee − trade over-allowance; finance = F&I products − product cost + reserve; plus incentives; chargebacks count in the month they come back (toggle). Counted in the month delivered; "final" once finalized. Wholesale = wholesale price − cost
 - Click any unit count or gross to see the deals behind it
 - Who sees it: **GM** (and admins) everything; **sales managers and F&I** the variable tab; **service and parts managers** the fixed tab. New roles: General Manager, Service Manager, Parts Manager

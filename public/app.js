@@ -293,8 +293,8 @@ function renderStats(stats) {
 }
 
 // ---------- Dashboard (store / variable / fixed) ----------
-// Month by month: MTD, pace (from the store's open days), forecast (the
-// month's goals), last month, and last year, with Var = pace minus each.
+// Month by month: what's been made so far, where the month lands on pace
+// (from the store's open days), the month's goals, last month and last year.
 // The GM sees every tab; sales managers and F&I the variable tab; service
 // and parts managers the fixed tab.
 
@@ -339,67 +339,173 @@ async function runExecDashboard() {
   execData = data;
   const [y, m] = data.month.split('-').map(Number);
   const monthName = new Date(y, m - 1, 1).toLocaleDateString([], { month: 'long', year: 'numeric' });
-  document.getElementById('execTitle').textContent = `${{ store: 'Store Summary', variable: 'Variable Summary', fixed: 'Fixed Ops Summary' }[tab]} · ${monthName}`;
+  document.getElementById('execTitle').textContent = `${{ store: 'The Store', variable: 'Sales & F&I', fixed: 'Service & Parts' }[tab]} · ${monthName}`;
   const pace = data.pace || {};
   document.getElementById('execPace').textContent = pace.totalDays
-    ? `${pace.elapsedDays ?? 0} of ${pace.totalDays} selling days${pace.factor ? ` · pace = MTD × ${(pace.factor).toFixed(2)}` : ''} · Var = pace minus forecast, last month, or last year`
+    ? `Day ${pace.elapsedDays ?? 0} of ${pace.totalDays} selling days${pace.factor ? ` · "on pace" = so far × ${(pace.factor).toFixed(2)}` : ''}`
     : '';
   body.innerHTML = tab === 'variable' ? renderVariable(data) : tab === 'store' ? renderStoreDash(data) : renderFixed(data);
 }
 
-// A tile: rows MTD / Forecast / Last Mth / Last YR, with actual, pace, var.
-function execTile(title, sub, { mtd, forecast, lastMonth, lastYear, factor, isRate, ids, label }) {
-  const pace = isRate ? null : mtd * factor;
-  const base = isRate ? mtd : pace;
-  const row = (name, value, withVar) => html`<tr><th>${name}</th><td>${fmtN(value)}</td>${isRate ? '' : html`<td></td>`}${withVar && value !== null && value !== undefined ? varCell(base - value) : html`<td class="var-cell"></td>`}</tr>`;
-  return html`<div class="exec-tile">
-    <div class="exec-tile-title">${title}${sub ? html`<span>${sub}</span>` : ''}</div>
-    <table>
-      <tr><th></th><th>Actual</th>${isRate ? '' : html`<th>Pace</th>`}<th>Var</th></tr>
-      <tr><th>MTD</th>${ids ? drillCell(mtd, ids, label) : html`<td>${fmtN(mtd)}</td>`}${isRate ? '' : html`<td>${fmtN(pace)}</td>`}<td class="var-cell"></td></tr>
-      ${row('Forecast', forecast, true)}${row('Last Mth', lastMonth, true)}${row('Last YR', lastYear, true)}
-    </table>
+// ----- Our dashboard design -----
+// Each metric is one goal bar: the actual so far, where the month lands on
+// pace, the goal line, and last month / last year as small ticks -- with a
+// 12-month trend line and "what it takes" to hit the goal. A short
+// plain-English "Month pulse" sits on top.
+
+const money0 = v => (v === null || v === undefined || Number.isNaN(v) ? '--' : `${v < 0 ? '-' : ''}$${Math.abs(Math.round(v)).toLocaleString()}`);
+const signed = (v, fmt) => `${v >= 0 ? '▲' : '▼'} ${fmt(Math.abs(v))}`;
+
+function sparkline(values, fmt) {
+  const pts = values.filter(v => v !== null && v !== undefined);
+  if (pts.length < 2) return '';
+  const w = 96, h = 26, pad = 3;
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const xy = values.map((v, i) => [pad + (i * (w - pad * 2)) / (values.length - 1), h - pad - (((v ?? min) - min) / span) * (h - pad * 2)]);
+  const last = xy[xy.length - 1];
+  return html`<svg class="sparkline" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Last 12 months">
+    <title>Last 12 months: ${values.map(v => fmt(v)).join(', ')}</title>
+    <polyline points="${xy.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3" fill="currentColor" stroke="var(--surface)" stroke-width="2" />
+  </svg>`;
+}
+
+// One metric as a goal bar.
+function goalBar({ label, actual, pace, goal, lastMonth, lastYear, series, fmt, ids, drillLabel, daysLeft, rate }) {
+  const vals = [actual, rate ? null : pace, goal, lastMonth, lastYear].filter(v => v !== null && v !== undefined && !Number.isNaN(v));
+  const max = Math.max(1, ...vals.map(v => Math.max(0, v))) * 1.08;
+  const pct = v => (v === null || v === undefined || Number.isNaN(v) ? null : Math.max(0, Math.min(100, (Math.max(0, v) / max) * 100)));
+  const target = rate ? actual : pace;
+  const vsGoal = goal !== null && goal !== undefined && target !== null ? target - goal : null;
+  const status = vsGoal === null ? '' : vsGoal >= 0
+    ? html`<span class="gb-ahead">${signed(vsGoal, fmt)} ${rate ? 'over' : 'ahead of'} goal</span>`
+    : html`<span class="gb-behind">${signed(vsGoal, fmt)} ${rate ? 'under' : 'behind'} goal</span>`;
+  const need = !rate && goal !== null && goal !== undefined && daysLeft > 0 && actual < goal
+    ? html`<div class="gb-need">What it takes: ${fmt(goal - actual)} more → ${fmt === money0 ? money0((goal - actual) / daysLeft) : ((goal - actual) / daysLeft).toFixed(1)} a day for ${daysLeft} selling day${daysLeft === 1 ? '' : 's'}</div>` : '';
+  const tip = [`${label}: ${fmt(actual)}`, rate ? '' : `on pace for ${fmt(pace)}`, goal !== null && goal !== undefined ? `goal ${fmt(goal)}` : 'no goal set',
+    `last month ${fmt(lastMonth)}`, `last year ${fmt(lastYear)}`].filter(Boolean).join(' · ');
+  const value = ids && ids.length
+    ? html`<button type="button" class="gb-value link" data-exec-drill="${JSON.stringify(ids)}" data-exec-kind="deals" data-exec-label="${drillLabel || label}">${fmt(actual)}</button>`
+    : html`<span class="gb-value">${fmt(actual)}</span>`;
+  return html`<div class="gbar">
+    <div class="gb-head">
+      <span class="gb-label">${label}</span>
+      ${value}
+      <span class="gb-spark">${new SafeHtml(sparkline(series || [], fmt))}</span>
+    </div>
+    <div class="gb-track" title="${tip}">
+      ${!rate && pct(pace) !== null ? html`<span class="gb-pace" style="width:${pct(pace)}%"></span>` : ''}
+      <span class="gb-actual" style="width:${pct(actual) ?? 0}%"></span>
+      ${pct(lastYear) !== null ? html`<span class="gb-tick gb-ly" style="left:${pct(lastYear)}%" title="Last year ${fmt(lastYear)}"></span>` : ''}
+      ${pct(lastMonth) !== null ? html`<span class="gb-tick gb-lm" style="left:${pct(lastMonth)}%" title="Last month ${fmt(lastMonth)}"></span>` : ''}
+      ${pct(goal) !== null ? html`<span class="gb-goal" style="left:${pct(goal)}%" title="Goal ${fmt(goal)}"></span>` : ''}
+    </div>
+    <div class="gb-foot">
+      ${rate ? '' : html`<span>On pace for <strong>${fmt(pace)}</strong></span>`}
+      <span>Goal ${goal === null || goal === undefined ? html`<em>not set</em>` : html`<strong>${fmt(goal)}</strong>`}</span>
+      <span>Last month ${fmt(lastMonth)}</span><span>Last year ${fmt(lastYear)}</span>
+      ${status}
+    </div>
+    ${need}
   </div>`;
 }
 
-function deptNumbers(d, t) {
-  const pick = s => ({
-    units: s[t].units, front: s[t].front, finance: s[t].finance, incentives: s[t].incentives, chargebacks: s[t].chargebacks,
-    retailGross: s[t].gross, gross: s[t].gross + s.wholesale[t].gross
-  });
-  return { mtd: pick(d.mtd), lm: pick(d.lastMonth), ly: pick(d.lastYear) };
+const GB_LEGEND = html`<div class="gb-legend" aria-hidden="true">
+  <span><i class="lg-actual"></i>So far</span><span><i class="lg-pace"></i>On pace for</span><span><i class="lg-goal"></i>Goal</span>
+  <span><i class="lg-lm"></i>Last month</span><span><i class="lg-ly"></i>Last year</span></div>`;
+
+function daysLeft(d) { return Math.max(0, (d.pace.totalDays || 0) - (d.pace.elapsedDays || 0)); }
+
+// Plain-English summary of the month.
+function pulseLines(d, scope) {
+  const f = d.pace.factor;
+  const g = d.plan.goals;
+  const lines = [];
+  const left = daysLeft(d);
+  const dept = (t, name) => {
+    const X = deptNumbers(d, t);
+    const units = X.mtd.units, paceU = units * f, goalU = g[`${t}Units`];
+    const gross = X.mtd.gross, paceG = gross * f, goalG = g[`${t}Gross`];
+    const perCar = units ? X.mtd.retailGross / units : null;
+    const perCarLm = X.lm.units ? X.lm.retailGross / X.lm.units : null;
+    let s = `${name}: ${units} unit${units === 1 ? '' : 's'} and ${money0(gross)} gross so far`;
+    if (goalU) {
+      const diff = Math.round(paceU - goalU);
+      s += `, on pace for ${Math.round(paceU)} of ${goalU} units (${diff >= 0 ? `${diff} ahead` : `${-diff} behind`})`;
+      if (diff < 0 && left) s += ` -- needs ${((goalU - units) / left).toFixed(1)} a day`;
+    } else if (units || X.lm.units) {
+      s += `, on pace for ${Math.round(paceU)} units vs ${X.lm.units} last month`;
+    }
+    s += '.';
+    if (goalG) s += ` Gross is on pace for ${money0(paceG)} of ${money0(goalG)}.`;
+    if (perCar !== null && perCarLm !== null) s += ` Gross per car ${money0(perCar)}, ${perCar >= perCarLm ? 'up' : 'down'} ${money0(Math.abs(perCar - perCarLm))} vs last month.`;
+    else if (perCar !== null) s += ` Gross per car ${money0(perCar)}.`;
+    return s;
+  };
+  if (scope === 'store') {
+    const gross = ['new', 'used'].reduce((sum, t) => sum + deptNumbers(d, t).mtd.gross, 0);
+    const lm = ['new', 'used'].reduce((sum, t) => sum + deptNumbers(d, t).lm.gross, 0);
+    const e = d.plan.expenses;
+    const exp = Object.values(e).reduce((sum, v) => sum + (v || 0), 0);
+    let s = `Variable gross ${money0(gross)} so far, on pace for ${money0(gross * f)}`;
+    if (lm) s += ` (${gross * f >= lm ? 'ahead of' : 'behind'} last month's ${money0(lm)})`;
+    s += '.';
+    if (exp) s += ` After ${money0(exp)} in expenses, the month is on pace for ${money0(gross * f - exp)} net.`;
+    lines.push(s, 'Service and parts join this once the Service module is built.');
+  }
+  lines.push(dept('new', 'New'), dept('used', 'Pre-Owned'));
+  if (left) lines.push(`${left} selling day${left === 1 ? '' : 's'} left this month.`);
+  const review = Object.values(d.exceptions || {}).reduce((sum, x) => sum + x.ids.length, 0);
+  if (review) lines.push(`${review} deal${review === 1 ? '' : 's'} flagged for review below.`);
+  return html`<div class="pulse"><div class="pulse-title">Month pulse</div><ul>${lines.map(l => html`<li>${l}</li>`)}</ul></div>`;
 }
+
+function reviewCards(d) {
+  const ex = d.exceptions || {};
+  return html`<div class="exec-section-title">Review</div>
+    <p class="exec-section-sub">Delivered deals worth a second look.</p>
+    <div class="review-grid">${Object.values(ex).map(x => x.ids.length
+      ? html`<button type="button" class="review-card flagged" data-exec-drill="${JSON.stringify(x.ids)}" data-exec-kind="deals" data-exec-label="${x.label}"><strong>${x.ids.length}</strong><span>${x.label}</span></button>`
+      : html`<div class="review-card"><strong>0</strong><span>${x.label}</span></div>`)}</div>`;
+}
+
+function seriesOf(d, key) { return d.trend.map(m => m[key]); }
 
 function renderVariable(d) {
   const f = d.pace.factor;
   const g = d.plan.goals;
+  const left = daysLeft(d);
   const N = deptNumbers(d, 'new');
   const U = deptNumbers(d, 'used');
-  const goalGross = t => g[`${t}Gross`];
-  const goalUnits = t => g[`${t}Units`];
-  const sumGoal = (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0));
+  const cnt = v => fmtN(v);
+  const sum = (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0));
   const ids = t => d.mtd[t].dealIds;
-  const deptRow = (t, X, title) => {
-    const tu = goalUnits(t), tg = goalGross(t);
-    return execTile(`${title} Retail Units`, '', { mtd: X.mtd.units, forecast: tu, lastMonth: X.lm.units, lastYear: X.ly.units, factor: f, ids: ids(t), label: `${title} retail deals` }) +
-      execTile(`${title} Front PVR`, '', { mtd: pvr(X.mtd.front, X.mtd.units), forecast: null, lastMonth: pvr(X.lm.front, X.lm.units), lastYear: pvr(X.ly.front, X.ly.units), isRate: true }) +
-      execTile(`${title} Finance PVR`, '', { mtd: pvr(X.mtd.finance, X.mtd.units), forecast: null, lastMonth: pvr(X.lm.finance, X.lm.units), lastYear: pvr(X.ly.finance, X.ly.units), isRate: true }) +
-      execTile(`${title} Total PVR`, 'incl. incentives', {
-        mtd: pvr(X.mtd.front + X.mtd.finance + X.mtd.incentives, X.mtd.units), forecast: tu && tg !== null ? tg / tu : null,
-        lastMonth: pvr(X.lm.front + X.lm.finance + X.lm.incentives, X.lm.units), lastYear: pvr(X.ly.front + X.ly.finance + X.ly.incentives, X.ly.units), isRate: true
-      }) +
-      execTile(`${title} Variable Gross`, '', { mtd: X.mtd.gross, forecast: tg, lastMonth: X.lm.gross, lastYear: X.ly.gross, factor: f, ids: ids(t), label: `${title} deals` });
-  };
-  const tiles = html`<div class="exec-grid">
-    ${new SafeHtml(execTile('Total Retail Units', '', { mtd: N.mtd.units + U.mtd.units, forecast: sumGoal(goalUnits('new'), goalUnits('used')), lastMonth: N.lm.units + U.lm.units, lastYear: N.ly.units + U.ly.units, factor: f, ids: [...ids('new'), ...ids('used')], label: 'Retail deals' }))}
-    <div class="exec-grid-gap"></div>
-    ${new SafeHtml(execTile('Total Variable Gross', '', { mtd: N.mtd.gross + U.mtd.gross, forecast: sumGoal(goalGross('new'), goalGross('used')), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, factor: f, ids: [...ids('new'), ...ids('used')], label: 'All deals' }))}
-    <div class="exec-row-label">New</div>
-    ${new SafeHtml(deptRow('new', N, 'New'))}
-    <div class="exec-row-label">Pre-Owned</div>
-    ${new SafeHtml(deptRow('used', U, 'Pre-Owned'))}
-  </div>`;
-  return tiles + renderBreakdown(d) + renderTrend(d) + renderExpenses(d, false);
+  const perCar = (X, which) => (X[which].units ? X[which].retailGross / X[which].units : null);
+  const goalPer = t => (g[`${t}Units`] && g[`${t}Gross`] !== null ? g[`${t}Gross`] / g[`${t}Units`] : null);
+  const trendPer = (t) => d.trend.map(m => (m[`${t}Units`] ? (m[`${t}Front`] + m[`${t}Finance`]) / m[`${t}Units`] : null));
+  const frontFin = (X, name) => X.mtd.units
+    ? html`<div class="gb-split">Front ${money0(X.mtd.front / X.mtd.units)} · Finance ${money0(X.mtd.finance / X.mtd.units)}${X.mtd.incentives ? ` · Incentives ${money0(X.mtd.incentives / X.mtd.units)}` : ''} per car</div>` : '';
+  return pulseLines(d, 'variable') + GB_LEGEND + html`
+    <div class="exec-section-title">Units delivered</div>
+    <div class="gb-grid">
+      ${goalBar({ label: 'Total', actual: N.mtd.units + U.mtd.units, pace: (N.mtd.units + U.mtd.units) * f, goal: sum(g.newUnits, g.usedUnits), lastMonth: N.lm.units + U.lm.units, lastYear: N.ly.units + U.ly.units, series: d.trend.map(m => m.newUnits + m.usedUnits), fmt: cnt, ids: [...ids('new'), ...ids('used')], drillLabel: 'All retail deals', daysLeft: left })}
+      ${goalBar({ label: 'New', actual: N.mtd.units, pace: N.mtd.units * f, goal: g.newUnits, lastMonth: N.lm.units, lastYear: N.ly.units, series: seriesOf(d, 'newUnits'), fmt: cnt, ids: ids('new'), drillLabel: 'New retail deals', daysLeft: left })}
+      ${goalBar({ label: 'Pre-Owned', actual: U.mtd.units, pace: U.mtd.units * f, goal: g.usedUnits, lastMonth: U.lm.units, lastYear: U.ly.units, series: seriesOf(d, 'usedUnits'), fmt: cnt, ids: ids('used'), drillLabel: 'Pre-owned retail deals', daysLeft: left })}
+    </div>
+    <div class="exec-section-title">Gross</div>
+    <div class="gb-grid">
+      ${goalBar({ label: 'Total', actual: N.mtd.gross + U.mtd.gross, pace: (N.mtd.gross + U.mtd.gross) * f, goal: sum(g.newGross, g.usedGross), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, series: d.trend.map(m => m.new + m.used), fmt: money0, ids: [...ids('new'), ...ids('used')], drillLabel: 'All deals', daysLeft: left })}
+      ${goalBar({ label: 'New', actual: N.mtd.gross, pace: N.mtd.gross * f, goal: g.newGross, lastMonth: N.lm.gross, lastYear: N.ly.gross, series: seriesOf(d, 'new'), fmt: money0, ids: ids('new'), drillLabel: 'New deals', daysLeft: left })}
+      ${goalBar({ label: 'Pre-Owned', actual: U.mtd.gross, pace: U.mtd.gross * f, goal: g.usedGross, lastMonth: U.lm.gross, lastYear: U.ly.gross, series: seriesOf(d, 'used'), fmt: money0, ids: ids('used'), drillLabel: 'Pre-owned deals', daysLeft: left })}
+    </div>
+    <div class="exec-section-title">Gross per car <span class="exec-section-note">(PVR, incl. incentives)</span></div>
+    <div class="gb-grid gb-grid-2">
+      <div>${goalBar({ label: 'New', actual: perCar(N, 'mtd'), goal: goalPer('new'), lastMonth: perCar(N, 'lm'), lastYear: perCar(N, 'ly'), series: trendPer('new'), fmt: money0, rate: true })}${frontFin(N)}</div>
+      <div>${goalBar({ label: 'Pre-Owned', actual: perCar(U, 'mtd'), goal: goalPer('used'), lastMonth: perCar(U, 'lm'), lastYear: perCar(U, 'ly'), series: trendPer('used'), fmt: money0, rate: true })}${frontFin(U)}</div>
+    </div>` + reviewCards(d) + renderExpenses(d, false) + html`
+    <button type="button" class="btn-secondary btn-small exec-detail-btn" data-toggle-detail>Show detail table</button>
+    <div class="exec-detail" hidden>${new SafeHtml(renderBreakdown(d))}</div>`;
 }
 
 // The detail table: units, gross, and per vehicle by department and line.
@@ -440,7 +546,7 @@ function renderBreakdown(d) {
   rows.push(html`<tr class="bd-total bd-grand"><th>Total</th><td>${fmtN(d.mtd.new.notFinalUnits + d.mtd.used.notFinalUnits)}</td><td>${fmtN(d.mtd.new.finalUnits + d.mtd.used.finalUnits)}</td><td>${fmtN(A.units)}</td><td>${fmtN(A.units * f)}</td><td></td><td class="var-cell"></td><td>${fmtN(L.units)}</td>${varCell(A.units * f - L.units)}
     <td>${fmtN(A.nf)}</td><td>${fmtN(A.fg)}</td><td>${fmtN(A.gross)}</td><td>${fmtN(A.gross * f)}</td><td></td><td class="var-cell"></td><td>${fmtN(L.gross)}</td>${varCell(A.gross * f - L.gross)}
     <td>${fmtN(pvr(A.gross, A.units))}</td><td></td><td>${fmtN(pvr(L.gross, L.units))}</td></tr>`);
-  return html`<div class="exec-section-title">Breakdown</div>
+  return html`<div class="exec-section-title">Detail</div>
     <div class="exec-table-wrap"><table class="exec-table">
       <thead>
         <tr><th></th><th colspan="8">Units</th><th colspan="8">Gross</th><th colspan="3">Per Vehicle</th></tr>
@@ -448,24 +554,6 @@ function renderBreakdown(d) {
           <th>Not Final</th><th>Final</th><th>MTD</th><th>Paced</th><th>Forecast</th><th>Var</th><th>Last Year</th><th>Var</th><th>MTD</th><th>Forecast</th><th>Last Year</th></tr>
       </thead>
       <tbody>${rows}</tbody>
-    </table></div>`;
-}
-
-function renderTrend(d) {
-  const months = d.trend;
-  const last3 = months.slice(-3);
-  const avg = (list, k) => (list.length ? list.reduce((s, x) => s + x[k], 0) / list.length : null);
-  const label = k => { const [y, m] = k.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString([], { month: 'short', year: '2-digit' }); };
-  const row = (k, title) => {
-    const mtd = d.mtd[k].gross + d.mtd.wholesale[k].gross;
-    const ly = d.lastYear[k].gross + d.lastYear.wholesale[k].gross;
-    const a3 = avg(last3, k);
-    return html`<tr><th>${title}</th><td>${fmtN(avg(months, k))}</td>${last3.map(x => html`<td>${fmtN(x[k])}</td>`)}<td>${fmtN(a3)}</td><td>${fmtN(mtd)}</td>${varCell(a3 === null ? null : mtd - a3)}<td>${fmtN(ly)}</td>${varCell(mtd - ly)}</tr>`;
-  };
-  return html`<div class="exec-section-title">Gross trend</div>
-    <div class="exec-table-wrap"><table class="exec-table exec-trend">
-      <thead><tr><th></th><th>6 MO Avg</th>${last3.map(x => html`<th>${label(x.month)}</th>`)}<th>3 MO Avg</th><th>MTD</th><th>3 MO Var</th><th>Last Year</th><th>YOY Var</th></tr></thead>
-      <tbody>${row('new', 'New')}${row('used', 'Pre-Owned')}</tbody>
     </table></div>`;
 }
 
@@ -480,7 +568,7 @@ function renderExpenses(d, store) {
   const anyExpense = lines.some(l => l[2] !== null);
   return html`<div class="exec-section-title">Expenses &amp; Net</div>
     <div class="exec-table-wrap"><table class="exec-table">
-      <thead><tr><th></th><th>Gross MTD</th><th>Gross Paced</th><th>Expenses (month)</th><th>Net (paced)</th></tr></thead>
+      <thead><tr><th></th><th>Gross so far</th><th>Gross on pace</th><th>Expenses (month)</th><th>Net on pace</th></tr></thead>
       <tbody>
         ${lines.map(([name, g, x]) => html`<tr><th>${name}</th><td>${g === null ? html`<span class="audit-note">Not available yet</span>` : fmtN(g)}</td><td>${g === null ? '' : fmtN(g * f)}</td><td>${fmtN(x)}</td>
           ${g === null || x === null ? html`<td></td>` : varCell(g * f - x)}</tr>`)}
@@ -490,43 +578,61 @@ function renderExpenses(d, store) {
     ${anyExpense ? '' : html`<p class="audit-note">Enter this month's expenses under 🎯 Goals &amp; Expenses to see Net.</p>`}`;
 }
 
+function deptNumbers(d, t) {
+  const pick = s => ({
+    units: s[t].units, front: s[t].front, finance: s[t].finance, incentives: s[t].incentives, chargebacks: s[t].chargebacks,
+    retailGross: s[t].gross, gross: s[t].gross + s.wholesale[t].gross
+  });
+  return { mtd: pick(d.mtd), lm: pick(d.lastMonth), ly: pick(d.lastYear) };
+}
+
+
 function renderStoreDash(d) {
   const f = d.pace.factor;
   const g = d.plan.goals;
-  const units = d.mtd.new.units + d.mtd.used.units;
-  const gross = d.mtd.new.gross + d.mtd.used.gross + d.mtd.wholesale.new.gross + d.mtd.wholesale.used.gross;
-  const lmGross = d.lastMonth.new.gross + d.lastMonth.used.gross + d.lastMonth.wholesale.new.gross + d.lastMonth.wholesale.used.gross;
-  const lyGross = d.lastYear.new.gross + d.lastYear.used.gross + d.lastYear.wholesale.new.gross + d.lastYear.wholesale.used.gross;
-  const goal = (a, b) => (g[a] === null && g[b] === null ? null : (g[a] || 0) + (g[b] || 0));
+  const left = daysLeft(d);
+  const N = deptNumbers(d, 'new');
+  const U = deptNumbers(d, 'used');
+  const sum = (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0));
   const allIds = [...d.mtd.new.dealIds, ...d.mtd.used.dealIds];
   const inv = d.inventory;
-  return html`<div class="exec-grid exec-grid-store">
-    ${new SafeHtml(execTile('Total Retail Units', '', { mtd: units, forecast: goal('newUnits', 'usedUnits'), lastMonth: d.lastMonth.new.units + d.lastMonth.used.units, lastYear: d.lastYear.new.units + d.lastYear.used.units, factor: f, ids: allIds, label: 'Retail deals' }))}
-    ${new SafeHtml(execTile('Variable Gross', 'sales & F&I', { mtd: gross, forecast: goal('newGross', 'usedGross'), lastMonth: lmGross, lastYear: lyGross, factor: f, ids: allIds, label: 'All deals' }))}
-    <div class="exec-tile exec-na"><div class="exec-tile-title">Fixed Gross<span>service & parts</span></div><p>Not available yet -- needs the Service module.</p>
-      ${g.serviceGross !== null || g.partsGross !== null ? html`<p class="audit-note">Forecast: ${fmtN((g.serviceGross || 0) + (g.partsGross || 0))}</p>` : ''}</div>
-    <div class="exec-tile"><div class="exec-tile-title">Inventory</div>
-      <table><tr><th>Units</th><td>${fmtN(inv.units)}</td></tr><tr><th>New / Pre-Owned</th><td>${fmtN(inv.newUnits)} / ${fmtN(inv.usedUnits)}</td></tr>
-      <tr><th>Cost value</th><td>${fmtN(inv.value)}</td></tr><tr><th>60+ days</th><td class="${inv.aged ? 'report-warn' : ''}">${fmtN(inv.aged)}</td></tr></table></div>
-    <div class="exec-tile"><div class="exec-tile-title">Leads this month</div>
-      <table><tr><th>New leads</th><td>${fmtN(d.leads.count)}</td></tr><tr><th>Sold</th><td>${fmtN(d.leads.sold)}</td></tr>
-      <tr><th>Closing %</th><td>${d.leads.count ? `${Math.round((d.leads.sold / d.leads.count) * 1000) / 10}%` : '--'}</td></tr></table></div>
-  </div>` + renderExpenses(d, true) + renderTrend(d);
+  const exp = Object.values(d.plan.expenses).reduce((s, v) => s + (v || 0), 0);
+  const gross = N.mtd.gross + U.mtd.gross;
+  return pulseLines(d, 'store') + GB_LEGEND + html`
+    <div class="gb-grid">
+      ${goalBar({ label: 'Units delivered', actual: N.mtd.units + U.mtd.units, pace: (N.mtd.units + U.mtd.units) * f, goal: sum(g.newUnits, g.usedUnits), lastMonth: N.lm.units + U.lm.units, lastYear: N.ly.units + U.ly.units, series: d.trend.map(m => m.newUnits + m.usedUnits), fmt: fmtN, ids: allIds, drillLabel: 'All retail deals', daysLeft: left })}
+      ${goalBar({ label: 'Variable gross', actual: gross, pace: gross * f, goal: sum(g.newGross, g.usedGross), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, series: d.trend.map(m => m.new + m.used), fmt: money0, ids: allIds, drillLabel: 'All deals', daysLeft: left })}
+      <div class="gbar gbar-na"><div class="gb-head"><span class="gb-label">Fixed gross</span><span class="gb-value">--</span></div>
+        <p class="audit-note">Service and parts -- not available yet (needs the Service module).</p></div>
+    </div>
+    <div class="store-stats">
+      <div class="store-stat"><span>Net, on pace</span><strong>${exp ? money0(gross * f - exp) : '--'}</strong><em>${exp ? `after ${money0(exp)} expenses` : 'enter expenses to see net'}</em></div>
+      <div class="store-stat"><span>Inventory</span><strong>${fmtN(inv.units)}</strong><em>${fmtN(inv.newUnits)} new · ${fmtN(inv.usedUnits)} pre-owned · ${money0(inv.value)} at cost</em></div>
+      <div class="store-stat ${inv.aged ? 'warn' : ''}"><span>60+ days in stock</span><strong>${fmtN(inv.aged)}</strong><em>of ${fmtN(inv.units)} cars</em></div>
+      <div class="store-stat"><span>Leads this month</span><strong>${fmtN(d.leads.count)}</strong><em>${fmtN(d.leads.sold)} sold · ${d.leads.count ? `${Math.round((d.leads.sold / d.leads.count) * 1000) / 10}%` : '--'} closing</em></div>
+    </div>` + reviewCards(d) + renderExpenses(d, true);
 }
 
 function renderFixed(d) {
   const g = d.plan.goals;
-  const tile = (title, goalValue) => html`<div class="exec-tile exec-na"><div class="exec-tile-title">${title}</div>
-    <table><tr><th>MTD</th><td>--</td></tr><tr><th>Forecast</th><td>${fmtN(goalValue)}</td></tr><tr><th>Last Mth</th><td>--</td></tr><tr><th>Last YR</th><td>--</td></tr></table></div>`;
-  return html`<div class="exec-na-banner"><strong>Service and parts numbers are not available yet.</strong> They fill in once the Service module (repair orders, labor, parts) is built. Goals can be set now.</div>
-    <div class="exec-grid exec-grid-fixed">
-      ${tile('Service Gross', g.serviceGross)}${tile('Parts Gross', g.partsGross)}${tile('Repair Orders', g.repairOrders)}
-      ${tile('Effective Labor Rate', null)}${tile('Hours per RO', null)}
+  return html`<div class="pulse"><div class="pulse-title">Month pulse</div><ul>
+      <li>Service and parts numbers aren't available yet -- they fill in once the Service module (repair orders, labor, parts) is built.</li>
+      <li>Goals for this month: service gross ${money0(g.serviceGross)}, parts gross ${money0(g.partsGross)}, repair orders ${fmtN(g.repairOrders)}. Set them under 🎯 Goals &amp; Expenses.</li>
+    </ul></div>
+    <div class="gb-grid">
+      ${['Service gross', 'Parts gross', 'Repair orders', 'Effective labor rate', 'Hours per RO'].map(l => html`<div class="gbar gbar-na"><div class="gb-head"><span class="gb-label">${l}</span><span class="gb-value">--</span></div><p class="audit-note">Not available yet</p></div>`)}
     </div>`;
 }
 
 // ----- Drill-down -----
 document.getElementById('execBody').addEventListener('click', (e) => {
+  const toggle = e.target.closest('[data-toggle-detail]');
+  if (toggle) {
+    const detail = toggle.nextElementSibling;
+    detail.hidden = !detail.hidden;
+    toggle.textContent = detail.hidden ? 'Show detail table' : 'Hide detail table';
+    return;
+  }
   const el = e.target.closest('[data-exec-drill]');
   if (!el || !execData) return;
   const ids = new Set(JSON.parse(el.dataset.execDrill));

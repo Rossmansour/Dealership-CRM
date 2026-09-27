@@ -150,6 +150,39 @@ function carRows(data, ids) {
   }));
 }
 
+// Finished deals worth a second look: money review, not work in progress.
+function reviewList(data, key, from, to) {
+  const carById = new Map(data.cars.map(c => [c.id, c]));
+  const acvByDeal = new Map(data.appraisals.filter(a => a.dealId && a.status === 'acquired' && a.acquiredFor).map(a => [a.dealId, a.acquiredFor]));
+  const overLimit = Math.max(0, n(data.settings.overAllowanceReview) || 1000);
+  const finalizeDays = Math.max(1, n(data.settings.finalizeReviewDays) || 3);
+  const out = { noProducts: [], negativeFront: [], overAllowance: [], notFinalized: [], chargebacks: [] };
+  for (const d of data.deals) {
+    if (!SOLD.includes(d.status)) continue;
+    const car = carById.get(d.carId);
+    const soldAt = d.deliveredAt || (car && car.dateSold);
+    const t = soldAt ? new Date(soldAt).getTime() : NaN;
+    const g = dealGross(d, car, data.settings, acvByDeal.get(d.id));
+    if (t >= from && t < to && !(car && car.soldAs === 'wholesale')) {
+      const products = n(d.gapPremium) + n(d.servicePremium) + n(d.maintenancePremium) + n(d.aftermarketAmount);
+      if (!products) out.noProducts.push(d.id);
+      if (g.front < 0) out.negativeFront.push(d.id);
+      if (g.overAllowance > overLimit) out.overAllowance.push(d.id);
+    }
+    // Delivered but not finalized for too long (any month): holds up funding.
+    if (d.status !== 'finalized' && soldAt && Date.now() - t > finalizeDays * 86400000) out.notFinalized.push(d.id);
+    const cbAt = d.chargebackDate || soldAt;
+    if (n(d.chargebackAmount) && cbAt && new Date(cbAt).getTime() >= from && new Date(cbAt).getTime() < to) out.chargebacks.push(d.id);
+  }
+  return {
+    noProducts: { label: 'Delivered with no F&I products', ids: out.noProducts },
+    negativeFront: { label: 'Negative front gross', ids: out.negativeFront },
+    overAllowance: { label: `Trade over-allowance over $${overLimit.toLocaleString('en-US')}`, ids: out.overAllowance },
+    notFinalized: { label: `Delivered, not finalized after ${finalizeDays} days`, ids: out.notFinalized },
+    chargebacks: { label: 'Chargebacks this month', ids: out.chargebacks }
+  };
+}
+
 function variableReport(data, key, includeChargebacks) {
   const tz = data.storeHours.timezone;
   const range = k => monthRange(k, tz);
@@ -158,17 +191,24 @@ function variableReport(data, key, includeChargebacks) {
   const lastMonth = summarize(data, ...range(shiftMonth(key, -1)), includeChargebacks);
   const lastYear = summarize(data, ...range(shiftMonth(key, -12)), includeChargebacks);
   const days = openDays(key, data.storeHours);
+  // The 12 months before this one, for trend lines.
   const trend = [];
-  for (let i = 6; i >= 1; i--) {
+  for (let i = 12; i >= 1; i--) {
     const k = shiftMonth(key, -i);
     const s = summarize(data, ...range(k), includeChargebacks);
-    trend.push({ month: k, new: s.new.gross + s.wholesale.new.gross, used: s.used.gross + s.wholesale.used.gross, newUnits: s.new.units, usedUnits: s.used.units });
+    trend.push({
+      month: k, new: s.new.gross + s.wholesale.new.gross, used: s.used.gross + s.wholesale.used.gross,
+      newUnits: s.new.units, usedUnits: s.used.units,
+      newFront: s.new.front, usedFront: s.used.front, newFinance: s.new.finance, usedFinance: s.used.finance
+    });
   }
-  const ids = new Set([...mtd.new.dealIds, ...mtd.used.dealIds, ...mtd.new.chargebackDealIds, ...mtd.used.chargebackDealIds]);
+  const exceptions = reviewList(data, key, from, to);
+  const ids = new Set([...mtd.new.dealIds, ...mtd.used.dealIds, ...mtd.new.chargebackDealIds, ...mtd.used.chargebackDealIds,
+    ...Object.values(exceptions).flatMap(x => x.ids)]);
   const carIds = new Set([...mtd.wholesale.new.carIds, ...mtd.wholesale.used.carIds]);
   return {
     month: key, pace: { elapsedDays: days.elapsed, totalDays: days.total, factor: days.elapsed ? days.total / days.elapsed : 0 },
-    mtd, lastMonth, lastYear, trend, plan: planFor(data.settings, key),
+    mtd, lastMonth, lastYear, trend, exceptions, plan: planFor(data.settings, key),
     lastYearPlan: planFor(data.settings, shiftMonth(key, -12)),
     deals: dealRows(data, ids), wholesaleCars: carRows(data, carIds),
     includeChargebacks
