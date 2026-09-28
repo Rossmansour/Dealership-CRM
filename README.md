@@ -132,7 +132,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **One car** (click it) opens its own page: photo; stock #, VIN, step, year/make/model/trim/body/colors, odometer, price, transmission, engine; time in step, time in recon, days in stock; acquired date, when recon started, car cost, work total / approved / spent; the store's own fields (**Other 1–6**, inspection date, inspection RO #)
 - **Work items** on the car: phase (mechanical, detail, cosmetic repair, other), status (needs approval / approved / declined / done) with who and when, additional information, an online description for the listing, **parts $ + labor hours × rate = total**, vendor. **Select all** and **Change status** for several at once, filter by phase, and **+ Add work items** picks from the store's list by phase (type to filter, A–Z, what's already on the car is checked) or adds one that isn't on the list
 - **Send to service**: approved mechanical items become one internal RO with their hours, rate, and parts (cost reaches the car when the RO closes). **Done** on outside work asks the actual cost and adds it to the car right away. Steps taken (with time in each) and notes are at the bottom; the page prints
-- **Needs approval**, **Not started**, and **Performance** (ADR, % on goal, spend per car, spent vs. estimate, average time per step vs. goal) -- all following the All / New / Used choice
+- Every car added to inventory goes into recon on its own: used cars at **Purchase / Trade**, new cars at **New - PDI**
+- **Needs approval** and **Performance** (ADR, % on goal, spend per car, spent vs. estimate, average time per step vs. goal) -- all following the All / New / Used choice
 - Steps and goals are set by managers (**Steps & goals**); sales managers, GMs, and the service team (service manager, advisors, technicians) can open it; sales managers approve
 
 **Parts** (left sidebar → Parts)

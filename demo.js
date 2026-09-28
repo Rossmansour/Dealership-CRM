@@ -332,7 +332,7 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
 
       // ----- Recon: cars on their way to the front line -----
       const steps = require('./recon').reconSettings(settings).steps.map(x => x.key);
-      const labelOf = k => (k === 'ready' ? 'Frontline Ready' : require('./recon').reconSettings(settings).steps.find(x => x.key === k).label);
+      const labelOf = k => (k === 'ready' ? 'Frontline Ready' : (require('./recon').reconSettings(settings).steps.find(x => x.key === k) || require('./recon').defaultReconSettings().steps.find(x => x.key === k) || { label: k }).label);
       const hoursAgo = h => new Date(Date.now() - h * 3600000).toISOString();
       const roOf = stock => ros.find(r => r.carId === carByStock[stock].id);
       const item = (category, description, estimate, status, extra = {}) => ({
@@ -376,7 +376,7 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
         unitFor('U2381', [['purchase_trade', 12], ['ucm_approval', 3], ['repair', 36], ['vendor', 20], ['detail_ready', 16], ['insp_ready', 14]], { done: true, items: [item('detail', 'Full detail', 180, 'done', { actual: 180, costPosted: true })] }),
         unitFor('N2502', [['new_import', 30], ['new_transport', 70]]),
         unitFor('N2504', [['new_transport', 96], ['detail_ready', 30]]),
-        unitFor('N2503', [['new_import', 8]]),
+        unitFor('N2503', [['new_transport', 20], ['new_pdi', 8]]),
         unitFor('U2380', [['trade_not_cleared', 30], ['ucm_approval', 20], ['parts_hold', 60], ['detail_ready', 24], ['insp_ready', 12]], { done: true, items: [item('mechanical', 'Timing belt', 900, 'done', { actual: 1040, costPosted: true })] })
       ];
       // Shift the finished ones back in time so they finished days ago.
@@ -415,6 +415,8 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
     const d = req.dealershipId;
     const removed = await store.tx(async q => {
       const counts = {};
+      // Demo cars that went into recon on their own (not marked demo) go too.
+      await q.query(`DELETE FROM recon_units WHERE dealership_id = $1 AND data->>'carId' IN (SELECT id FROM cars WHERE dealership_id = $1 AND data->>'demo' = 'true')`, [d]);
       for (const table of DEMO_TABLES) {
         const { rowCount } = await q.query(`DELETE FROM ${table} WHERE dealership_id = $1 AND data->>'demo' = 'true'`, [d]);
         counts[table] = rowCount;

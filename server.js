@@ -468,6 +468,7 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
   await store.tx(async q => {
     await store.insert(q, 'cars', req.dealershipId, newCar);
     await audit.created(q, req, 'car', newCar);
+    await recon.addCar(q, req, newCar); // straight into recon: used at Purchase / Trade, new at New - PDI
   });
   res.status(201).json(newCar);
 }));

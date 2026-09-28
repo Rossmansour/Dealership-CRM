@@ -27,7 +27,7 @@ async function api(path, method = 'GET', body) {
   return data;
 }
 
-let board = null;      // { settings, can, units, notStarted }
+let board = null;      // { settings, can, units }
 let me = null;
 let tab = 'cars';
 let carType = 'all';   // all | new | used -- splits every list and number
@@ -65,9 +65,7 @@ function paceClass(hours, goal) {
 function render() {
   const active = board.units.filter(u => u.status === 'active' && typeOk(u));
   const pending = active.flatMap(u => u.items.filter(i => i.status === 'proposed'));
-  const waiting = board.notStarted.filter(c => carType === 'all' || c.stockType === carType);
   document.getElementById('rcApprovalCount').textContent = pending.length;
-  document.getElementById('rcWaitingCount').textContent = waiting.length;
   document.querySelectorAll('.rc-type').forEach(t => t.classList.toggle('active', t.dataset.type === carType));
   const goalH = board.settings.goalDays * 24;
   const avg = active.length ? active.reduce((s, u) => s + u.totalHours, 0) / active.length : 0;
@@ -80,13 +78,11 @@ function render() {
     <div class="rc-stat ${active.some(u => u.late) ? 'rc-stat-bad' : ''}"><strong>${active.filter(u => u.late).length}</strong><span>past the ${board.settings.goalDays}-day goal</span></div>
     <div class="rc-stat"><strong>${active.length ? daysText(avg) : '--'}</strong><span>average days in recon now</span></div>
     <div class="rc-stat"><strong class="${adr === null ? '' : paceClass(adr, goalH)}">${adr === null ? '--' : daysText(adr)}</strong><span>ADR · days to frontline, last 30 days</span></div>
-    <div class="rc-stat ${pending.length ? 'rc-stat-warn' : ''}"><strong>${pending.length}</strong><span>to approve · ${money(pending.reduce((s, i) => s + i.estimate, 0))}</span></div>
-    <div class="rc-stat"><strong>${waiting.length}</strong><span>${typeWord}cars not started</span></div>`;
+    <div class="rc-stat ${pending.length ? 'rc-stat-warn' : ''}"><strong>${pending.length}</strong><span>to approve · ${money(pending.reduce((s, i) => s + i.estimate, 0))}</span></div>`;
   document.querySelectorAll('.rc-view').forEach(v => { v.hidden = v.dataset.rcView !== tab; });
   document.querySelectorAll('.rc-tab').forEach(t => t.classList.toggle('active', t.dataset.rcTab === tab));
   if (tab === 'cars') renderCars();
   if (tab === 'approvals') renderApprovals(active);
-  if (tab === 'waiting') renderWaiting();
   if (tab === 'performance') renderPerformance();
   if (tab === 'car') renderCarPage();
   document.getElementById('rcStrip').hidden = tab === 'car';
@@ -538,26 +534,6 @@ document.getElementById('rcApprovals').addEventListener('click', async (e) => {
   try { await api(`/recon/units/${unitId}/items/${itemId}`, 'PUT', { status }); await refresh(); } catch (err) { alert(err.message); }
 });
 
-// ---------- Not started ----------
-function renderWaiting() {
-  const list = board.notStarted.filter(c => matches({ car: c, stockType: c.stockType }));
-  document.getElementById('rcWaiting').innerHTML = list.length ? html`
-    <p class="send-text-hint">Cars in stock that haven't started recon. They start at ${carType === 'new' ? 'the first New step' : carType === 'used' ? 'Purchase / Trade' : 'the first New step (new cars) or Purchase / Trade (used)'}.</p>
-    <table class="data-table rc-table"><thead><tr><th>Car</th><th>Stock #</th><th>Type</th><th>Miles</th><th>In stock</th><th>Asking</th><th></th></tr></thead><tbody>
-    ${list.sort((a, b) => new Date(a.dateAdded) - new Date(b.dateAdded)).map(c => {
-      const days = c.dateAdded ? Math.floor((Date.now() - new Date(c.dateAdded)) / 86400000) : null;
-      return html`<tr><td><strong>${c.year} ${c.make} ${c.model}</strong> ${c.trim}</td><td>${c.stockNumber}</td><td><span class="rc-type-chip rc-type-${c.stockType}">${c.stockType === 'new' ? 'New' : 'Used'}</span></td><td>${c.mileage ? Number(c.mileage).toLocaleString() : '--'}</td>
-        <td class="${days >= 3 ? 'rc-late' : ''}">${days === null ? '--' : `${days} day${days === 1 ? '' : 's'}`}</td><td>${money(c.price)}</td>
-        <td>${board.can.work ? html`<button type="button" class="btn-primary btn-small" data-start="${c.id}">Start recon</button>` : ''}</td></tr>`;
-    })}</tbody></table>`
-    : html`<p class="rc-empty-big">Every car here is in recon or done.</p>`;
-}
-document.getElementById('rcWaiting').addEventListener('click', async (e) => {
-  const b = e.target.closest('[data-start]');
-  if (!b) return;
-  try { const u = await api('/recon/units', 'POST', { carId: b.dataset.start }); await refresh(); tab = 'cars'; stepFilter = u.step; render(); openUnit(u.id); } catch (err) { alert(err.message); }
-});
-
 // ---------- Performance ----------
 function renderPerformance() {
   const since = Date.now() - 30 * 86400000;
@@ -673,7 +649,7 @@ document.getElementById('rcTypes').addEventListener('click', (e) => {
     if (unitParam && board.units.some(x => x.id === unitParam)) openUnit(unitParam);
     else if (car) {
       const u = board.units.find(x => x.car && x.car.id === car && x.status === 'active');
-      if (u) { stepFilter = u.step; render(); openUnit(u.id); } else if (board.notStarted.some(c => c.id === car)) { tab = 'waiting'; render(); }
+      if (u) { stepFilter = u.step; render(); openUnit(u.id); }
     }
   } catch (err) {
     document.getElementById('rcStrip').innerHTML = '';

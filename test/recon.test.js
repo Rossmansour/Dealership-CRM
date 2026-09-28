@@ -33,15 +33,13 @@ after(() => h.stopServer());
 test('sales managers and service see the board and start recon; salespeople do not', async () => {
   assert.strictEqual((await as(sales, 'GET', '/recon/board')).status, 403);
   const board = (await as(advisor, 'GET', '/recon/board')).body;
-  assert.ok(board.notStarted.some(c => c.id === car.id), 'a used car in stock waits to start');
   assert.strictEqual(board.settings.steps[0].label, 'New - Import');
-  assert.strictEqual((await as(sales, 'POST', '/recon/units', { carId: car.id })).status, 403);
-  const made = await as(tech, 'POST', '/recon/units', { carId: car.id });
-  assert.strictEqual(made.status, 201);
-  unit = made.body;
+  unit = board.units.find(u => u.carId === car.id);
+  assert.ok(unit, 'a car added to inventory goes into recon on its own');
   assert.deepStrictEqual([unit.step, unit.status, unit.car.stockNumber, unit.car.stockType], ['purchase_trade', 'active', 'U100', 'used'], 'used cars start at Purchase / Trade');
+  assert.strictEqual((await as(sales, 'POST', '/recon/units', { carId: car.id })).status, 403);
   assert.strictEqual((await as(tech, 'POST', '/recon/units', { carId: car.id })).status, 400, 'only once at a time');
-  assert.ok(!(await as(manager, 'GET', '/recon/board')).body.notStarted.some(c => c.id === car.id));
+  assert.strictEqual((await as(manager, 'GET', '/recon/board')).body.units.filter(u => u.carId === car.id).length, 1);
 });
 
 test('work items: estimates, manager approval, and outside work posts to the car', async () => {
@@ -99,9 +97,8 @@ test('moving through steps to the front line, with a note, and reopening', async
 test('new cars go through recon too, starting at a "new" step; wholesale is a way out', async () => {
   const fresh = (await as(manager, 'POST', '/cars', { year: 2025, make: 'Ford', model: 'Escape', price: 32000, cost: 29000, mileage: 10, stockType: 'new' })).body;
   const board = (await as(manager, 'GET', '/recon/board')).body;
-  assert.strictEqual(board.notStarted.find(c => c.id === fresh.id).stockType, 'new');
-  const u = (await as(manager, 'POST', '/recon/units', { carId: fresh.id })).body;
-  assert.strictEqual(u.step, 'new_import');
+  const u = board.units.find(x => x.carId === fresh.id);
+  assert.deepStrictEqual([u.step, u.stepLabel, u.car.stockType], ['new_pdi', 'New - PDI', 'new'], 'new cars start at New - PDI');
   const out = (await as(manager, 'POST', `/recon/units/${u.id}/move`, { step: 'wholesale' })).body;
   assert.deepStrictEqual([out.status, out.removedReason], ['removed', 'Wholesale']);
   assert.ok((await as(manager, 'GET', '/recon/board')).body.units.some(x => x.id === u.id && x.step === 'wholesale'), 'shows under Wholesale');
@@ -109,8 +106,8 @@ test('new cars go through recon too, starting at a "new" step; wholesale is a wa
 
 test('work items like the shop uses them: pick from the list, price parts and labor, bulk status, store fields', async () => {
   const c = (await as(manager, 'POST', '/cars', { year: 2020, make: 'Audi', model: 'Q5', price: 30000, cost: 25000, mileage: 40000, stockType: 'used' })).body;
-  let u = (await as(advisor, 'POST', '/recon/units', { carId: c.id })).body;
   const board = (await as(advisor, 'GET', '/recon/board')).body;
+  let u = board.units.find(x => x.carId === c.id);
   assert.ok(board.settings.catalog.mechanical.includes('Oil Change'), 'a list of work items by phase');
   u = (await as(advisor, 'POST', `/recon/units/${u.id}/items/bulk`, { items: [{ description: 'Oil Change', category: 'mechanical' }, { description: 'Used Car Detail', category: 'detail' }, { description: 'PDR (Dent Repair)', category: 'cosmetic' }] })).body;
   assert.strictEqual(u.items.length, 3);
@@ -133,9 +130,20 @@ test('work items like the shop uses them: pick from the list, price parts and la
   assert.deepStrictEqual([unitNow.fields.other1, unitNow.inspectionRo], ['Lot B', '1690006']);
 });
 
+test('cars already in stock before recon are put in when the board opens; sold cars are not', async () => {
+  const early = (await as(manager, 'POST', '/cars', { year: 2018, make: 'Mazda', model: '3', price: 15000, cost: 12000, mileage: 60000, stockType: 'used' })).body;
+  const sold = (await as(manager, 'POST', '/cars', { year: 2016, make: 'Jeep', model: 'Compass', price: 11000, cost: 9000, mileage: 90000, stockType: 'used' })).body;
+  await h.store.pool.query(`DELETE FROM recon_units WHERE data->>'carId' IN ($1, $2)`, [early.id, sold.id]);
+  await h.store.pool.query(`UPDATE cars SET data = jsonb_set(data, '{status}', '"sold"') WHERE id = $1`, [sold.id]);
+  const board = (await as(manager, 'GET', '/recon/board')).body;
+  assert.strictEqual(board.units.find(x => x.carId === early.id).step, 'purchase_trade');
+  assert.ok(!board.units.some(x => x.carId === sold.id));
+  assert.strictEqual((await as(manager, 'GET', '/recon/board')).body.units.filter(x => x.carId === early.id).length, 1, 'only once');
+});
+
 test('every car that finished recon stays on the board, however long ago', async () => {
   const old = (await as(manager, 'POST', '/cars', { year: 2017, make: 'Kia', model: 'Soul', price: 12000, cost: 9000, mileage: 80000, stockType: 'used' })).body;
-  const u = (await as(manager, 'POST', '/recon/units', { carId: old.id })).body;
+  const u = (await as(manager, 'GET', '/recon/board')).body.units.find(x => x.carId === old.id);
   await as(manager, 'POST', `/recon/units/${u.id}/move`, { step: 'ready' });
   await h.store.pool.query(`UPDATE recon_units SET data = jsonb_set(data, '{doneAt}', to_jsonb('2020-01-01T00:00:00Z'::text)) WHERE id = $1`, [u.id]);
   const board = (await as(manager, 'GET', '/recon/board')).body;
@@ -149,12 +157,17 @@ test('steps and goals are the managers\' to set', async () => {
   assert.deepStrictEqual(s.steps.map(x => x.key), ['inspection', 'detail']);
   assert.strictEqual((await as(manager, 'PUT', '/recon/settings', { steps: [] })).status, 400);
   const reset = (await as(manager, 'PUT', '/recon/settings', { reset: true })).body;
-  assert.strictEqual(reset.steps.length, 19);
+  assert.strictEqual(reset.steps.length, 20);
+  assert.strictEqual(reset.steps[2].label, 'New - PDI');
   assert.strictEqual(reset.steps[0].label, 'New - Import');
   // A store still on the very first step list is moved to the current steps.
   await h.store.pool.query(`UPDATE dealerships SET settings = settings || '{"recon":{"goalDays":5,"steps":[{"key":"inspect","label":"Check-in","goalHours":24},{"key":"detail","label":"Detail","goalHours":24}]}}'::jsonb`);
   assert.strictEqual((await as(manager, 'GET', '/recon/settings')).body.steps[0].label, 'New - Import');
   // Saving all the steps keeps all of them (an earlier version cut the list at 12).
+  // A store on the steps from before New - PDI gets it added after New - In Transport.
+  const noPdi = reset.steps.filter(x => x.key !== 'new_pdi');
+  await h.store.pool.query(`UPDATE dealerships SET settings = jsonb_set(settings, '{recon,steps}', $1::jsonb)`, [JSON.stringify(noPdi)]);
+  assert.deepStrictEqual((await as(manager, 'GET', '/recon/settings')).body.steps.slice(0, 3).map(x => x.key), ['new_import', 'new_transport', 'new_pdi']);
   const all = (await as(manager, 'PUT', '/recon/settings', { steps: reset.steps })).body;
   assert.deepStrictEqual(all.steps.slice(-3).map(x => x.label), ['Repair', 'Offsite Sublet', 'Vendor']);
 });
