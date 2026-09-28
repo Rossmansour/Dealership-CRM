@@ -95,7 +95,7 @@ function render() {
 
 // ---------- Steps (left) and cars (right) ----------
 function unitsInStep(key) {
-  if (key === 'all') return board.units.filter(u => u.status === 'active' && matches(u));
+  if (key === 'all') return board.units.filter(u => matches(u)); // in recon, frontline ready, and wholesale
   if (key === READY) return board.units.filter(u => u.status === 'done' && matches(u));
   if (key === WHOLESALE) return board.units.filter(u => u.status === 'removed' && u.step === WHOLESALE && matches(u));
   return board.units.filter(u => u.status === 'active' && u.step === key && matches(u));
@@ -122,7 +122,10 @@ function renderCars() {
         <span class="rc-step-num">${list.length || ''}</span>
         <span class="rc-step-late">${late || ''}</span></button>`;
     })}`;
-  const list = (stepFilter === '__other' ? other : unitsInStep(stepFilter)).sort((a, b) => (b.status === 'active' ? b.hoursInStep : 0) - (a.status === 'active' ? a.hoursInStep : 0) || b.totalHours - a.totalHours);
+  // Cars still in recon first (longest in their step on top), then finished ones, newest first.
+  const rank = u => (u.status === 'active' ? 0 : u.status === 'done' ? 1 : 2);
+  const list = (stepFilter === '__other' ? other : unitsInStep(stepFilter)).sort((a, b) => rank(a) - rank(b) ||
+    (a.status === 'active' ? b.hoursInStep - a.hoursInStep : new Date(b.doneAt) - new Date(a.doneAt)));
   const title = (rows.find(r => r.key === stepFilter) || rows[0]).label;
   const goalH = board.settings.goalDays * 24;
   document.getElementById('rcList').innerHTML = html`

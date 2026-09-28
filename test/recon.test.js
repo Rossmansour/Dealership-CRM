@@ -133,6 +133,15 @@ test('work items like the shop uses them: pick from the list, price parts and la
   assert.deepStrictEqual([unitNow.fields.other1, unitNow.inspectionRo], ['Lot B', '1690006']);
 });
 
+test('every car that finished recon stays on the board, however long ago', async () => {
+  const old = (await as(manager, 'POST', '/cars', { year: 2017, make: 'Kia', model: 'Soul', price: 12000, cost: 9000, mileage: 80000, stockType: 'used' })).body;
+  const u = (await as(manager, 'POST', '/recon/units', { carId: old.id })).body;
+  await as(manager, 'POST', `/recon/units/${u.id}/move`, { step: 'ready' });
+  await h.store.pool.query(`UPDATE recon_units SET data = jsonb_set(data, '{doneAt}', to_jsonb('2020-01-01T00:00:00Z'::text)) WHERE id = $1`, [u.id]);
+  const board = (await as(manager, 'GET', '/recon/board')).body;
+  assert.ok(board.units.some(x => x.id === u.id && x.status === 'done'), 'a car finished years ago still shows under Frontline Ready');
+});
+
 test('steps and goals are the managers\' to set', async () => {
   assert.strictEqual((await as(tech, 'PUT', '/recon/settings', { goalDays: 3 })).status, 403);
   const s = (await as(manager, 'PUT', '/recon/settings', { goalDays: 4, steps: [{ label: 'Inspection', goalHours: 12 }, { label: 'Detail', goalHours: 24 }] })).body;

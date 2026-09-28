@@ -160,9 +160,9 @@ router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
   const cfg = reconSettings(settings);
   const carById = new Map(cars.map(c => [c.id, c]));
   const roById = new Map(ros.map(r => [r.id, r]));
-  const recentCutoff = Date.now() - 90 * 86400000;
-  const shown = units.filter(u => u.status === 'active' ||
-    ((u.status === 'done' || (u.status === 'removed' && u.step === WHOLESALE)) && new Date(u.doneAt).getTime() >= recentCutoff));
+  // Every car in recon, every car that finished (Frontline Ready), and every
+  // car wholesaled out of it. (Cars taken out for other reasons are left off.)
+  const shown = units.filter(u => u.status === 'active' || u.status === 'done' || (u.status === 'removed' && u.step === WHOLESALE));
   const inRecon = new Set(units.filter(u => u.status !== 'removed').map(u => u.carId));
   const notStarted = cars.filter(c => c.status !== 'sold' && !inRecon.has(c.id)).map(c => ({
     id: c.id, year: c.year, make: c.make, model: c.model, trim: c.trim || '', stockNumber: c.stockNumber || '', mileage: c.mileage,
