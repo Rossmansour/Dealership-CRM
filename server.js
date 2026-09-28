@@ -21,6 +21,7 @@ const reports = require('./reports');
 const dashboard = require('./dashboard');
 const service = require('./service');
 const parts = require('./parts');
+const recon = require('./recon');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -73,7 +74,9 @@ app.use(express.json());
 
 // The app page itself requires signing in; the login page, styles, and
 // car photos stay public (Twilio needs to fetch photos to send MMS).
-app.get(['/', '/index.html'], auth.requireLoginForPage);
+app.get(['/', '/index.html', '/recon.html'], auth.requireLoginForPage);
+// Recon runs in its own browser tab.
+app.get('/recon', auth.requireLoginForPage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'recon.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------- Request plumbing ----------
@@ -95,6 +98,7 @@ app.use('/api', reports.router);
 app.use('/api', dashboard.router);
 app.use('/api', service.router);
 app.use('/api', parts.router);
+app.use('/api', recon.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;

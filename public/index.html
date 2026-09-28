@@ -54,7 +54,7 @@
     <button type="button" class="nav-icon" data-view="assistant" data-module="crm" title="AI Assistant" aria-label="AI Assistant">
       <svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.5H10l-4.5 3.5V16H4z"/><path d="M12 8.2l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z"/></svg>
     </button>
-    <button type="button" class="nav-icon" data-view="recon" data-module="service" title="Recon" aria-label="Recon">
+    <button type="button" class="nav-icon" data-view="recon" data-module="service" title="Recon (opens in a new tab)" aria-label="Recon, opens in a new tab">
       <svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M8 3l1.5 2M16 3l-1.5 2M12 2v2.5"/></svg>
     </button>
     <button type="button" class="nav-icon" data-view="parts" data-module="parts" title="Parts Inventory" aria-label="Parts Inventory">
@@ -589,19 +589,6 @@
     </div>
     <h2 class="appt-day-title" id="apptDayTitle"></h2>
     <div id="apptList"></div>
-  </section>
-
-  <!-- SERVICE: recon (getting used cars front-line ready) -->
-  <section id="reconPanel" class="tab-panel">
-    <div class="panel-header">
-      <select id="reconFilter">
-        <option value="used">Pre-owned in stock</option>
-        <option value="all">All cars in stock</option>
-      </select>
-      <input type="text" id="reconSearch" placeholder="Search stock #, VIN, vehicle..." />
-    </div>
-    <div class="ro-summary" id="reconSummary"></div>
-    <div class="recon-board" id="reconBoard"></div>
   </section>
 
   <!-- PARTS: the shelf -->

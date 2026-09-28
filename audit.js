@@ -25,6 +25,7 @@ const LABELS = {
   part: p => `${p.number}${p.description ? ` · ${p.description}` : ''}`,
   parts_ticket: t => `P-${t.ticketNumber}${t.customerName ? ` · ${t.customerName}` : ''}`,
   special_order: o => `Special order ${o.number || ''}${o.customerName ? ` · ${o.customerName}` : ''}`,
+  recon_unit: u => `Recon · ${u.vehicleLabel || ''}${u.stockNumber ? ` (#${u.stockNumber})` : ''}`,
   repair_order: r => `RO-${r.roNumber}${r.customerName ? ` · ${r.customerName}` : ''}`,
   service_appointment: a => `Service appt${a.customerName ? ` · ${a.customerName}` : ''}`,
   appraisal: a => `A-${a.appraisalNumber}${[a.year, a.make, a.model].some(Boolean) ? ' · ' + [a.year, a.make, a.model].filter(Boolean).join(' ') : ''}`

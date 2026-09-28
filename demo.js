@@ -18,7 +18,7 @@ const audit = require('./audit');
 const service = require('./service');
 
 const DEMO_DOMAIN = '@demo.dealerdomus.app';
-const DEMO_TABLES = ['special_orders', 'parts_tickets', 'part_moves', 'parts', 'service_appointments', 'repair_orders', 'tasks', 'deals', 'leads', 'cars'];
+const DEMO_TABLES = ['recon_units', 'special_orders', 'parts_tickets', 'part_moves', 'parts', 'service_appointments', 'repair_orders', 'tasks', 'deals', 'leads', 'cars'];
 
 const uuid = () => crypto.randomUUID();
 const DAY = 86400000;
@@ -328,6 +328,66 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
       for (const [lead, days, hour, min, concern, advisor, waiter, [year, make, model]] of appts) {
         await store.insert(q, 'service_appointments', d, { id: uuid(), leadId: lead.id, vehicle: { vin: '', year: String(year), make, model, trim: '', color: '', plate: '', mileageIn: null, mileageOut: null },
           startsAt: at(days, hour, min), concern, advisorId: staff[advisor].id, waiter, status: 'scheduled', customerName: lead.name, roId: null, createdAt: at(Math.max(days, 0) + 2), createdBy: by(advisor), demo: true });
+      }
+
+      // ----- Recon: cars on their way to the front line -----
+      const steps = require('./recon').reconSettings(settings).steps.map(x => x.key);
+      const labelOf = k => (k === 'ready' ? 'Front line' : require('./recon').reconSettings(settings).steps.find(x => x.key === k).label);
+      const hoursAgo = h => new Date(Date.now() - h * 3600000).toISOString();
+      const roOf = stock => ros.find(r => r.carId === carByStock[stock].id);
+      const item = (category, description, estimate, status, extra = {}) => ({
+        id: uuid(), category, description, estimate, actual: null, vendor: '', status, roId: null, roNumber: null, roJobId: null, costPosted: false,
+        addedBy: 'Rob Carter', addedAt: hoursAgo(40), approvedBy: status === 'proposed' ? null : 'Rob Carter', approvedAt: status === 'proposed' ? null : hoursAgo(30), ...extra
+      });
+      const linkRo = (stock, i = 0) => { const r = roOf(stock); return r ? { roId: r.id, roNumber: r.roNumber, roJobId: r.jobs[i].id } : {}; };
+      // segments: [step, hours spent]; the last one is where it is now unless done.
+      const unitFor = (stock, segments, { done = false, items = [], notes = [] } = {}) => {
+        const car = carByStock[stock];
+        const total = segments.reduce((s2, [, h]) => s2 + h, 0);
+        let t = total;
+        const history = segments.map(([step, h], k) => {
+          const entered = hoursAgo(t);
+          t -= h;
+          const last = k === segments.length - 1;
+          return { step, label: labelOf(step), enteredAt: entered, leftAt: last && !done ? null : hoursAgo(t), by: k % 2 ? 'Mike Chen' : 'Dana Brooks' };
+        });
+        if (done) history.push({ step: 'ready', label: 'Front line', enteredAt: hoursAgo(t), leftAt: hoursAgo(t), by: 'Rob Carter' });
+        if (done) car.frontLineAt = hoursAgo(t);
+        return {
+          id: uuid(), carId: car.id, stockNumber: car.stockNumber, vehicleLabel: `${car.year} ${car.make} ${car.model}`,
+          status: done ? 'done' : 'active', step: done ? 'ready' : segments[segments.length - 1][0],
+          stepEnteredAt: done ? hoursAgo(t) : history[history.length - 1].enteredAt, startedAt: hoursAgo(total), doneAt: done ? hoursAgo(t) : null,
+          history, items, notes, startedBy: by('dana'), demo: true
+        };
+      };
+      const units = [
+        unitFor('U2404', [['inspect', 20], ['approve', 10]], { items: [
+          item('tires', 'Two front tires', 480, 'proposed'), item('body', 'Rear bumper scuff', 350, 'proposed', { vendor: 'Desert Collision' }), item('detail', 'Full detail', 180, 'approved')] }),
+        unitFor('U2406', [['inspect', 14], ['approve', 6], ['mechanical', 52]], { items: [
+          item('mechanical', 'Front brakes, battery', 520, 'approved', linkRo('U2406')), item('detail', 'Full detail', 180, 'approved')],
+          notes: [{ id: uuid(), text: 'Waiting on battery from parts -- should be here by noon.', at: hoursAgo(5), by: 'Sam Patel' }] }),
+        unitFor('U2407', [['inspect', 5]], { items: [item('mechanical', 'Oil change, inspection', 150, 'approved', linkRo('U2407'))] }),
+        unitFor('U2401', [['inspect', 18], ['approve', 4], ['mechanical', 30], ['body', 26], ['detail', 20]], { items: [
+          item('body', 'Door ding (PDR)', 150, 'done', { actual: 150, costPosted: true, vendor: 'Dent Pros', doneAt: hoursAgo(22) }), item('detail', 'Full detail', 180, 'approved')] }),
+        unitFor('U2402', [['inspect', 22], ['approve', 3], ['mechanical', 40], ['body', 10], ['detail', 30], ['photos', 30]], { items: [
+          item('detail', 'Full detail', 180, 'done', { actual: 175, costPosted: true, doneAt: hoursAgo(32) })] }),
+        unitFor('U2403', [['inspect', 16], ['approve', 5], ['mechanical', 40], ['detail', 18], ['photos', 12]], { done: true, items: [
+          item('mechanical', 'Recon: safety inspection, brakes, detail', 360, 'approved', linkRo('U2403'))] }),
+        unitFor('U2381', [['inspect', 12], ['approve', 3], ['mechanical', 36], ['body', 20], ['detail', 16], ['photos', 14]], { done: true, items: [item('detail', 'Full detail', 180, 'done', { actual: 180, costPosted: true })] }),
+        unitFor('U2380', [['inspect', 30], ['approve', 20], ['mechanical', 60], ['detail', 24], ['photos', 12]], { done: true, items: [item('mechanical', 'Timing belt', 900, 'done', { actual: 1040, costPosted: true })] })
+      ];
+      // Shift the finished ones back in time so they finished days ago.
+      const shift = (u, days) => {
+        const ms = days * 86400000;
+        const back = iso => (iso ? new Date(new Date(iso).getTime() - ms).toISOString() : iso);
+        u.startedAt = back(u.startedAt); u.stepEnteredAt = back(u.stepEnteredAt); u.doneAt = back(u.doneAt);
+        u.history = u.history.map(x => ({ ...x, enteredAt: back(x.enteredAt), leftAt: back(x.leftAt) }));
+        carByStock[u.stockNumber].frontLineAt = u.doneAt;
+      };
+      shift(units[5], 18); shift(units[6], 10); shift(units[7], 22);
+      for (const u of units) {
+        for (const i of u.items) if (i.costPosted && i.actual) carByStock[u.stockNumber].cost += i.actual;
+        await store.insert(q, 'recon_units', d, u);
       }
 
       // Save cars, customers, deals

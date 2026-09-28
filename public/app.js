@@ -182,7 +182,7 @@ const MODULES = [
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', recon: 'reconPanel', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
@@ -190,7 +190,7 @@ let currentView = 'pipeline';
 const VIEW_LABELS = {
   execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', reports: 'Reports',
   assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', service: 'Repair Orders',
-  serviceappts: 'Appointments', recon: 'Recon', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
+  serviceappts: 'Appointments', recon: 'Recon ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
 };
 const openRailGroups = new Set();
@@ -247,6 +247,8 @@ window.showModule = function(moduleKey) {
 };
 
 function showView(view) {
+  // Recon is its own app in its own browser tab.
+  if (view === 'recon') { window.open('/recon', 'dealerdomus-recon'); return; }
   if (currentView === 'appraisals' && view !== 'appraisals' && appraisalDirty &&
       !confirm('Leave this appraisal without saving your changes?')) return;
   if (view !== 'appraisals') { document.body.classList.remove('wide-page'); setAppraisalDirty(false); }
@@ -270,7 +272,6 @@ function showView(view) {
   if (view === 'execdash') openExecDashboard();
   if (view === 'service') openServiceView();
   if (view === 'serviceappts') openServiceAppointments();
-  if (view === 'recon') openReconView();
   if (view === 'parts') openPartsView();
   if (view === 'partstickets') openTicketsView();
   if (view === 'partsorders') openOrdersView();
@@ -6099,7 +6100,14 @@ async function init() {
   if (settingsRes.ok) appSettings = await settingsRes.json();
   loadAll();
   startAlertPolling();
+  // Links from the Recon tab: /#ro=<id> opens that repair order.
+  const hashRo = new URLSearchParams(location.hash.slice(1)).get('ro');
+  if (hashRo && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(hashRo); }
 }
+window.addEventListener('hashchange', () => {
+  const id = new URLSearchParams(location.hash.slice(1)).get('ro');
+  if (id && currentUser && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(id); }
+});
 
 // ---------- Alerts (the bell) ----------
 // Checks for new alerts every 30 seconds. New ones light up the bell;

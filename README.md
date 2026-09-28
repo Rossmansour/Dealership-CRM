@@ -121,7 +121,17 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
 - New roles: **Service Advisor** and **Technician**
 
-- **Recon** (Service → Recon): pre-owned cars in stock as a board -- *Needs recon*, *In recon* (open internal RO), *Front-line ready* -- with days in stock, days in recon, and recon cost. "Send to recon" opens an internal RO for the car
+- **Recon** (Service → Recon) opens its own app in a new tab -- see below
+
+**Recon** (its own tab: Service → Recon, or `/recon`)
+- Every used car's trip to the front line on a board of steps -- by default *Check-in & inspection → Estimate approval → Mechanical → Body, paint & glass → Detail → Photos & online → Front line*. Drag a car to the next step, or use "Next" on the car
+- **Time goals**: each step has a goal in hours and the whole trip a goal in days (default 5). Timers turn green / amber / red, and the top strip shows what's past goal
+- **Work items** with estimates (mechanical, tires, body, glass, detail, other). A used-car manager approves or declines each one (**Needs approval** tab). A manager's own items can be approved as they're added
+- **Approved mechanical and tire work goes to service** as one internal RO on the car; its cost reaches the car when the RO closes. **Outside work** (body shop, glass, detailer) is marked done with its actual cost, which is added to the car right away
+- **Not started**: used cars in stock that haven't begun recon, oldest first, with "Start recon"
+- **Front line**: cars that finished in the last 90 days, days in recon, spent vs. estimate; a car can go back into recon
+- **Performance**: average days to the front line, % that made the goal, spend per car, spent vs. estimate, and average time per step against its goal (the slowest step is called out)
+- Notes on each car; steps and goals are set by managers (**Steps & goals**); everyone can see the board, and the people doing the work (service, parts, managers, technicians) move cars and add work
 
 **Parts** (left sidebar → Parts)
 - **Inventory**: part #, description, brand, OEM/aftermarket/used, bin, vendor, cost, price, and when to reorder. Shows **on hand**, what's **on open ROs and tickets**, and what's **available**, plus the shelf value at cost
