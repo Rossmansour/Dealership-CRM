@@ -170,7 +170,7 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', label: 'Sales & F&I', views: ['deals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
-  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals'],
+  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals', 'pricing'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
   { key: 'recon', label: 'Recon', views: ['recon'], permissions: ['viewRecon'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M8 3l1.5 2M16 3l-1.5 2M12 2v2.5"/></svg>' },
@@ -183,7 +183,7 @@ const MODULES = [
 ];
 
 const VIEW_PANELS = {
-  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
+  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
   reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
@@ -191,11 +191,14 @@ let currentView = 'pipeline';
 // Names of each screen, for the sidebar dropdowns.
 const VIEW_LABELS = {
   execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', reports: 'Reports',
-  assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', service: 'Repair Orders',
+  assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', pricing: 'Market Pricing', service: 'Repair Orders',
   serviceappts: 'Appointments', recon: 'Recon ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
 };
 const openRailGroups = new Set();
+// Screens only some people use.
+const VIEW_PERMISSIONS = { pricing: 'editInventory' };
+const viewVisible = v => !VIEW_PERMISSIONS[v] || userCan(VIEW_PERMISSIONS[v]);
 
 const moduleOfView = view => MODULES.find(m => m.views.includes(view));
 
@@ -213,7 +216,7 @@ function renderModuleNav() {
         ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
         ${m.views.length > 1 ? html`<span class="rail-caret" data-rail-caret="${m.key}" role="button" aria-label="Show ${m.label} screens" title="Show screens">▾</span>` : ''}
       </button>
-      ${m.views.length > 1 ? html`<div class="rail-sub">${m.views.map(v => html`
+      ${m.views.length > 1 ? html`<div class="rail-sub">${m.views.filter(viewVisible).map(v => html`
         <button type="button" class="rail-subitem ${v === currentView ? 'active' : ''}" data-rail-view="${v}">${VIEW_LABELS[v] || v}</button>`)}</div>` : ''}
     </div>`;
   }).join('');
@@ -277,6 +280,7 @@ function showView(view) {
   if (view === 'parts') openPartsView();
   if (view === 'partstickets') openTicketsView();
   if (view === 'partsorders') openOrdersView();
+  if (view === 'pricing') openPricingView();
   window.scrollTo(0, 0);
 }
 
