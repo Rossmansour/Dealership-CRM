@@ -28,6 +28,8 @@ const ROLES = {
   bdc: 'BDC Agent',
   finance: 'F&I Manager',
   service_manager: 'Service Manager',
+  service_advisor: 'Service Advisor',
+  technician: 'Technician',
   parts_manager: 'Parts Manager'
 };
 
@@ -48,7 +50,12 @@ const PERMISSIONS = {
   viewDashboardVariable: ['admin', 'general_manager', 'sales_manager', 'finance'],
   viewDashboardFixed: ['admin', 'general_manager', 'service_manager', 'parts_manager'],
   editDealAccounting: ['admin', 'general_manager', 'sales_manager', 'finance'], // F&I cost, reserve, incentives, chargebacks
-  manageIntegrations: ['admin']               // connect outside systems like the key machine
+  manageIntegrations: ['admin'],              // connect outside systems like the key machine
+  // Service: advisors write repair orders and book appointments; technicians
+  // see the shop and clock their own jobs; sales managers can follow recon.
+  viewService: ['admin', 'general_manager', 'service_manager', 'service_advisor', 'technician', 'parts_manager', 'sales_manager'],
+  writeRepairOrders: ['admin', 'general_manager', 'service_manager', 'service_advisor'],
+  editServiceSettings: ['admin', 'general_manager', 'service_manager'] // labor rates, shop tax, and tech pay
 };
 
 function can(user, permission) {

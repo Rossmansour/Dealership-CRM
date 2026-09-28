@@ -57,8 +57,11 @@
     <button type="button" class="nav-icon" data-view="accounting" data-module="accounting" title="Accounting" aria-label="Accounting">
       <svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>
     </button>
-    <button type="button" class="nav-icon" data-view="service" data-module="service" title="Service" aria-label="Service">
-      <svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>
+    <button type="button" class="nav-icon" data-view="service" data-module="service" title="Repair Orders" aria-label="Repair Orders">
+      <svg viewBox="0 0 24 24"><path d="M6 3.5h12v17H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="serviceappts" data-module="service" title="Service Appointments" aria-label="Service Appointments">
+      <svg viewBox="0 0 24 24"><path d="M4 5.5h16v15H4z"/><path d="M4 10h16M8.5 3v4M15.5 3v4"/><path d="M9 14.5l2 2 4-4"/></svg>
     </button>
   </nav>
 
@@ -542,23 +545,38 @@
     </form>
   </section>
 
-  <!-- SERVICE (placeholder -- next module to build) -->
+  <!-- SERVICE: repair orders -->
   <section id="service" class="tab-panel">
-    <div class="module-placeholder">
-      <div class="module-placeholder-icon">🔧</div>
-      <h2>Service Module</h2>
-      <p>This is the next module on the roadmap -- built out one piece at a time, same as everything else here.</p>
-      <div class="module-placeholder-list">
-        <div class="ca-section-title">Planned for this module</div>
-        <ul>
-          <li>Service appointment scheduling</li>
-          <li>Repair order (RO) tracking</li>
-          <li>Technician assignment &amp; workload view</li>
-          <li>Parts lookup &amp; ordering</li>
-          <li>Service-to-sales handoff (linking service customers back to the CRM)</li>
-        </ul>
+    <div id="roListView">
+      <div class="panel-header ro-header">
+        <div class="ro-filters" id="roFilters" role="tablist"></div>
+        <input type="text" id="roSearch" placeholder="Search RO #, customer, VIN, vehicle..." />
+        <button type="button" class="btn-secondary" id="serviceSetupBtn">⚙ Setup</button>
+        <button type="button" class="btn-primary" id="newRoBtn">+ New RO</button>
       </div>
+      <div class="ro-summary" id="roSummary"></div>
+      <div class="table-scroll">
+        <table class="data-table ro-table">
+          <thead><tr><th>RO</th><th>Opened</th><th>Customer</th><th>Vehicle</th><th>Advisor</th><th>Tech</th><th>Promised</th><th>Status</th><th>Total</th></tr></thead>
+          <tbody id="roTableBody"></tbody>
+        </table>
+      </div>
+      <p id="roEmpty" class="no-deals-note" hidden>No repair orders here.</p>
     </div>
+    <div id="roDetailView" hidden></div>
+  </section>
+
+  <!-- SERVICE: appointments -->
+  <section id="serviceAppts" class="tab-panel">
+    <div class="panel-header">
+      <button type="button" class="btn-secondary" id="apptPrevDay" aria-label="Previous day">&larr;</button>
+      <input type="date" id="apptDay" />
+      <button type="button" class="btn-secondary" id="apptNextDay" aria-label="Next day">&rarr;</button>
+      <button type="button" class="btn-secondary" id="apptToday">Today</button>
+      <button type="button" class="btn-primary" id="newApptBtn">+ New Appointment</button>
+    </div>
+    <h2 class="appt-day-title" id="apptDayTitle"></h2>
+    <div id="apptList"></div>
   </section>
 
   <!-- ACCOUNTING (placeholder -- a later module) -->
@@ -777,6 +795,7 @@
           <button type="button" class="cp-tab active" data-cptab="activity">Activity</button>
           <button type="button" class="cp-tab" data-cptab="conversation">Conversation</button>
           <button type="button" class="cp-tab" data-cptab="deals">Deals <span class="cp-count" id="cpDealCount">0</span></button>
+          <button type="button" class="cp-tab" data-cptab="service">Service <span class="cp-count" id="cpServiceCount">0</span></button>
           <button type="button" class="cp-tab" data-cptab="value">Value</button>
         </div>
 
@@ -812,6 +831,10 @@
           <div id="cpPushDeal"></div>
           <div class="cp-section-head">Deals</div>
           <div id="profileDealsList"></div>
+        </div>
+
+        <div class="cp-tabpanel" data-cptab="service" hidden>
+          <div id="cpService"></div>
         </div>
 
         <div class="cp-tabpanel" data-cptab="value" hidden>
@@ -1453,6 +1476,68 @@
   </div>
 </div>
 
+<!-- Service appointment -->
+<div class="modal" id="apptModal">
+  <div class="modal-content">
+    <h2 id="apptModalTitle">New Service Appointment</h2>
+    <form id="apptForm">
+      <label>Customer <div id="apptCustomerPicker"></div></label>
+      <label>Vehicle
+        <select id="apptVehiclePick"><option value="">Type it below, or pick one of theirs</option></select>
+      </label>
+      <div class="form-row-3">
+        <label>Year <input type="text" id="apptYear" maxlength="4" /></label>
+        <label>Make <input type="text" id="apptMake" /></label>
+        <label>Model <input type="text" id="apptModel" /></label>
+      </div>
+      <label>VIN <input type="text" id="apptVin" maxlength="17" /></label>
+      <div class="form-row-2">
+        <label>Date &amp; time <input type="datetime-local" id="apptStartsAt" required /></label>
+        <label>Advisor <select id="apptAdvisor"></select></label>
+      </div>
+      <label>What does the customer need? <textarea id="apptConcern" rows="3" placeholder="One job per line, e.g.&#10;Oil change&#10;Brakes squeak"></textarea></label>
+      <label class="inline-check"><input type="checkbox" id="apptWaiter" /> Customer is waiting</label>
+      <p class="send-text-status-error" id="apptMsg"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="apptCancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Service setup: labor rates, shop supplies, tax, technician pay -->
+<div class="modal" id="serviceSetupModal">
+  <div class="modal-content modal-wide">
+    <h2>Service Setup</h2>
+    <div class="ca-section-title">Labor rates (per hour)</div>
+    <div class="form-row-3">
+      <label>Customer pay <input type="number" id="ssCustomerRate" min="0" step="0.01" /></label>
+      <label>Warranty <input type="number" id="ssWarrantyRate" min="0" step="0.01" /></label>
+      <label>Internal <input type="number" id="ssInternalRate" min="0" step="0.01" /></label>
+    </div>
+    <div class="ca-section-title">Shop supplies</div>
+    <div class="form-row-2">
+      <label>% of customer-pay labor <input type="number" id="ssSuppliesPct" min="0" step="0.1" /></label>
+      <label>Most per RO ($, 0 = no limit) <input type="number" id="ssSuppliesCap" min="0" step="0.01" /></label>
+    </div>
+    <div class="ca-section-title">Tax</div>
+    <p class="send-text-hint" id="ssTaxRateNote"></p>
+    <label class="inline-check"><input type="checkbox" id="ssTaxParts" /> Charge tax on parts and shop supplies</label>
+    <label class="inline-check"><input type="checkbox" id="ssTaxLabor" /> Charge tax on labor</label>
+    <p class="send-text-hint">Not sure? Ask your accountant which your state requires.</p>
+    <div class="ca-section-title">Technicians</div>
+    <p class="send-text-hint">Flat rate: paid for the hours sold on each job. Hourly: paid for the time clocked on the job. Add technicians under Admin &rarr; Users (role: Technician).</p>
+    <div id="ssTechs"></div>
+    <p class="send-text-status-error" id="ssMsg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="ssCancelBtn">Close</button>
+      <button type="button" class="btn-primary" id="ssSaveBtn">Save rates &amp; tax</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
+<script src="service-ui.js"></script>
 </body>
 </html>

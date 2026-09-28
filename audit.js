@@ -22,6 +22,8 @@ const LABELS = {
   user: u => `${u.name} (${u.email})`,
   settings: () => 'Fee defaults',
   task: t => `${t.title || t.type}${t.leadName ? ` · ${t.leadName}` : ''}`,
+  repair_order: r => `RO-${r.roNumber}${r.customerName ? ` · ${r.customerName}` : ''}`,
+  service_appointment: a => `Service appt${a.customerName ? ` · ${a.customerName}` : ''}`,
   appraisal: a => `A-${a.appraisalNumber}${[a.year, a.make, a.model].some(Boolean) ? ' · ' + [a.year, a.make, a.model].filter(Boolean).join(' ') : ''}`
 };
 

@@ -239,6 +239,32 @@ const MIGRATIONS = [
   -- where each rotation left off.
   ALTER TABLE users ADD COLUMN available boolean NOT NULL DEFAULT true;
   ALTER TABLE dealerships ADD COLUMN rotation_state jsonb NOT NULL DEFAULT '{}';
+  `,
+  `
+  -- Service: repair orders (RO-5001...) and service appointments. Each
+  -- technician's pay (flat rate or hourly, and the rate) is on their user row.
+  CREATE TABLE repair_orders (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    seq bigserial,
+    ro_number integer NOT NULL,
+    data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id),
+    UNIQUE (dealership_id, ro_number)
+  );
+  ALTER TABLE dealerships ADD COLUMN next_ro_number integer NOT NULL DEFAULT 5001;
+  CREATE TABLE service_appointments (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    seq bigserial,
+    data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  ALTER TABLE users ADD COLUMN pay jsonb NOT NULL DEFAULT '{}';
   `
 ];
 
@@ -296,7 +322,7 @@ async function tx(fn) {
 // Every function takes `q` -- either the pool or a transaction client --
 // plus the dealership the request is acting for.
 
-const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks']);
+const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks', 'repair_orders', 'service_appointments']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);
@@ -342,6 +368,11 @@ async function insert(q, table, dealershipId, record) {
     await q.query(
       'INSERT INTO appraisals (dealership_id, id, appraisal_number, data) VALUES ($1, $2, $3, $4)',
       [dealershipId, record.id, record.appraisalNumber, record]
+    );
+  } else if (table === 'repair_orders') {
+    await q.query(
+      'INSERT INTO repair_orders (dealership_id, id, ro_number, data) VALUES ($1, $2, $3, $4)',
+      [dealershipId, record.id, record.roNumber, record]
     );
   } else {
     await q.query(
@@ -407,6 +438,16 @@ async function takeNextAppraisalNumber(q, dealershipId) {
   return rows[0].appraisal_number;
 }
 
+// Same idea for repair order numbers (RO-5001, RO-5002...).
+async function takeNextRoNumber(q, dealershipId) {
+  const { rows } = await q.query(
+    `UPDATE dealerships SET next_ro_number = next_ro_number + 1
+     WHERE id = $1 RETURNING next_ro_number - 1 AS ro_number`,
+    [dealershipId]
+  );
+  return rows[0].ro_number;
+}
+
 // Same idea for customer numbers.
 async function takeNextCustomerNumber(q, dealershipId) {
   const { rows } = await q.query(
@@ -430,5 +471,6 @@ module.exports = {
   saveSettings,
   takeNextDealNumber,
   takeNextAppraisalNumber,
-  takeNextCustomerNumber
+  takeNextCustomerNumber,
+  takeNextRoNumber
 };

@@ -107,6 +107,20 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Who sees it: **GM** (and admins) everything; **sales managers and F&I** the variable tab; **service and parts managers** the fixed tab. New roles: General Manager, Service Manager, Parts Manager
 - New data it uses: **New / Pre-Owned** and **wholesale** on each car; **F&I product cost, reserve, incentives, and chargebacks** on each deal (managers and F&I only); a **new-car pack** in Fee Defaults
 
+**Service** (left sidebar → Service)
+- **Repair orders (RO-5001...)**: customer (the same customer record Sales uses) or an inventory car for internal/recon work, the vehicle by VIN (with decoder, or pick one of the customer's vehicles), advisor, promise time
+- **Jobs** on each RO: concern / cause / correction, who pays (customer, warranty, internal), technician, hours sold and rate, and parts (part #, qty, cost, price)
+- **Status**: Open → In progress → Waiting on parts → Ready → Closed (or Void if opened by mistake). The list shows what's past its promise time and who's clocked in
+- **Technicians** clock in and out of their jobs (clocking into one job clocks them out of any other), write the cause and correction, and mark jobs done. They don't see tech pay
+- **Tech pay** per technician: flat rate (paid the hours sold) or hourly (paid the time clocked). Service gross = labor sold − tech pay
+- **Totals**: labor, parts, shop supplies (% of customer-pay labor, with a cap), and tax at the store's rate on parts/supplies and, if turned on, labor. Warranty and internal totals separately
+- **Closing** locks the RO. Internal work on an inventory car is **added to that car's cost** automatically, so the car's gross is right when it sells
+- **Appointments** by day: book from Service or the customer page, then "Arrived → RO" opens the RO with the jobs already filled in
+- **Customer page → Service tab**: their vehicles (bought here and serviced here) with every RO; open an RO or book service from there
+- **Dashboard → Service & Parts**: service gross, parts gross, ROs, effective labor rate, and hours per RO from closed ROs; the Store tab and Expenses & Net now include them
+- **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
+- New roles: **Service Advisor** and **Technician**
+
 **Round Robin & Store Hours** (Admin → 🔄 Round Robin & Store Hours)
 - **Two rotations at once**: every new lead gets a salesperson (Sales 1) **and** a BDC agent (BDC 1), each from its own rotation, taking turns in the order you set (▲▼ to reorder)
 - Each rotation can be turned on or off and limited to certain lead sources (e.g. BDC only for website and CarGurus leads)
