@@ -157,9 +157,8 @@ body {
   padding: 0;
   white-space: nowrap;
 }
-.brand-mark { width: 30px; height: 30px; }
+.brand-mark { width: 44px; height: 26px; fill: var(--blue); }
 .appbar-module { font-size: 13px; font-weight: 600; color: var(--text-muted); white-space: nowrap; padding-left: 12px; border-left: 1px solid var(--border); }
-.brand-mark rect { fill: var(--blue); }
 .appbar-nav { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .appbar-nav::-webkit-scrollbar { display: none; }
 .appbar-right { display: flex; align-items: center; gap: 6px; }
