@@ -48,10 +48,20 @@ function defaultReconSettings() {
     ]
   };
 }
+// The first version's steps. A store still on exactly that list (never
+// changed by hand) moves to the current defaults automatically.
+const FIRST_VERSION_STEPS = ['inspect', 'approve', 'mechanical', 'body', 'detail', 'photos'];
+
 function reconSettings(settings) {
   const r = (settings && settings.recon) || {};
   const d = defaultReconSettings();
-  return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps: Array.isArray(r.steps) && r.steps.length ? r.steps : d.steps };
+  let steps = Array.isArray(r.steps) && r.steps.length ? r.steps : d.steps;
+  if (steps.every(s => FIRST_VERSION_STEPS.includes(s.key))) steps = d.steps;
+  // An earlier version cut saved lists off at 12 steps. A list that is exactly
+  // the first 12 defaults gets the rest back.
+  const first12 = d.steps.slice(0, 12).map(s => s.key).join('|');
+  if (steps.length === 12 && steps.map(s => s.key).join('|') === first12) steps = [...steps, ...d.steps.slice(12)];
+  return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps };
 }
 const stepLabel = (cfg, key) => (key === READY ? 'Frontline Ready' : key === WHOLESALE ? 'Wholesale' : (cfg.steps.find(s => s.key === key) || {}).label || key);
 // Where a car starts: new cars at the first "new" step, everything else at Purchase / Trade (or the first step).
@@ -151,13 +161,14 @@ router.get('/recon/settings', allow('viewRecon'), wrap(async (req, res) => {
 }));
 
 router.put('/recon/settings', allow('approveRecon'), wrap(async (req, res) => {
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  if (b.reset) b.steps = defaultReconSettings().steps;
   const saved = await store.tx(async q => {
     const { rows } = await q.query('SELECT settings FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
     const settings = rows[0].settings || {};
     const before = reconSettings(settings);
     const seen = new Set();
-    const steps = (Array.isArray(b.steps) ? b.steps : before.steps).slice(0, 12).map(s => {
+    const steps = (Array.isArray(b.steps) ? b.steps : before.steps).slice(0, 40).map(s => {
       let key = text(s.key, 30).toLowerCase().replace(/[^a-z0-9_]/g, '') || text(s.label, 30).toLowerCase().replace(/[^a-z0-9]+/g, '_');
       while (!key || key === READY || key === WHOLESALE || seen.has(key)) key = `${key || 'step'}_${seen.size + 1}`;
       seen.add(key);

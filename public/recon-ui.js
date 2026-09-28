@@ -456,6 +456,14 @@ document.getElementById('rcStepRows').addEventListener('click', (e) => {
   if (e.target.closest('[data-rm]')) { draftSteps.splice(i, 1); renderStepRows(); }
 });
 document.getElementById('rcAddStep').addEventListener('click', () => { draftSteps.push({ key: '', label: '', goalHours: 24 }); renderStepRows(); });
+document.getElementById('rcResetSteps').addEventListener('click', async () => {
+  if (!confirm('Replace the steps with the default list (New - Import through Vendor)? Cars in a step that no longer exists show under "Other steps" until you move them.')) return;
+  try {
+    await api('/recon/settings', 'PUT', { reset: true, goalDays: document.getElementById('rcGoalDays').value });
+    document.getElementById('rcSetupModal').classList.remove('active');
+    await refresh();
+  } catch (err) { document.getElementById('rcSetupMsg').textContent = err.message; }
+});
 document.getElementById('rcSetupCancel').addEventListener('click', () => document.getElementById('rcSetupModal').classList.remove('active'));
 document.getElementById('rcSetupSave').addEventListener('click', async () => {
   try {
