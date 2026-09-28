@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sign In - Dealership CRM</title>
-<link rel="preload" href="fonts/manrope.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="fonts/archivo.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="style.css" />
 <script>
   if (localStorage.getItem('theme') === 'dark') {
@@ -12,21 +12,21 @@
   }
 </script>
 <style>
-  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; }
-  .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 32px; width: 100%; max-width: 380px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
-  .login-card h1 { margin: 0 0 4px; font-size: 22px; color: var(--heading); }
+  body { margin-left: 0 !important; background: var(--navy) !important; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; }
+  .login-card { background: var(--surface); border: 2px solid var(--heading); border-top: 6px solid var(--signal); border-radius: 2px; padding: 32px; width: 100%; max-width: 380px; box-shadow: var(--pop-shadow); }
+  .login-card h1 { margin: 0 0 4px; font-size: 22px; color: var(--heading); font-stretch: 125%; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; }
   .login-card .subtitle { margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; }
   .login-card label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 14px; }
-  .login-card input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 15px; }
+  .login-card input { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--text); font-size: 15px; }
   .login-card button { width: 100%; margin: 8px 0 0; padding: 11px; font-size: 15px; }
-  .login-error { display: none; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
+  .login-error { display: none; background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); border-radius: 2px; padding: 10px 12px; font-size: 13px; margin-bottom: 14px; }
   .login-hint { font-size: 12px; color: var(--text-muted); margin-top: 16px; }
 </style>
 </head>
 <body>
 
 <div class="login-card">
-  <h1>🚗 Dealership CRM</h1>
+  <h1>Dealership CRM</h1>
   <p class="subtitle" id="loginSubtitle">Sign in to continue</p>
 
   <div class="login-error" id="loginError"></div>
