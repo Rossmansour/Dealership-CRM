@@ -121,6 +121,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
 - New roles: **Service Advisor** and **Technician**
 
+- **Recon** (Service → Recon): pre-owned cars in stock as a board -- *Needs recon*, *In recon* (open internal RO), *Front-line ready* -- with days in stock, days in recon, and recon cost. "Send to recon" opens an internal RO for the car
+
 **Parts** (left sidebar → Parts)
 - **Inventory**: part #, description, brand, OEM/aftermarket/used, bin, vendor, cost, price, and when to reorder. Shows **on hand**, what's **on open ROs and tickets**, and what's **available**, plus the shelf value at cost
 - **Stock only moves with a record**: received (cost becomes the weighted average), used on an RO, sold over the counter, or a count adjustment (reason required). Each part shows its full history
@@ -130,6 +132,10 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Reorder list**: parts at or below their reorder point, with how many to order
 - **Dashboard → Service & Parts**: parts gross now includes counter sales
 - Techs can look parts up but don't see cost
+
+**Sidebar**: each module has a dropdown of its screens (hover the sidebar, click ▾). The module you're in opens by itself.
+
+**Demo data** (Admin → 🧪 Demo Data): loads a sample store -- 12 staff (sales, BDC, F&I, service advisors, technicians, parts), cars, customers with activity, sold and working deals, open and closed repair orders with tech time and recon, parts, counter tickets, special orders, and appointments -- so every screen and the dashboard have something in them. It's all marked as demo; the same button removes exactly that and nothing else. Demo staff can't sign in until an admin sets a password for them under Users & Roles.
 
 **Round Robin & Store Hours** (Admin → 🔄 Round Robin & Store Hours)
 - **Two rotations at once**: every new lead gets a salesperson (Sales 1) **and** a BDC agent (BDC 1), each from its own rotation, taking turns in the order you set (▲▼ to reorder)

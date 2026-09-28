@@ -2726,6 +2726,9 @@ RELATED DEALS: ${JSON.stringify(relatedDeals, null, 2)}`;
   }
 });
 
+// Demo data (Admin -> Demo data): load a sample store, or remove it.
+app.use('/api', require('./demo').makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, roadmapSteps: ROADMAP_STEPS }));
+
 // Unknown API addresses answer in the same { error } JSON shape as
 // everything else, instead of Express's default HTML page.
 app.use('/api', (req, res) => {
