@@ -207,7 +207,7 @@ router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
   const shown = units.filter(u => u.status === 'active' || u.status === 'done' || (u.status === 'removed' && u.step === WHOLESALE));
   res.json({
     settings: cfg,
-    can: { work: auth.can(req.user, 'workRecon'), approve: auth.can(req.user, 'approveRecon') },
+    can: { work: auth.can(req.user, 'workRecon'), approve: auth.can(req.user, 'approveRecon'), price: auth.can(req.user, 'editInventory') },
     units: shown.map(u => present(u, carById, roById, cfg))
   });
 }));

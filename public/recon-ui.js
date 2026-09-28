@@ -227,8 +227,25 @@ let prevTab = 'cars';
 let phaseFilter = '';
 const selectedItems = new Set();
 
+// The appraisal panel's data (appraisal + how cars like it sold), per car.
+const appraisalData = new Map();
+async function loadAppraisal(id) {
+  try { appraisalData.set(id, await api(`/recon/units/${id}/appraisal`)); } catch { appraisalData.set(id, { appraisal: null, market: { ready: false } }); }
+  if (openUnitId === id && tab === 'car') renderCarPage();
+}
+// What the car stands the store now and the gross at its asking price.
+// Approved work isn't in the car's cost until it's done, so it's added here.
+function grossOf(u) {
+  const c = u.car || {};
+  const pending = u.items.filter(i => i.status === 'approved').reduce((s, i) => s + (Number(i.estimate) || 0), 0);
+  const waiting = u.items.filter(i => i.status === 'proposed').reduce((s, i) => s + (Number(i.estimate) || 0), 0);
+  const allIn = (Number(c.cost) || 0) + pending;
+  return { pending, waiting, allIn, gross: (Number(c.price) || 0) - allIn };
+}
+
 function openUnit(id) {
   openUnitId = id;
+  loadAppraisal(id);
   if (tab !== 'car') prevTab = tab;
   tab = 'car';
   selectedItems.clear();
@@ -318,6 +335,8 @@ function renderCarPage() {
       </div>
     </div>
 
+    ${appraisalPanel(u)}
+
     <div class="rc-work">
       <div class="rc-work-head">
         <h3>Work items <span class="rc-count">${u.items.length}</span></h3>
@@ -356,6 +375,51 @@ function renderCarPage() {
         ${(u.notes || []).slice().reverse().map(nt => html`<div class="rc-note"><div>${nt.text}</div><span class="rc-muted">${nt.by} · ${fmtDate(nt.at)}</span></div>`)}
       </div>
     </div>`;
+}
+
+// Mini appraisal: what was paid and planned, what the car stands in now,
+// and the gross -- updated as each item is approved or declined.
+function appraisalPanel(u) {
+  const c = u.car || {};
+  const data = appraisalData.get(u.id);
+  const a = data && data.appraisal;
+  const m = data && data.market;
+  const g = grossOf(u);
+  const bought = a && a.acv !== null ? a.acv : (Number(c.cost) || 0) - u.spent;
+  const reconSoFar = u.spent + g.pending;
+  const target = a && a.targetGross !== null ? Number(a.targetGross) : null;
+  const grossClass = v => (target === null ? (v < 0 ? 'rc-late' : '') : v >= target ? 'rc-good' : v >= 0 ? 'rc-warn-text' : 'rc-late');
+  const row = (label, value, cls = '') => html`<div class="rc-info-row"><span>${label}</span><strong class="${cls}">${value}</strong></div>`;
+  const planned = a ? a.plannedRecon : 0;
+  const pct = planned ? Math.min(100, Math.round(reconSoFar / planned * 100)) : 0;
+  return html`<div class="rc-apr">
+    <div class="rc-apr-col">
+      <div class="rc-d-title">Appraisal ${a ? html`<span class="rc-muted">A-${a.appraisalNumber}</span>` : ''}</div>
+      ${!data ? html`<p class="rc-muted">Loading…</p>` : a ? html`
+        ${row('ACV (paid)', money(a.acv))}${row('Planned recon', money(a.plannedRecon))}${row('Target retail', money(a.targetRetail))}
+        ${row('Target gross', money(a.targetGross))}${row('Appraised by', a.appraisedBy || '—')}${a.condition ? row('Condition', a.condition.replace('_', ' ')) : ''}`
+      : html`<p class="rc-muted">No appraisal on file for this car.</p>${row('Bought for', money(bought))}`}
+    </div>
+    <div class="rc-apr-col">
+      <div class="rc-d-title">Where it stands</div>
+      ${row('Car cost now', money(c.cost))}
+      ${row('+ Approved, not done', money(g.pending))}
+      ${row('All in', money(g.allIn), 'rc-strong')}
+      <label class="rc-info-row"><span>Asking</span>${board.can.price
+        ? html`<input type="text" inputmode="numeric" data-d="price" value="${c.price ? Math.round(c.price) : ''}" aria-label="Asking price" />`
+        : html`<strong>${money(c.price)}</strong>`}</label>
+      ${row('Gross at asking', money(g.gross), grossClass(g.gross))}
+      ${g.waiting ? row(`If ${money(g.waiting)} waiting is approved`, money(g.gross - g.waiting), grossClass(g.gross - g.waiting)) : ''}
+      ${planned ? html`<div class="rc-apr-bar" title="Recon spent + approved vs. planned on the appraisal"><div class="${reconSoFar > planned ? 'rc-apr-over' : ''}" style="width:${pct}%"></div></div>
+        <div class="rc-muted">Recon ${money(reconSoFar)} of ${money(planned)} planned${reconSoFar > planned ? html` · <strong class="rc-late">${money(reconSoFar - planned)} over</strong>` : ''}</div>` : ''}
+    </div>
+    <div class="rc-apr-col">
+      <div class="rc-d-title">Cars like it ${m && m.ready ? html`<span class="rc-muted">${m.matching}</span>` : ''}</div>
+      ${!m ? html`<p class="rc-muted">Loading…</p>` : !m.ready ? html`<p class="rc-muted">Not enough to compare.</p>` : html`
+        ${row('Sold here', m.sold.count)}${row('Avg sale price', money(m.sold.avgSalePrice))}${row('Avg gross', money(m.sold.avgGross))}
+        ${row('Avg days to sell', m.sold.avgDaysToSell ?? '—')}${row('In stock now', m.inStock.count ? `${m.inStock.count} · avg ${money(m.inStock.avgAskingPrice)}` : '0')}`}
+    </div>
+  </div>`;
 }
 
 function itemCard(u, i, work, approve) {
@@ -422,6 +486,12 @@ carEl.addEventListener('change', async (e) => {
   try {
     if (t.dataset.d === 'step' && t.value) return moveUnit(u, t.value);
     if (t.dataset.d === 'phase') { phaseFilter = t.value; return renderCarPage(); }
+    if (t.dataset.d === 'price') {
+      const price = Number(String(t.value).replace(/[$,\s]/g, ''));
+      if (!(price > 0)) { alert('Enter an asking price.'); return renderCarPage(); }
+      await api(`/cars/${u.car.id}`, 'PUT', { price });
+      return refresh();
+    }
     if (t.dataset.d === 'all') {
       u.items.filter(i => !phaseFilter || i.category === phaseFilter).forEach(i => (t.checked ? selectedItems.add(i.id) : selectedItems.delete(i.id)));
       return renderCarPage();
@@ -514,11 +584,11 @@ function renderApprovals(active) {
   const rows = active.flatMap(u => u.items.filter(i => i.status === 'proposed').map(i => ({ u, i }))).filter(x => matches(x.u));
   document.getElementById('rcApprovals').innerHTML = rows.length ? html`
     <p class="send-text-hint">${board.can.approve ? 'Approve or decline each item. Approved mechanical work can then go to service.' : 'Waiting on a used-car manager.'}</p>
-    <table class="data-table rc-table"><thead><tr><th>Car</th><th>Work</th><th>Estimate</th><th>Added by</th><th>Car cost now</th><th></th></tr></thead><tbody>
+    <table class="data-table rc-table"><thead><tr><th>Car</th><th>Work</th><th>Estimate</th><th>Added by</th><th>Gross at asking</th><th></th></tr></thead><tbody>
     ${rows.map(({ u, i }) => html`<tr>
       <td><button type="button" class="link-btn" data-open="${u.id}">${vehicle(u)}</button><div class="rc-muted">${u.car && u.car.stockNumber ? `#${u.car.stockNumber}` : ''} · ${u.stepLabel}</div></td>
       <td><span class="rc-cat">${CATEGORY_LABELS[i.category]}</span> ${i.description}${i.vendor ? html`<div class="rc-muted">${i.vendor}</div>` : ''}</td>
-      <td><strong>${money(i.estimate)}</strong></td><td>${i.addedBy}</td><td>${money(u.car && u.car.cost)} / asking ${money(u.car && u.car.price)}</td>
+      <td><strong>${money(i.estimate)}</strong></td><td>${i.addedBy}</td><td>${(g => html`<strong class="${g.gross < 0 ? 'rc-late' : ''}">${money(g.gross)}</strong> <span class="rc-muted">→ ${money(g.gross - i.estimate)} if approved</span><div class="rc-muted">asking ${money(u.car && u.car.price)}</div>`)(grossOf(u))}</td>
       <td class="rc-row-actions">${board.can.approve ? html`<button type="button" class="btn-primary btn-small" data-approve="${u.id}|${i.id}|approved">Approve</button>
         <button type="button" class="btn-secondary btn-small" data-approve="${u.id}|${i.id}|declined">Decline</button>` : ''}</td></tr>`)}
     </tbody></table>
