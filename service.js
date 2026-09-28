@@ -596,4 +596,4 @@ router.post('/service/appointments/:id/open-ro', allow('writeRepairOrders'), wra
   res.status(201).json(present(result.ro, result.settings, await payMap(store.pool, req.dealershipId)));
 }));
 
-module.exports = { router, totals, clockedHours, serviceSettings, defaultServiceSettings, OPEN_STATUSES, payMap };
+module.exports = { router, createRo, totals, clockedHours, serviceSettings, defaultServiceSettings, OPEN_STATUSES, payMap };

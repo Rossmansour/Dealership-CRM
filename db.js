@@ -295,6 +295,17 @@ const MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (dealership_id, id)
   );
+  `,
+  `
+  -- Recon: each used car's trip to the front line -- the step it's in,
+  -- how long it spent in each step, work items with estimates and
+  -- approvals, and notes.
+  CREATE TABLE recon_units (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
   `
 ];
 
@@ -353,7 +364,7 @@ async function tx(fn) {
 // plus the dealership the request is acting for.
 
 const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks', 'repair_orders', 'service_appointments',
-  'parts', 'part_moves', 'parts_tickets', 'special_orders']);
+  'parts', 'part_moves', 'parts_tickets', 'special_orders', 'recon_units']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);

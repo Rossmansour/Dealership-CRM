@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Recon - DealerDomus</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="style.css" />
+<script>
+  if (localStorage.getItem('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+</script>
+</head>
+<body class="rc-body">
+
+<header class="rc-top">
+  <a class="rc-brand" href="/" title="Back to DealerDomus">
+    <img src="logo.svg" alt="" width="40" height="23" />
+    <span>DealerDomus</span>
+  </a>
+  <span class="rc-app-name">Recon</span>
+  <nav class="rc-tabs" id="rcTabs" aria-label="Recon">
+    <button type="button" class="rc-tab active" data-rc-tab="board">Board</button>
+    <button type="button" class="rc-tab" data-rc-tab="approvals">Needs approval <span class="rc-count" id="rcApprovalCount">0</span></button>
+    <button type="button" class="rc-tab" data-rc-tab="waiting">Not started <span class="rc-count" id="rcWaitingCount">0</span></button>
+    <button type="button" class="rc-tab" data-rc-tab="finished">Front line</button>
+    <button type="button" class="rc-tab" data-rc-tab="performance">Performance</button>
+  </nav>
+  <div class="rc-top-right">
+    <input type="text" id="rcSearch" placeholder="Stock #, VIN, vehicle..." />
+    <button type="button" class="btn-secondary btn-small" id="rcSetupBtn" hidden>⚙ Steps &amp; goals</button>
+    <span class="rc-user" id="rcUser"></span>
+  </div>
+</header>
+
+<div class="rc-main">
+  <div class="rc-strip" id="rcStrip"></div>
+  <section class="rc-view" data-rc-view="board"><div class="rc-board" id="rcBoard"></div></section>
+  <section class="rc-view" data-rc-view="approvals" hidden><div id="rcApprovals"></div></section>
+  <section class="rc-view" data-rc-view="waiting" hidden><div id="rcWaiting"></div></section>
+  <section class="rc-view" data-rc-view="finished" hidden><div id="rcFinished"></div></section>
+  <section class="rc-view" data-rc-view="performance" hidden><div id="rcPerformance"></div></section>
+</div>
+
+<!-- One car's recon -->
+<div class="rc-drawer-backdrop" id="rcBackdrop" hidden></div>
+<aside class="rc-drawer" id="rcDrawer" hidden aria-label="Car recon"></aside>
+
+<!-- Steps & goals -->
+<div class="modal" id="rcSetupModal">
+  <div class="modal-content">
+    <h2>Recon steps &amp; goals</h2>
+    <p class="send-text-hint">Cars move through these steps in order, then to the front line. Each step's goal is in hours; the whole trip's goal is in days.</p>
+    <label class="rc-goal-days">Goal: front line within <input type="number" id="rcGoalDays" min="1" step="0.5" /> days</label>
+    <div id="rcStepRows"></div>
+    <button type="button" class="btn-secondary btn-small" id="rcAddStep">+ Add step</button>
+    <p class="send-text-status-error" id="rcSetupMsg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="rcSetupCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="rcSetupSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="recon-ui.js"></script>
+</body>
+</html>
