@@ -30,8 +30,9 @@ before(async () => {
 });
 after(() => h.stopServer());
 
-test('everyone sees the board; the people doing the work start recon', async () => {
-  const board = (await as(sales, 'GET', '/recon/board')).body;
+test('sales managers and service see the board and start recon; salespeople do not', async () => {
+  assert.strictEqual((await as(sales, 'GET', '/recon/board')).status, 403);
+  const board = (await as(advisor, 'GET', '/recon/board')).body;
   assert.ok(board.notStarted.some(c => c.id === car.id), 'a used car in stock waits to start');
   assert.strictEqual(board.settings.steps[0].key, 'inspect');
   assert.strictEqual((await as(sales, 'POST', '/recon/units', { carId: car.id })).status, 403);
@@ -40,7 +41,7 @@ test('everyone sees the board; the people doing the work start recon', async () 
   unit = made.body;
   assert.deepStrictEqual([unit.step, unit.status, unit.car.stockNumber], ['inspect', 'active', 'U100']);
   assert.strictEqual((await as(tech, 'POST', '/recon/units', { carId: car.id })).status, 400, 'only once at a time');
-  assert.ok(!(await as(sales, 'GET', '/recon/board')).body.notStarted.some(c => c.id === car.id));
+  assert.ok(!(await as(manager, 'GET', '/recon/board')).body.notStarted.some(c => c.id === car.id));
 });
 
 test('work items: estimates, manager approval, and outside work posts to the car', async () => {

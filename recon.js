@@ -110,7 +110,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 const allow = auth.requirePermission;
 
 // Everything the recon screen shows.
-router.get('/recon/board', wrap(async (req, res) => {
+router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
   const { units, cars, ros, settings } = await load(store.pool, req.dealershipId);
   const cfg = reconSettings(settings);
   const carById = new Map(cars.map(c => [c.id, c]));
@@ -130,7 +130,7 @@ router.get('/recon/board', wrap(async (req, res) => {
   });
 }));
 
-router.get('/recon/settings', wrap(async (req, res) => {
+router.get('/recon/settings', allow('viewRecon'), wrap(async (req, res) => {
   const d = await store.getDealership(store.pool, req.dealershipId);
   res.json(reconSettings(d && d.settings));
 }));

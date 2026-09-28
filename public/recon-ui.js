@@ -462,7 +462,8 @@ document.getElementById('rcSearch').addEventListener('input', () => render());
       if (u) openUnit(u.id); else if (board.notStarted.some(c => c.id === car)) { tab = 'waiting'; render(); }
     }
   } catch (err) {
-    document.getElementById('rcBoard').innerHTML = html`<p class="send-text-status-error">${err.message}</p>`;
+    document.getElementById('rcStrip').innerHTML = '';
+    document.getElementById('rcBoard').innerHTML = html`<p class="rc-empty-big">${err.message}<br><a href="/">Back to DealerDomus</a></p>`;
   }
   setInterval(() => { if (!document.hidden && !openUnitId) refresh().catch(() => {}); }, 60000);
 })();

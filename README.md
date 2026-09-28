@@ -121,9 +121,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
 - New roles: **Service Advisor** and **Technician**
 
-- **Recon** (Service → Recon) opens its own app in a new tab -- see below
 
-**Recon** (its own tab: Service → Recon, or `/recon`)
+**Recon** (its own section in the sidebar, above Service; opens in its own tab, or go to `/recon`)
 - Every used car's trip to the front line on a board of steps -- by default *Check-in & inspection → Estimate approval → Mechanical → Body, paint & glass → Detail → Photos & online → Front line*. Drag a car to the next step, or use "Next" on the car
 - **Time goals**: each step has a goal in hours and the whole trip a goal in days (default 5). Timers turn green / amber / red, and the top strip shows what's past goal
 - **Work items** with estimates (mechanical, tires, body, glass, detail, other). A used-car manager approves or declines each one (**Needs approval** tab). A manager's own items can be approved as they're added

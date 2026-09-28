@@ -60,9 +60,10 @@ const PERMISSIONS = {
   // the parts department runs the stock, counter sales, and ordering.
   viewParts: ['admin', 'general_manager', 'parts_manager', 'service_manager', 'service_advisor', 'technician'],
   writeParts: ['admin', 'general_manager', 'parts_manager', 'service_manager'],
-  // Recon: everyone can see where a car is; the people doing the work move
-  // cars and add work; used-car managers approve the spending.
-  workRecon: ['admin', 'general_manager', 'sales_manager', 'service_manager', 'service_advisor', 'technician', 'parts_manager'],
+  // Recon: sales managers and the service team see it and do the work;
+  // used-car managers approve the spending.
+  viewRecon: ['admin', 'general_manager', 'sales_manager', 'service_manager', 'service_advisor', 'technician'],
+  workRecon: ['admin', 'general_manager', 'sales_manager', 'service_manager', 'service_advisor', 'technician'],
   approveRecon: ['admin', 'general_manager', 'sales_manager']
 };
 
