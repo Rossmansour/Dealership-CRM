@@ -24,21 +24,27 @@ const n = v => Number(v) || 0;
 const round2 = v => Math.round(n(v) * 100) / 100;
 const text = (v, max = 300) => String(v ?? '').trim().slice(0, max);
 
-const READY = 'ready'; // the front line -- the end of every trip
+const READY = 'ready'; // the front line -- the end of a retail car's trip
+const WHOLESALE = 'wholesale'; // or out the back door: leaves recon, not counted in days-to-front-line
 const CATEGORIES = ['mechanical', 'tires', 'body', 'glass', 'detail', 'other'];
 const TO_SERVICE = ['mechanical', 'tires'];
 const ITEM_STATUSES = ['proposed', 'approved', 'declined', 'done'];
 
+// The store's steps, in order. Front line and Wholesale are always the two
+// ways out, so they aren't in the list.
 function defaultReconSettings() {
+  const step = (key, label, goalHours) => ({ key, label, goalHours });
   return {
     goalDays: 5,
     steps: [
-      { key: 'inspect', label: 'Check-in & inspection', goalHours: 24 },
-      { key: 'approve', label: 'Estimate approval', goalHours: 8 },
-      { key: 'mechanical', label: 'Mechanical', goalHours: 48 },
-      { key: 'body', label: 'Body, paint & glass', goalHours: 48 },
-      { key: 'detail', label: 'Detail', goalHours: 24 },
-      { key: 'photos', label: 'Photos & online', goalHours: 24 }
+      step('new_import', 'New - Import', 24), step('new_transport', 'New - In Transport', 120),
+      step('purchase_trade', 'Purchase / Trade', 24), step('used_transport', 'Used - In Transport', 120),
+      step('trade_not_cleared', 'Trade Not Cleared', 48), step('loaner', 'Loaner', 0),
+      step('write_up', 'Write Up', 8), step('detail_ready', 'Detail Ready', 24), step('detail_complete', 'Detail Complete', 8),
+      step('smog', 'Smog', 24), step('insp_ready', 'Insp Ready / Dispatch', 8), step('parts_estimate', 'Parts Estimate', 8),
+      step('ucm_approval', 'UCM Approval', 8), step('approved_declined', 'Approved / Declined', 4), step('order_parts', 'Order Parts', 8),
+      step('parts_hold', 'Parts Hold', 72), step('repair', 'Repair', 24), step('offsite_sublet', 'Offsite Sublet', 72),
+      step('vendor', 'Vendor', 48)
     ]
   };
 }
@@ -47,7 +53,12 @@ function reconSettings(settings) {
   const d = defaultReconSettings();
   return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps: Array.isArray(r.steps) && r.steps.length ? r.steps : d.steps };
 }
-const stepLabel = (cfg, key) => (key === READY ? 'Front line' : (cfg.steps.find(s => s.key === key) || {}).label || key);
+const stepLabel = (cfg, key) => (key === READY ? 'Frontline Ready' : key === WHOLESALE ? 'Wholesale' : (cfg.steps.find(s => s.key === key) || {}).label || key);
+// Where a car starts: new cars at the first "new" step, everything else at Purchase / Trade (or the first step).
+function firstStep(cfg, car) {
+  const isNew = car.stockType === 'new';
+  return cfg.steps.find(s => (isNew ? /new/i.test(s.key) : s.key === 'purchase_trade')) || cfg.steps[0];
+}
 
 // ---------- Work items and money ----------
 
@@ -78,6 +89,8 @@ function present(unit, cars, roById, cfg) {
     car: car ? {
       id: car.id, year: car.year, make: car.make, model: car.model, trim: car.trim || '', stockNumber: car.stockNumber || '', vin: car.vin || '',
       mileage: car.mileage, color: car.exteriorColor || '', price: n(car.price), cost: n(car.cost), status: car.status, dateAdded: car.dateAdded,
+      stockType: car.stockType === 'new' ? 'new' : 'used',
+      daysInStock: car.dateAdded ? Math.floor((now - new Date(car.dateAdded).getTime()) / 86400000) : null,
       photo: (car.photos || [])[0] || null
     } : null,
     stepLabel: stepLabel(cfg, unit.step),
@@ -116,10 +129,12 @@ router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
   const carById = new Map(cars.map(c => [c.id, c]));
   const roById = new Map(ros.map(r => [r.id, r]));
   const recentCutoff = Date.now() - 90 * 86400000;
-  const shown = units.filter(u => u.status === 'active' || (u.status === 'done' && new Date(u.doneAt).getTime() >= recentCutoff));
+  const shown = units.filter(u => u.status === 'active' ||
+    ((u.status === 'done' || (u.status === 'removed' && u.step === WHOLESALE)) && new Date(u.doneAt).getTime() >= recentCutoff));
   const inRecon = new Set(units.filter(u => u.status !== 'removed').map(u => u.carId));
-  const notStarted = cars.filter(c => c.status !== 'sold' && c.stockType !== 'new' && !inRecon.has(c.id)).map(c => ({
+  const notStarted = cars.filter(c => c.status !== 'sold' && !inRecon.has(c.id)).map(c => ({
     id: c.id, year: c.year, make: c.make, model: c.model, trim: c.trim || '', stockNumber: c.stockNumber || '', mileage: c.mileage,
+    stockType: c.stockType === 'new' ? 'new' : 'used', vin: c.vin || '',
     dateAdded: c.dateAdded, price: n(c.price)
   }));
   res.json({
@@ -144,7 +159,7 @@ router.put('/recon/settings', allow('approveRecon'), wrap(async (req, res) => {
     const seen = new Set();
     const steps = (Array.isArray(b.steps) ? b.steps : before.steps).slice(0, 12).map(s => {
       let key = text(s.key, 30).toLowerCase().replace(/[^a-z0-9_]/g, '') || text(s.label, 30).toLowerCase().replace(/[^a-z0-9]+/g, '_');
-      while (!key || key === READY || seen.has(key)) key = `${key || 'step'}_${seen.size + 1}`;
+      while (!key || key === READY || key === WHOLESALE || seen.has(key)) key = `${key || 'step'}_${seen.size + 1}`;
       seen.add(key);
       return { key, label: text(s.label, 40) || key, goalHours: Math.max(0, Math.round(n(s.goalHours))) };
     }).filter(s => s.label);
@@ -186,7 +201,7 @@ router.post('/recon/units', allow('workRecon'), wrap(async (req, res) => {
     if (existing) return { error: 'This car is already in recon.' };
     const cfg = reconSettings((await store.getDealership(q, req.dealershipId)).settings);
     const now = new Date().toISOString();
-    const first = cfg.steps[0];
+    const first = cfg.steps.find(s => s.key === (req.body || {}).step) || firstStep(cfg, car);
     const unit = {
       id: crypto.randomUUID(), carId, stockNumber: car.stockNumber || '', vehicleLabel: [car.year, car.make, car.model].filter(Boolean).join(' '),
       status: 'active', step: first.key, stepEnteredAt: now, startedAt: now, doneAt: null,
@@ -207,14 +222,19 @@ router.post('/recon/units/:id/move', allow('workRecon'), wrap(async (req, res) =
   const step = text((req.body || {}).step, 30);
   await withUnit(req, res, async (q, unit, cfg) => {
     if (unit.status !== 'active') return { error: 'This car already finished recon.' };
-    if (step !== READY && !cfg.steps.some(s => s.key === step)) return { error: 'Pick a step.' };
+    if (step !== READY && step !== WHOLESALE && !cfg.steps.some(s => s.key === step)) return { error: 'Pick a step.' };
     if (step === unit.step) return { details: 'No change' };
     const now = new Date().toISOString();
     const open = unit.history.find(h => !h.leftAt);
     if (open) open.leftAt = now;
-    unit.history.push({ step, label: stepLabel(cfg, step), enteredAt: now, leftAt: step === READY ? now : null, by: req.user.name });
+    unit.history.push({ step, label: stepLabel(cfg, step), enteredAt: now, leftAt: step === READY || step === WHOLESALE ? now : null, by: req.user.name });
     unit.step = step;
     unit.stepEnteredAt = now;
+    if (step === WHOLESALE) {
+      unit.status = 'removed';
+      unit.removedReason = 'Wholesale';
+      unit.doneAt = now;
+    }
     if (step === READY) {
       unit.status = 'done';
       unit.doneAt = now;
@@ -228,11 +248,12 @@ router.post('/recon/units/:id/move', allow('workRecon'), wrap(async (req, res) =
 // Put a finished car back in recon (e.g. something found on a test drive).
 router.post('/recon/units/:id/reopen', allow('workRecon'), wrap(async (req, res) => {
   await withUnit(req, res, async (q, unit, cfg) => {
-    if (unit.status !== 'done') return { error: 'This car is still in recon.' };
+    if (unit.status === 'active') return { error: 'This car is still in recon.' };
     const now = new Date().toISOString();
     const step = cfg.steps.find(s => s.key === text((req.body || {}).step, 30)) || cfg.steps[0];
     unit.status = 'active';
     unit.doneAt = null;
+    unit.removedReason = '';
     unit.step = step.key;
     unit.stepEnteredAt = now;
     unit.history.push({ step: step.key, label: step.label, enteredAt: now, leftAt: null, by: req.user.name });
@@ -336,4 +357,4 @@ router.post('/recon/units/:id/notes', allow('workRecon'), wrap(async (req, res) 
   });
 }));
 
-module.exports = { router, reconSettings, defaultReconSettings, present, READY };
+module.exports = { router, reconSettings, defaultReconSettings, present, READY, WHOLESALE };

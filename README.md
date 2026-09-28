@@ -123,14 +123,13 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 
 
 **Recon** (its own section in the sidebar, above Service; opens in its own tab, or go to `/recon`)
-- Every used car's trip to the front line on a board of steps -- by default *Check-in & inspection → Estimate approval → Mechanical → Body, paint & glass → Detail → Photos & online → Front line*. Drag a car to the next step, or use "Next" on the car
-- **Time goals**: each step has a goal in hours and the whole trip a goal in days (default 5). Timers turn green / amber / red, and the top strip shows what's past goal
-- **Work items** with estimates (mechanical, tires, body, glass, detail, other). A used-car manager approves or declines each one (**Needs approval** tab). A manager's own items can be approved as they're added
-- **Approved mechanical and tire work goes to service** as one internal RO on the car; its cost reaches the car when the RO closes. **Outside work** (body shop, glass, detailer) is marked done with its actual cost, which is added to the car right away
-- **Not started**: used cars in stock that haven't begun recon, oldest first, with "Start recon"
-- **Front line**: cars that finished in the last 90 days, days in recon, spent vs. estimate; a car can go back into recon
-- **Performance**: average days to the front line, % that made the goal, spend per car, spent vs. estimate, and average time per step against its goal (the slowest step is called out)
-- Notes on each car; steps and goals are set by managers (**Steps & goals**); everyone can see the board, and the people doing the work (service, parts, managers, technicians) move cars and add work
+- **All / New / Used** across the top: every list, count, and number (including **ADR**, average days to frontline) can be seen for all cars or split by new and used
+- **Steps down the left**, numbered, with how many cars are in each and how many are past the step's goal. Default steps: New - Import, New - In Transport, Purchase / Trade, Used - In Transport, Trade Not Cleared, Loaner, Write Up, Detail Ready, Detail Complete, Smog, Insp Ready / Dispatch, Parts Estimate, UCM Approval, Approved / Declined, Order Parts, Parts Hold, Repair, Offsite Sublet, Vendor -- and the two ways out, **Frontline Ready** and **Wholesale**
+- **Cars on the right** for the chosen step: step, stock #, new/used, vehicle and VIN, **time in step**, **time in recon**, **days in stock**, work (to approve / in service / estimate / spent), and the latest note. Drag a car onto a step on the left to move it
+- New cars start at the first New step; used cars at Purchase / Trade. Wholesale takes a car out of recon without counting it in ADR
+- **One car** (click it): time in step and total vs. goals, every step it went through with time in each, work items with estimates, approval, **send mechanical work to service** as an internal RO (cost reaches the car when the RO closes), **mark outside work done** with its actual cost (added to the car right away), notes
+- **Needs approval**, **Not started**, and **Performance** (ADR, % on goal, spend per car, spent vs. estimate, average time per step vs. goal) -- all following the All / New / Used choice
+- Steps and goals are set by managers (**Steps & goals**); sales managers, GMs, and the service team (service manager, advisors, technicians) can open it; sales managers approve
 
 **Parts** (left sidebar → Parts)
 - **Inventory**: part #, description, brand, OEM/aftermarket/used, bin, vendor, cost, price, and when to reorder. Shows **on hand**, what's **on open ROs and tickets**, and what's **available**, plus the shelf value at cost

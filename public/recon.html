@@ -18,12 +18,10 @@
     <span>DealerDomus</span>
   </a>
   <span class="rc-app-name">Recon</span>
-  <nav class="rc-tabs" id="rcTabs" aria-label="Recon">
-    <button type="button" class="rc-tab active" data-rc-tab="board">Board</button>
-    <button type="button" class="rc-tab" data-rc-tab="approvals">Needs approval <span class="rc-count" id="rcApprovalCount">0</span></button>
-    <button type="button" class="rc-tab" data-rc-tab="waiting">Not started <span class="rc-count" id="rcWaitingCount">0</span></button>
-    <button type="button" class="rc-tab" data-rc-tab="finished">Front line</button>
-    <button type="button" class="rc-tab" data-rc-tab="performance">Performance</button>
+  <nav class="rc-types" id="rcTypes" aria-label="Which cars">
+    <button type="button" class="rc-type active" data-type="all">All</button>
+    <button type="button" class="rc-type" data-type="new">New</button>
+    <button type="button" class="rc-type" data-type="used">Used</button>
   </nav>
   <div class="rc-top-right">
     <input type="text" id="rcSearch" placeholder="Stock #, VIN, vehicle..." />
@@ -32,12 +30,21 @@
   </div>
 </header>
 
+<nav class="rc-tabs" id="rcTabs" aria-label="Recon views">
+  <button type="button" class="rc-tab active" data-rc-tab="cars">Cars in recon</button>
+  <button type="button" class="rc-tab" data-rc-tab="approvals">Needs approval <span class="rc-count" id="rcApprovalCount">0</span></button>
+  <button type="button" class="rc-tab" data-rc-tab="waiting">Not started <span class="rc-count" id="rcWaitingCount">0</span></button>
+  <button type="button" class="rc-tab" data-rc-tab="performance">Performance</button>
+</nav>
+
 <div class="rc-main">
   <div class="rc-strip" id="rcStrip"></div>
-  <section class="rc-view" data-rc-view="board"><div class="rc-board" id="rcBoard"></div></section>
+  <section class="rc-view rc-cars" data-rc-view="cars">
+    <aside class="rc-steps" id="rcSteps" aria-label="Steps"></aside>
+    <div class="rc-list" id="rcList"></div>
+  </section>
   <section class="rc-view" data-rc-view="approvals" hidden><div id="rcApprovals"></div></section>
   <section class="rc-view" data-rc-view="waiting" hidden><div id="rcWaiting"></div></section>
-  <section class="rc-view" data-rc-view="finished" hidden><div id="rcFinished"></div></section>
   <section class="rc-view" data-rc-view="performance" hidden><div id="rcPerformance"></div></section>
 </div>
 
@@ -49,7 +56,7 @@
 <div class="modal" id="rcSetupModal">
   <div class="modal-content">
     <h2>Recon steps &amp; goals</h2>
-    <p class="send-text-hint">Cars move through these steps in order, then to the front line. Each step's goal is in hours; the whole trip's goal is in days.</p>
+    <p class="send-text-hint">Cars move through these steps (in any order), then out to Frontline Ready or Wholesale. Each step's goal is in hours; the whole trip's goal is in days.</p>
     <label class="rc-goal-days">Goal: front line within <input type="number" id="rcGoalDays" min="1" step="0.5" /> days</label>
     <div id="rcStepRows"></div>
     <button type="button" class="btn-secondary btn-small" id="rcAddStep">+ Add step</button>

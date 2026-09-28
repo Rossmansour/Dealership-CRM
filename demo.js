@@ -332,7 +332,7 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
 
       // ----- Recon: cars on their way to the front line -----
       const steps = require('./recon').reconSettings(settings).steps.map(x => x.key);
-      const labelOf = k => (k === 'ready' ? 'Front line' : require('./recon').reconSettings(settings).steps.find(x => x.key === k).label);
+      const labelOf = k => (k === 'ready' ? 'Frontline Ready' : require('./recon').reconSettings(settings).steps.find(x => x.key === k).label);
       const hoursAgo = h => new Date(Date.now() - h * 3600000).toISOString();
       const roOf = stock => ros.find(r => r.carId === carByStock[stock].id);
       const item = (category, description, estimate, status, extra = {}) => ({
@@ -351,7 +351,7 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
           const last = k === segments.length - 1;
           return { step, label: labelOf(step), enteredAt: entered, leftAt: last && !done ? null : hoursAgo(t), by: k % 2 ? 'Mike Chen' : 'Dana Brooks' };
         });
-        if (done) history.push({ step: 'ready', label: 'Front line', enteredAt: hoursAgo(t), leftAt: hoursAgo(t), by: 'Rob Carter' });
+        if (done) history.push({ step: 'ready', label: 'Frontline Ready', enteredAt: hoursAgo(t), leftAt: hoursAgo(t), by: 'Rob Carter' });
         if (done) car.frontLineAt = hoursAgo(t);
         return {
           id: uuid(), carId: car.id, stockNumber: car.stockNumber, vehicleLabel: `${car.year} ${car.make} ${car.model}`,
@@ -361,20 +361,23 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
         };
       };
       const units = [
-        unitFor('U2404', [['inspect', 20], ['approve', 10]], { items: [
+        unitFor('U2404', [['purchase_trade', 20], ['ucm_approval', 10]], { items: [
           item('tires', 'Two front tires', 480, 'proposed'), item('body', 'Rear bumper scuff', 350, 'proposed', { vendor: 'Desert Collision' }), item('detail', 'Full detail', 180, 'approved')] }),
-        unitFor('U2406', [['inspect', 14], ['approve', 6], ['mechanical', 52]], { items: [
+        unitFor('U2406', [['purchase_trade', 14], ['ucm_approval', 6], ['repair', 52]], { items: [
           item('mechanical', 'Front brakes, battery', 520, 'approved', linkRo('U2406')), item('detail', 'Full detail', 180, 'approved')],
           notes: [{ id: uuid(), text: 'Waiting on battery from parts -- should be here by noon.', at: hoursAgo(5), by: 'Sam Patel' }] }),
-        unitFor('U2407', [['inspect', 5]], { items: [item('mechanical', 'Oil change, inspection', 150, 'approved', linkRo('U2407'))] }),
-        unitFor('U2401', [['inspect', 18], ['approve', 4], ['mechanical', 30], ['body', 26], ['detail', 20]], { items: [
+        unitFor('U2407', [['write_up', 5]], { items: [item('mechanical', 'Oil change, inspection', 150, 'approved', linkRo('U2407'))] }),
+        unitFor('U2401', [['purchase_trade', 18], ['ucm_approval', 4], ['repair', 30], ['offsite_sublet', 26], ['detail_ready', 20]], { items: [
           item('body', 'Door ding (PDR)', 150, 'done', { actual: 150, costPosted: true, vendor: 'Dent Pros', doneAt: hoursAgo(22) }), item('detail', 'Full detail', 180, 'approved')] }),
-        unitFor('U2402', [['inspect', 22], ['approve', 3], ['mechanical', 40], ['body', 10], ['detail', 30], ['photos', 30]], { items: [
+        unitFor('U2402', [['used_transport', 22], ['write_up', 3], ['repair', 40], ['detail_ready', 10], ['detail_complete', 30], ['smog', 30]], { items: [
           item('detail', 'Full detail', 180, 'done', { actual: 175, costPosted: true, doneAt: hoursAgo(32) })] }),
-        unitFor('U2403', [['inspect', 16], ['approve', 5], ['mechanical', 40], ['detail', 18], ['photos', 12]], { done: true, items: [
+        unitFor('U2403', [['purchase_trade', 16], ['ucm_approval', 5], ['repair', 40], ['detail_ready', 18], ['insp_ready', 12]], { done: true, items: [
           item('mechanical', 'Recon: safety inspection, brakes, detail', 360, 'approved', linkRo('U2403'))] }),
-        unitFor('U2381', [['inspect', 12], ['approve', 3], ['mechanical', 36], ['body', 20], ['detail', 16], ['photos', 14]], { done: true, items: [item('detail', 'Full detail', 180, 'done', { actual: 180, costPosted: true })] }),
-        unitFor('U2380', [['inspect', 30], ['approve', 20], ['mechanical', 60], ['detail', 24], ['photos', 12]], { done: true, items: [item('mechanical', 'Timing belt', 900, 'done', { actual: 1040, costPosted: true })] })
+        unitFor('U2381', [['purchase_trade', 12], ['ucm_approval', 3], ['repair', 36], ['vendor', 20], ['detail_ready', 16], ['insp_ready', 14]], { done: true, items: [item('detail', 'Full detail', 180, 'done', { actual: 180, costPosted: true })] }),
+        unitFor('N2502', [['new_import', 30], ['new_transport', 70]]),
+        unitFor('N2504', [['new_transport', 96], ['detail_ready', 30]]),
+        unitFor('N2503', [['new_import', 8]]),
+        unitFor('U2380', [['trade_not_cleared', 30], ['ucm_approval', 20], ['parts_hold', 60], ['detail_ready', 24], ['insp_ready', 12]], { done: true, items: [item('mechanical', 'Timing belt', 900, 'done', { actual: 1040, costPosted: true })] })
       ];
       // Shift the finished ones back in time so they finished days ago.
       const shift = (u, days) => {
@@ -384,7 +387,8 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
         u.history = u.history.map(x => ({ ...x, enteredAt: back(x.enteredAt), leftAt: back(x.leftAt) }));
         carByStock[u.stockNumber].frontLineAt = u.doneAt;
       };
-      shift(units[5], 18); shift(units[6], 10); shift(units[7], 22);
+      const byStock = k => units.find(x => x.stockNumber === k);
+      shift(byStock('U2403'), 18); shift(byStock('U2381'), 10); shift(byStock('U2380'), 22);
       for (const u of units) {
         for (const i of u.items) if (i.costPosted && i.actual) carByStock[u.stockNumber].cost += i.actual;
         await store.insert(q, 'recon_units', d, u);

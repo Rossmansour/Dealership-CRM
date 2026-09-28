@@ -2356,3 +2356,48 @@ body.rc-body { margin: 0; min-height: 100vh; }
   .rc-bar-row { grid-template-columns: 110px minmax(0, 1fr) 80px; }
   .rc-table { display: block; overflow-x: auto; }
 }
+/* Recon: New / Used / All, steps on the left, cars on the right */
+.rc-types { display: flex; gap: 2px; background: rgba(255,255,255,0.1); border-radius: 10px; padding: 3px; }
+.rc-type { border: none; background: none; color: rgba(255,255,255,0.75); font: inherit; font-size: 14px; font-weight: 600; padding: 6px 16px; border-radius: 8px; cursor: pointer; }
+.rc-type.active { background: #fff; color: var(--navy); }
+.rc-body > .rc-tabs { display: flex; gap: 4px; padding: 8px 20px 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+.rc-body > .rc-tabs .rc-tab { color: var(--text-secondary); border-radius: 0; border-bottom: 3px solid transparent; padding: 8px 12px 10px; }
+.rc-body > .rc-tabs .rc-tab:hover { background: none; color: var(--text); }
+.rc-body > .rc-tabs .rc-tab.active { background: none; color: var(--blue); border-bottom-color: var(--blue); }
+.rc-cars:not([hidden]) { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.rc-steps { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; position: sticky; top: 72px; max-height: calc(100vh - 90px); overflow-y: auto; }
+.rc-steps-head, .rc-step { display: grid; grid-template-columns: minmax(0, 1fr) 36px 36px; align-items: center; }
+.rc-steps-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); }
+.rc-steps-head span:not(:first-child), .rc-step-num, .rc-step-late { text-align: center; }
+.rc-step { width: 100%; border: none; border-bottom: 1px solid var(--border); background: none; font: inherit; font-size: 13px; color: var(--text); padding: 7px 10px; cursor: pointer; text-align: left; }
+.rc-step:hover { background: var(--surface-alt); }
+.rc-step.active { background: var(--highlight-bg); color: var(--blue); font-weight: 700; box-shadow: inset 3px 0 0 var(--blue); }
+.rc-step.rc-drop { background: var(--highlight-bg); outline: 2px dashed var(--blue); outline-offset: -2px; }
+.rc-step-empty { color: var(--text-muted); }
+.rc-step-exit { background: color-mix(in srgb, var(--green) 6%, transparent); }
+.rc-step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-step-label em { font-style: normal; color: var(--text-muted); font-size: 11px; display: inline-block; min-width: 20px; }
+.rc-step-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rc-step-late { font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
+.rc-list-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.rc-list-head h2 { margin: 0; font-size: 18px; color: var(--heading); }
+.rc-units tbody tr { cursor: pointer; }
+.rc-units tbody tr:hover td { background: var(--highlight-bg); }
+.rc-units td { vertical-align: top; font-size: 13px; }
+.rc-units tr.rc-dragging { opacity: 0.45; }
+.rc-veh { min-width: 190px; }
+.rc-step-chip { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.rc-type-chip { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-top: 3px; }
+.rc-type-new { background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue); }
+.rc-type-used { background: var(--surface-alt); color: var(--text-secondary); }
+.rc-work .rc-flag { display: inline-block; margin: 0 4px 3px 0; }
+.rc-note-cell { max-width: 320px; }
+.rc-note-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 900px) {
+  .rc-cars:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+  .rc-steps { position: static; max-height: 260px; }
+}
+@media (max-width: 760px) {
+  .rc-types { order: 3; }
+  .rc-body > .rc-tabs { padding: 4px 8px 0; overflow-x: auto; }
+}

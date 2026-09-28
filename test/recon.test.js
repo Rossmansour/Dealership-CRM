@@ -34,12 +34,12 @@ test('sales managers and service see the board and start recon; salespeople do n
   assert.strictEqual((await as(sales, 'GET', '/recon/board')).status, 403);
   const board = (await as(advisor, 'GET', '/recon/board')).body;
   assert.ok(board.notStarted.some(c => c.id === car.id), 'a used car in stock waits to start');
-  assert.strictEqual(board.settings.steps[0].key, 'inspect');
+  assert.strictEqual(board.settings.steps[0].label, 'New - Import');
   assert.strictEqual((await as(sales, 'POST', '/recon/units', { carId: car.id })).status, 403);
   const made = await as(tech, 'POST', '/recon/units', { carId: car.id });
   assert.strictEqual(made.status, 201);
   unit = made.body;
-  assert.deepStrictEqual([unit.step, unit.status, unit.car.stockNumber], ['inspect', 'active', 'U100']);
+  assert.deepStrictEqual([unit.step, unit.status, unit.car.stockNumber, unit.car.stockType], ['purchase_trade', 'active', 'U100', 'used'], 'used cars start at Purchase / Trade');
   assert.strictEqual((await as(tech, 'POST', '/recon/units', { carId: car.id })).status, 400, 'only once at a time');
   assert.ok(!(await as(manager, 'GET', '/recon/board')).body.notStarted.some(c => c.id === car.id));
 });
@@ -84,16 +84,27 @@ test('mechanical work goes to service as an internal RO; its cost arrives when t
 
 test('moving through steps to the front line, with a note, and reopening', async () => {
   await as(tech, 'POST', `/recon/units/${unit.id}/notes`, { text: 'Small door ding, leave it' });
-  await as(tech, 'POST', `/recon/units/${unit.id}/move`, { step: 'mechanical' });
+  await as(tech, 'POST', `/recon/units/${unit.id}/move`, { step: 'repair' });
   assert.strictEqual((await as(tech, 'POST', `/recon/units/${unit.id}/move`, { step: 'nowhere' })).status, 400);
   const done = (await as(tech, 'POST', `/recon/units/${unit.id}/move`, { step: 'ready' })).body;
   assert.strictEqual(done.status, 'done');
-  assert.deepStrictEqual(done.history.map(x => x.step), ['inspect', 'mechanical', 'ready']);
+  assert.deepStrictEqual(done.history.map(x => x.step), ['purchase_trade', 'repair', 'ready']);
   assert.ok(done.history.every(x => x.leftAt), 'every step has an end time');
   assert.strictEqual(done.notes[0].text, 'Small door ding, leave it');
   assert.ok((await carNow()).frontLineAt);
-  const back = (await as(tech, 'POST', `/recon/units/${unit.id}/reopen`, { step: 'detail' })).body;
-  assert.deepStrictEqual([back.status, back.step], ['active', 'detail']);
+  const back = (await as(tech, 'POST', `/recon/units/${unit.id}/reopen`, { step: 'detail_ready' })).body;
+  assert.deepStrictEqual([back.status, back.step], ['active', 'detail_ready']);
+});
+
+test('new cars go through recon too, starting at a "new" step; wholesale is a way out', async () => {
+  const fresh = (await as(manager, 'POST', '/cars', { year: 2025, make: 'Ford', model: 'Escape', price: 32000, cost: 29000, mileage: 10, stockType: 'new' })).body;
+  const board = (await as(manager, 'GET', '/recon/board')).body;
+  assert.strictEqual(board.notStarted.find(c => c.id === fresh.id).stockType, 'new');
+  const u = (await as(manager, 'POST', '/recon/units', { carId: fresh.id })).body;
+  assert.strictEqual(u.step, 'new_import');
+  const out = (await as(manager, 'POST', `/recon/units/${u.id}/move`, { step: 'wholesale' })).body;
+  assert.deepStrictEqual([out.status, out.removedReason], ['removed', 'Wholesale']);
+  assert.ok((await as(manager, 'GET', '/recon/board')).body.units.some(x => x.id === u.id && x.step === 'wholesale'), 'shows under Wholesale');
 });
 
 test('steps and goals are the managers\' to set', async () => {
