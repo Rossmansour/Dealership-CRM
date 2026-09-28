@@ -119,7 +119,8 @@ test('who sees which tab: GM everything, sales & F&I variable, service & parts f
   assert.deepStrictEqual(await Promise.all(['store', 'variable', 'fixed'].map(t => code(parts, t))), [403, 403, 200]);
   assert.deepStrictEqual(await Promise.all(['store', 'variable', 'fixed'].map(t => code(sales, t))), [403, 403, 403]);
   const fixed = (await as(service, 'GET', `/dashboard/fixed?month=${MONTH}`)).body;
-  assert.strictEqual(fixed.available, false);
+  assert.strictEqual(fixed.available, true, 'fixed ops now come from closed repair orders');
+  assert.strictEqual(fixed.mtd.ros, 0);
   assert.strictEqual(fixed.plan.goals.serviceGross, 90000);
   const me = (await as(gm, 'GET', '/auth/me')).body;
   assert.strictEqual(me.roleLabel, 'General Manager');

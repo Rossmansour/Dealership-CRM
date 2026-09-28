@@ -19,6 +19,7 @@ const photos = require('./photos');
 const alerts = require('./alerts');
 const reports = require('./reports');
 const dashboard = require('./dashboard');
+const service = require('./service');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -91,6 +92,7 @@ app.use('/api', auth.router);
 app.use('/api', alerts.router);
 app.use('/api', reports.router);
 app.use('/api', dashboard.router);
+app.use('/api', service.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -109,7 +111,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // the activity routes, so it (and its audit trail) can't be rewritten by
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
-  cars: ['id', 'photos', 'openROs', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
+  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
@@ -184,6 +186,7 @@ app.put('/api/settings', allow('editSettings'), wrap(async (req, res) => {
     const incoming = { ...(req.body || {}) };
     delete incoming.rotations; // changed through /api/rotations (managers can too)
     delete incoming.monthlyPlan; // changed through /api/dashboard/plan
+    delete incoming.service; // changed through /api/service/settings
     if ('storeHours' in incoming) incoming.storeHours = storeHours.cleanStoreHours(incoming.storeHours);
     if ('roadmapLabels' in incoming) {
       const labels = Array.isArray(incoming.roadmapLabels) ? incoming.roadmapLabels : [];
@@ -441,7 +444,7 @@ function buildCar(fields) {
     soldAs: fields.soldAs === 'wholesale' ? 'wholesale' : 'retail', // when sold: to a customer, or wholesaled
     wholesalePrice: Number(fields.wholesalePrice) || 0,
     photos: [], // array of paths like /uploads/cars/abc123.jpg
-    openROs: [], // groundwork for the future Service module -- empty until Service exists
+    openROs: [], // open repair orders on this car (kept by the Service module)
     dateAdded: new Date().toISOString(),
     dateSold: null
   };

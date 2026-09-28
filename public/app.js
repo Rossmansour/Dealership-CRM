@@ -152,7 +152,7 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
   { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
-  { key: 'service', label: 'Service', views: ['service'],
+  { key: 'service', label: 'Service', views: ['service', 'serviceappts'], permissions: ['viewService'],
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
   { key: 'accounting', label: 'Accounting', views: ['accounting'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>' }
@@ -160,7 +160,7 @@ const MODULES = [
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', accounting: 'accounting', execdash: 'execDashboard'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
@@ -203,6 +203,8 @@ function showView(view) {
   if (view === 'appraisals') showAppraisalList();
   if (view === 'reports') openReportsView();
   if (view === 'execdash') openExecDashboard();
+  if (view === 'service') openServiceView();
+  if (view === 'serviceappts') openServiceAppointments();
   window.scrollTo(0, 0);
 }
 
@@ -372,7 +374,7 @@ function sparkline(values, fmt) {
 }
 
 // One metric as a goal bar.
-function goalBar({ label, actual, pace, goal, lastMonth, lastYear, series, fmt, ids, drillLabel, daysLeft, rate }) {
+function goalBar({ label, actual, pace, goal, lastMonth, lastYear, series, fmt, ids, drillLabel, daysLeft, rate, kind = 'deals' }) {
   const vals = [actual, rate ? null : pace, goal, lastMonth, lastYear].filter(v => v !== null && v !== undefined && !Number.isNaN(v));
   const max = Math.max(1, ...vals.map(v => Math.max(0, v))) * 1.08;
   const pct = v => (v === null || v === undefined || Number.isNaN(v) ? null : Math.max(0, Math.min(100, (Math.max(0, v) / max) * 100)));
@@ -386,7 +388,7 @@ function goalBar({ label, actual, pace, goal, lastMonth, lastYear, series, fmt, 
   const tip = [`${label}: ${fmt(actual)}`, rate ? '' : `on pace for ${fmt(pace)}`, goal !== null && goal !== undefined ? `goal ${fmt(goal)}` : 'no goal set',
     `last month ${fmt(lastMonth)}`, `last year ${fmt(lastYear)}`].filter(Boolean).join(' · ');
   const value = ids && ids.length
-    ? html`<button type="button" class="gb-value link" data-exec-drill="${JSON.stringify(ids)}" data-exec-kind="deals" data-exec-label="${drillLabel || label}">${fmt(actual)}</button>`
+    ? html`<button type="button" class="gb-value link" data-exec-drill="${JSON.stringify(ids)}" data-exec-kind="${kind}" data-exec-label="${drillLabel || label}">${fmt(actual)}</button>`
     : html`<span class="gb-value">${fmt(actual)}</span>`;
   return html`<div class="gbar">
     <div class="gb-head">
@@ -448,11 +450,14 @@ function pulseLines(d, scope) {
     const lm = ['new', 'used'].reduce((sum, t) => sum + deptNumbers(d, t).lm.gross, 0);
     const e = d.plan.expenses;
     const exp = Object.values(e).reduce((sum, v) => sum + (v || 0), 0);
+    const fx = d.fixed ? d.fixed.mtd : null;
+    const fixedGross = fx ? fx.gross : 0;
     let s = `Variable gross ${money0(gross)} so far, on pace for ${money0(gross * f)}`;
     if (lm) s += ` (${gross * f >= lm ? 'ahead of' : 'behind'} last month's ${money0(lm)})`;
     s += '.';
-    if (exp) s += ` After ${money0(exp)} in expenses, the month is on pace for ${money0(gross * f - exp)} net.`;
-    lines.push(s, 'Service and parts join this once the Service module is built.');
+    lines.push(s);
+    if (fx) lines.push(`Service & parts gross ${money0(fixedGross)} so far from ${fx.ros} closed RO${fx.ros === 1 ? '' : 's'}, on pace for ${money0(fixedGross * f)}.`);
+    if (exp) lines.push(`After ${money0(exp)} in expenses, the store is on pace for ${money0((gross + fixedGross) * f - exp)} net.`);
   }
   lines.push(dept('new', 'New'), dept('used', 'Pre-Owned'));
   if (left) lines.push(`${left} selling day${left === 1 ? '' : 's'} left this month.`);
@@ -562,7 +567,7 @@ function renderExpenses(d, store) {
   const e = d.plan.expenses;
   const gross = t => d.mtd[t].gross + d.mtd.wholesale[t].gross;
   const lines = [['New', gross('new'), e.newVariable], ['Pre-Owned', gross('used'), e.usedVariable]];
-  if (store) lines.push(['Service', null, e.service], ['Parts', null, e.parts], ['General / admin', null, e.general]);
+  if (store) lines.push(['Service', d.fixed ? d.fixed.mtd.serviceGross : null, e.service], ['Parts', d.fixed ? d.fixed.mtd.partsGross : null, e.parts], ['General / admin', null, e.general]);
   const totalGross = lines.reduce((s, l) => s + (l[1] || 0), 0);
   const totalExp = lines.reduce((s, l) => s + (l[2] || 0), 0);
   const anyExpense = lines.some(l => l[2] !== null);
@@ -597,13 +602,12 @@ function renderStoreDash(d) {
   const allIds = [...d.mtd.new.dealIds, ...d.mtd.used.dealIds];
   const inv = d.inventory;
   const exp = Object.values(d.plan.expenses).reduce((s, v) => s + (v || 0), 0);
-  const gross = N.mtd.gross + U.mtd.gross;
+  const gross = N.mtd.gross + U.mtd.gross + (d.fixed ? d.fixed.mtd.gross : 0);
   return pulseLines(d, 'store') + GB_LEGEND + html`
     <div class="gb-grid">
       ${goalBar({ label: 'Units delivered', actual: N.mtd.units + U.mtd.units, pace: (N.mtd.units + U.mtd.units) * f, goal: sum(g.newUnits, g.usedUnits), lastMonth: N.lm.units + U.lm.units, lastYear: N.ly.units + U.ly.units, series: d.trend.map(m => m.newUnits + m.usedUnits), fmt: fmtN, ids: allIds, drillLabel: 'All retail deals', daysLeft: left })}
-      ${goalBar({ label: 'Variable gross', actual: gross, pace: gross * f, goal: sum(g.newGross, g.usedGross), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, series: d.trend.map(m => m.new + m.used), fmt: money0, ids: allIds, drillLabel: 'All deals', daysLeft: left })}
-      <div class="gbar gbar-na"><div class="gb-head"><span class="gb-label">Fixed gross</span><span class="gb-value">--</span></div>
-        <p class="audit-note">Service and parts -- not available yet (needs the Service module).</p></div>
+      ${goalBar({ label: 'Variable gross', actual: N.mtd.gross + U.mtd.gross, pace: (N.mtd.gross + U.mtd.gross) * f, goal: sum(g.newGross, g.usedGross), lastMonth: N.lm.gross + U.lm.gross, lastYear: N.ly.gross + U.ly.gross, series: d.trend.map(m => m.new + m.used), fmt: money0, ids: allIds, drillLabel: 'All deals', daysLeft: left })}
+      ${d.fixed ? goalBar({ label: 'Service & parts gross', actual: d.fixed.mtd.gross, pace: d.fixed.mtd.gross * f, goal: sum(g.serviceGross, g.partsGross), lastMonth: d.fixed.lastMonth.gross, lastYear: d.fixed.lastYear.gross, series: d.fixed.trend.map(m => m.serviceGross + m.partsGross), fmt: money0, ids: d.fixed.mtd.roIds, drillLabel: 'Closed repair orders', daysLeft: left, kind: 'ros' }) : ''}
     </div>
     <div class="store-stats">
       <div class="store-stat"><span>Net, on pace</span><strong>${exp ? money0(gross * f - exp) : '--'}</strong><em>${exp ? `after ${money0(exp)} expenses` : 'enter expenses to see net'}</em></div>
@@ -614,13 +618,29 @@ function renderStoreDash(d) {
 }
 
 function renderFixed(d) {
+  const f = d.pace.factor;
   const g = d.plan.goals;
-  return html`<div class="pulse"><div class="pulse-title">Month pulse</div><ul>
-      <li>Service and parts numbers aren't available yet -- they fill in once the Service module (repair orders, labor, parts) is built.</li>
-      <li>Goals for this month: service gross ${money0(g.serviceGross)}, parts gross ${money0(g.partsGross)}, repair orders ${fmtN(g.repairOrders)}. Set them under 🎯 Goals &amp; Expenses.</li>
-    </ul></div>
+  const left = daysLeft(d);
+  const M = d.mtd, LM = d.lastMonth, LY = d.lastYear;
+  const hrs = v => (v === null || v === undefined || Number.isNaN(v) ? '--' : Number(v).toFixed(1));
+  const lines = [
+    `Service gross ${money0(M.serviceGross)} and parts gross ${money0(M.partsGross)} so far from ${M.ros} closed RO${M.ros === 1 ? '' : 's'}, on pace for ${money0(M.gross * f)}${LM.gross ? ` (last month ${money0(LM.gross)})` : ''}.`,
+    M.hours ? `${hrs(M.hours)} labor hours sold${M.elr !== null ? `, customer-pay labor at ${money0(M.elr)} an hour` : ''}${M.hoursPerRo !== null ? `, ${hrs(M.hoursPerRo)} hours per RO` : ''}.` : 'No labor hours sold yet this month.',
+    `Labor sold: customer ${money0(M.customerLabor)} · warranty ${money0(M.warrantyLabor)} · internal ${money0(M.internalLabor)}.`
+  ];
+  if (left) lines.push(`${left} selling day${left === 1 ? '' : 's'} left this month.`);
+  return html`<div class="pulse"><div class="pulse-title">Month pulse</div><ul>${lines.map(l => html`<li>${l}</li>`)}</ul></div>` + GB_LEGEND + html`
+    <div class="exec-section-title">Gross</div>
     <div class="gb-grid">
-      ${['Service gross', 'Parts gross', 'Repair orders', 'Effective labor rate', 'Hours per RO'].map(l => html`<div class="gbar gbar-na"><div class="gb-head"><span class="gb-label">${l}</span><span class="gb-value">--</span></div><p class="audit-note">Not available yet</p></div>`)}
+      ${goalBar({ label: 'Total', actual: M.gross, pace: M.gross * f, goal: (g.serviceGross === null && g.partsGross === null) ? null : (g.serviceGross || 0) + (g.partsGross || 0), lastMonth: LM.gross, lastYear: LY.gross, series: d.trend.map(m => m.serviceGross + m.partsGross), fmt: money0, ids: M.roIds, drillLabel: 'Closed repair orders', daysLeft: left, kind: 'ros' })}
+      ${goalBar({ label: 'Service (labor)', actual: M.serviceGross, pace: M.serviceGross * f, goal: g.serviceGross, lastMonth: LM.serviceGross, lastYear: LY.serviceGross, series: d.trend.map(m => m.serviceGross), fmt: money0, ids: M.roIds, drillLabel: 'Closed repair orders', daysLeft: left, kind: 'ros' })}
+      ${goalBar({ label: 'Parts', actual: M.partsGross, pace: M.partsGross * f, goal: g.partsGross, lastMonth: LM.partsGross, lastYear: LY.partsGross, series: d.trend.map(m => m.partsGross), fmt: money0, ids: M.roIds, drillLabel: 'Closed repair orders', daysLeft: left, kind: 'ros' })}
+    </div>
+    <div class="exec-section-title">Work</div>
+    <div class="gb-grid">
+      ${goalBar({ label: 'Repair orders', actual: M.ros, pace: M.ros * f, goal: g.repairOrders, lastMonth: LM.ros, lastYear: LY.ros, series: d.trend.map(m => m.ros), fmt: fmtN, ids: M.roIds, drillLabel: 'Closed repair orders', daysLeft: left, kind: 'ros' })}
+      ${goalBar({ label: 'Effective labor rate', actual: M.elr, goal: null, lastMonth: LM.elr, lastYear: LY.elr, series: d.trend.map(m => m.elr), fmt: money0, rate: true })}
+      ${goalBar({ label: 'Hours per RO', actual: M.hoursPerRo, goal: null, lastMonth: LM.hoursPerRo, lastYear: LY.hoursPerRo, series: d.trend.map(m => (m.ros ? m.hours / m.ros : null)), fmt: hrs, rate: true })}
     </div>`;
 }
 
@@ -638,7 +658,14 @@ document.getElementById('execBody').addEventListener('click', (e) => {
   const ids = new Set(JSON.parse(el.dataset.execDrill));
   const list = document.getElementById('execDrillList');
   document.getElementById('execDrillTitle').textContent = `${el.dataset.execLabel} (${ids.size})`;
-  if (el.dataset.execKind === 'cars') {
+  if (el.dataset.execKind === 'ros') {
+    const rows = (execData.ros || (execData.fixed && execData.fixed.ros) || []).filter(r => ids.has(r.id));
+    list.innerHTML = html`<table class="data-table report-table"><thead><tr><th>RO</th><th>Closed</th><th>Customer</th><th>Vehicle</th><th>Hours</th><th>Labor</th><th>Parts</th><th>Gross</th></tr></thead>
+      <tbody>${rows.map(r => html`<tr>
+        <td><button type="button" class="deal-number-link" data-exec-ro="${r.id}">RO-${r.roNumber}</button></td>
+        <td>${r.closedAt ? new Date(r.closedAt).toLocaleDateString() : '--'}</td><td>${r.customer}</td><td>${r.vehicle}</td>
+        <td>${Number(r.hours).toFixed(1)}</td><td>${fmtN(r.labor)}</td><td>${fmtN(r.parts)}</td><td><strong>${fmtN(r.gross)}</strong></td></tr>`)}</tbody></table>`;
+  } else if (el.dataset.execKind === 'cars') {
     const cars = execData.wholesaleCars.filter(c => ids.has(c.id));
     list.innerHTML = html`<table class="data-table report-table"><thead><tr><th>Sold</th><th>Vehicle</th><th>Stock #</th><th>Wholesale price</th><th>Cost</th><th>Gross</th></tr></thead>
       <tbody>${cars.map(c => html`<tr><td>${c.soldAt ? new Date(c.soldAt).toLocaleDateString() : '--'}</td><td>${c.vehicle}</td><td>${c.stockNumber}</td><td>${fmtN(c.price)}</td><td>${fmtN(c.cost)}</td><td>${fmtN(c.gross)}</td></tr>`)}</tbody></table>`;
@@ -658,6 +685,8 @@ document.getElementById('execBody').addEventListener('click', (e) => {
 document.getElementById('execDrillList').addEventListener('click', (e) => {
   const deal = e.target.closest('[data-exec-deal]');
   const lead = e.target.closest('[data-exec-lead]');
+  const ro = e.target.closest('[data-exec-ro]');
+  if (ro) { document.getElementById('execDrillModal').classList.remove('active'); openRoById(ro.dataset.execRo); return; }
   if (!deal && !lead) return;
   document.getElementById('execDrillModal').classList.remove('active');
   if (deal) openDealWorkspace(deal.dataset.execDeal); else openLeadProfile(lead.dataset.execLead);
@@ -3101,6 +3130,7 @@ function renderCustomerPage() {
   renderThread(lead);
   renderProfileDeals(lead);
   renderCpValue(lead);
+  if (typeof renderCpService === 'function') renderCpService(lead);
 }
 
 // ----- Header -----
@@ -5661,6 +5691,8 @@ const ROLE_OPTIONS = [
   ['finance', 'F&I Manager'],
   ['sales_manager', 'Sales Manager'],
   ['service_manager', 'Service Manager'],
+  ['service_advisor', 'Service Advisor'],
+  ['technician', 'Technician'],
   ['parts_manager', 'Parts Manager'],
   ['general_manager', 'General Manager'],
   ['admin', 'Admin']

@@ -1,6 +1,6 @@
 // dashboard.js
 // The management dashboard: the whole store (GM), variable (sales & F&I),
-// and fixed (service & parts), month by month -- MTD, pace, forecast
+// and fixed (service & parts, from closed repair orders), month by month -- MTD, pace, forecast
 // (goals), last month, and last year, with the deals behind each number.
 //
 // Gross, per retail deal:
@@ -99,16 +99,17 @@ function summarize(data, from, to, includeChargebacks) {
 
 // ---------- Data loading ----------
 async function loadData(dealershipId) {
-  const [deals, cars, appraisals, leads, dealership] = await Promise.all([
+  const [deals, cars, appraisals, leads, repairOrders, dealership] = await Promise.all([
     store.list(store.pool, 'deals', dealershipId),
     store.list(store.pool, 'cars', dealershipId),
     store.list(store.pool, 'appraisals', dealershipId),
     store.list(store.pool, 'leads', dealershipId),
+    store.list(store.pool, 'repair_orders', dealershipId),
     store.getDealership(store.pool, dealershipId)
   ]);
   const settings = (dealership && dealership.settings) || {};
   return {
-    deals: deals.map(({ creditApp, ...d }) => d), cars, appraisals, leads: leads.map(({ creditApp, ...l }) => l),
+    deals: deals.map(({ creditApp, ...d }) => d), cars, appraisals, leads: leads.map(({ creditApp, ...l }) => l), repairOrders,
     settings, storeHours: hours.cleanStoreHours(settings.storeHours)
   };
 }
@@ -217,6 +218,7 @@ function variableReport(data, key, includeChargebacks) {
 
 function storeReport(data, key) {
   const v = variableReport(data, key, true);
+  const fixed = fixedReport(data, key);
   const tz = data.storeHours.timezone;
   const [from, to] = monthRange(key, tz);
   const inMonth = iso => { const t = new Date(iso).getTime(); return t >= from && t < to; };
@@ -225,11 +227,70 @@ function storeReport(data, key) {
   const newLeads = data.leads.filter(l => inMonth(l.dateAdded));
   return {
     ...v,
+    fixed: { mtd: fixed.mtd, lastMonth: fixed.lastMonth, lastYear: fixed.lastYear, trend: fixed.trend, ros: fixed.ros },
     inventory: {
       units: stock.length, newUnits: stock.filter(c => c.stockType === 'new').length, usedUnits: stock.filter(c => c.stockType !== 'new').length,
       value: stock.reduce((s, c) => s + n(c.cost), 0), aged: aged.length
     },
     leads: { count: newLeads.length, sold: newLeads.filter(l => l.status === 'won' || data.deals.some(d => d.leadId === l.id && SOLD.includes(d.status))).length }
+  };
+}
+
+// ---------- Fixed ops (service & parts), from closed repair orders ----------
+// Service gross = labor sold - what the techs are paid for it. Parts gross =
+// parts sold - parts cost. Counted in the month the RO closed.
+function fixedSummary(data, from, to) {
+  const out = {
+    ros: 0, roIds: [], hours: 0, customerHours: 0,
+    customerLabor: 0, warrantyLabor: 0, internalLabor: 0, laborSale: 0, laborCost: 0,
+    partsSale: 0, partsCost: 0
+  };
+  for (const ro of data.repairOrders || []) {
+    if (ro.status !== 'closed' || !ro.closedTotals) continue;
+    const t = new Date(ro.closedAt).getTime();
+    if (!(t >= from && t < to)) continue;
+    const c = ro.closedTotals;
+    out.ros++; out.roIds.push(ro.id);
+    out.hours += n(c.hours); out.customerHours += n(c.customer && c.customer.hours);
+    out.customerLabor += n(c.customer && c.customer.labor);
+    out.warrantyLabor += n(c.warranty && c.warranty.labor);
+    out.internalLabor += n(c.internal && c.internal.labor);
+    out.laborSale += n(c.laborSale); out.laborCost += n(c.laborCost);
+    out.partsSale += n(c.partsSale); out.partsCost += n(c.partsCost);
+  }
+  out.serviceGross = out.laborSale - out.laborCost;
+  out.partsGross = out.partsSale - out.partsCost;
+  out.gross = out.serviceGross + out.partsGross;
+  out.elr = out.customerHours ? out.customerLabor / out.customerHours : null; // effective labor rate
+  out.hoursPerRo = out.ros ? out.hours / out.ros : null;
+  return out;
+}
+
+function fixedReport(data, key) {
+  const tz = data.storeHours.timezone;
+  const range = k => monthRange(k, tz);
+  const [from, to] = range(key);
+  const days = openDays(key, data.storeHours);
+  const trend = [];
+  for (let i = 12; i >= 1; i--) {
+    const k = shiftMonth(key, -i);
+    const f = fixedSummary(data, ...range(k));
+    trend.push({ month: k, serviceGross: f.serviceGross, partsGross: f.partsGross, ros: f.ros, hours: f.hours, elr: f.elr });
+  }
+  const mtd = fixedSummary(data, from, to);
+  const roById = new Map((data.repairOrders || []).map(r => [r.id, r]));
+  return {
+    month: key, available: true,
+    pace: { elapsedDays: days.elapsed, totalDays: days.total, factor: days.elapsed ? days.total / days.elapsed : 0 },
+    mtd, lastMonth: fixedSummary(data, ...range(shiftMonth(key, -1))), lastYear: fixedSummary(data, ...range(shiftMonth(key, -12))),
+    trend, plan: planFor(data.settings, key),
+    ros: mtd.roIds.map(id => roById.get(id)).map(r => ({
+      id: r.id, roNumber: r.roNumber, customer: r.customerName || (r.carId ? 'Internal' : '--'),
+      vehicle: [r.vehicle && r.vehicle.year, r.vehicle && r.vehicle.make, r.vehicle && r.vehicle.model].filter(Boolean).join(' '),
+      closedAt: r.closedAt, hours: n(r.closedTotals.hours), labor: n(r.closedTotals.laborSale), laborCost: n(r.closedTotals.laborCost),
+      parts: n(r.closedTotals.partsSale), partsCost: n(r.closedTotals.partsCost),
+      gross: n(r.closedTotals.laborSale) - n(r.closedTotals.laborCost) + n(r.closedTotals.partsSale) - n(r.closedTotals.partsCost)
+    }))
   };
 }
 
@@ -247,8 +308,7 @@ router.get('/dashboard/:tab', wrap(async (req, res) => {
   const key = MONTH.test(req.query.month || '') ? req.query.month : currentMonth(data.storeHours.timezone);
   if (req.params.tab === 'variable') return res.json(variableReport(data, key, req.query.chargebacks !== '0'));
   if (req.params.tab === 'store') return res.json(storeReport(data, key));
-  // Fixed ops: no service/parts data until the Service module exists.
-  res.json({ month: key, available: false, plan: planFor(data.settings, key), pace: openDays(key, data.storeHours) });
+  res.json(fixedReport(data, key));
 }));
 
 // Monthly goals (forecast) and expenses. Variable goals: sales managers /
@@ -289,4 +349,4 @@ router.put('/dashboard/plan/:month', wrap(async (req, res) => {
   res.json(saved);
 }));
 
-module.exports = { router, dealGross, summarize, openDays, monthRange, shiftMonth };
+module.exports = { router, dealGross, summarize, fixedSummary, openDays, monthRange, shiftMonth };
