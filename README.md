@@ -125,6 +125,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 **Recon** (its own section in the sidebar, above Service; opens in its own tab, or go to `/recon`)
 - **All / New / Used** across the top: every list, count, and number (including **ADR**, average days to frontline) can be seen for all cars or split by new and used
 - **Steps down the left**, numbered, with how many cars are in each and how many are past the step's goal. Default steps: New - Import, New - In Transport, Purchase / Trade, Used - In Transport, Trade Not Cleared, Loaner, Write Up, Detail Ready, Detail Complete, Smog, Insp Ready / Dispatch, Parts Estimate, UCM Approval, Approved / Declined, Order Parts, Parts Hold, Repair, Offsite Sublet, Vendor -- and the two ways out, **Frontline Ready** and **Wholesale**
+- **All** shows every car: in recon, Frontline Ready, and Wholesale. **Frontline Ready** shows every car that finished recon (no time limit)
 - **Cars on the right** for the chosen step: step, stock #, new/used, vehicle and VIN, **time in step**, **time in recon**, **days in stock**, work (to approve / in service / estimate / spent), and the latest note. Drag a car onto a step on the left to move it
 - New cars start at the first New step; used cars at Purchase / Trade. Wholesale takes a car out of recon without counting it in ADR
 - On each car in the list: **▾ to move it** (next step first, or any step, Frontline Ready, Wholesale), a photo, and its **notes log** with **+** to add one
