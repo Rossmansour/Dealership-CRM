@@ -113,4 +113,13 @@ test('steps and goals are the managers\' to set', async () => {
   assert.strictEqual(s.goalDays, 4);
   assert.deepStrictEqual(s.steps.map(x => x.key), ['inspection', 'detail']);
   assert.strictEqual((await as(manager, 'PUT', '/recon/settings', { steps: [] })).status, 400);
+  const reset = (await as(manager, 'PUT', '/recon/settings', { reset: true })).body;
+  assert.strictEqual(reset.steps.length, 19);
+  assert.strictEqual(reset.steps[0].label, 'New - Import');
+  // A store still on the very first step list is moved to the current steps.
+  await h.store.pool.query(`UPDATE dealerships SET settings = settings || '{"recon":{"goalDays":5,"steps":[{"key":"inspect","label":"Check-in","goalHours":24},{"key":"detail","label":"Detail","goalHours":24}]}}'::jsonb`);
+  assert.strictEqual((await as(manager, 'GET', '/recon/settings')).body.steps[0].label, 'New - Import');
+  // Saving all the steps keeps all of them (an earlier version cut the list at 12).
+  const all = (await as(manager, 'PUT', '/recon/settings', { steps: reset.steps })).body;
+  assert.deepStrictEqual(all.steps.slice(-3).map(x => x.label), ['Repair', 'Offsite Sublet', 'Vendor']);
 });
