@@ -42,7 +42,6 @@ async function refresh() {
   board = await api('/recon/board');
   document.getElementById('rcSetupBtn').hidden = !board.can.approve;
   render();
-  if (openUnitId) renderDrawer();
 }
 
 const typeOk = u => carType === 'all' || ((u.car && u.car.stockType) || u.stockType || 'used') === carType;
@@ -89,6 +88,9 @@ function render() {
   if (tab === 'approvals') renderApprovals(active);
   if (tab === 'waiting') renderWaiting();
   if (tab === 'performance') renderPerformance();
+  if (tab === 'car') renderCarPage();
+  document.getElementById('rcStrip').hidden = tab === 'car';
+  document.getElementById('rcTabs').classList.toggle('rc-tabs-car', tab === 'car');
 }
 
 // ---------- Steps (left) and cars (right) ----------
@@ -126,14 +128,17 @@ function renderCars() {
   document.getElementById('rcList').innerHTML = html`
     <div class="rc-list-head"><h2>${title}</h2><span class="rc-muted">${list.length} car${list.length === 1 ? '' : 's'} · drag a car onto a step on the left to move it</span></div>
     ${list.length ? html`<table class="data-table rc-table rc-units"><thead><tr>
-      <th>Step</th><th>Stock #</th><th>Vehicle</th><th title="Days in this step">In step</th><th title="Days in recon">In recon</th><th title="Days in stock">In stock</th><th>Work</th><th>Latest note</th></tr></thead><tbody>
+      <th></th><th>Step</th><th></th><th>Stock #</th><th>Vehicle</th><th title="Time in this step">In step</th><th title="Time in recon">In recon</th><th title="Days in stock">In stock</th><th>Work</th><th>Notes</th></tr></thead><tbody>
       ${list.map(u => {
-        const note = (u.notes || [])[u.notes.length - 1];
+        const notes = (u.notes || []).slice().reverse();
         const c = u.car || {};
         const stepN = board.settings.steps.findIndex(s2 => s2.key === u.step);
+        const nxt = u.status === 'active' ? nextStepOf(u) : null;
         return html`<tr class="rc-row" draggable="${board.can.work && u.status === 'active' ? 'true' : 'false'}" data-unit="${u.id}">
+          <td class="rc-move-cell">${board.can.work && u.status === 'active' ? html`<button type="button" class="rc-move-btn" data-row-move="${u.id}" title="${nxt ? `Move to ${nxt.label}` : 'Move to…'}" aria-label="Move">▾</button>` : ''}</td>
           <td><span class="rc-step-chip">${stepN >= 0 ? `${stepN + 1}. ` : ''}${u.stepLabel}</span></td>
-          <td><strong>${c.stockNumber || u.stockNumber || ''}</strong><div><span class="rc-type-chip rc-type-${c.stockType}">${c.stockType === 'new' ? 'New' : 'Used'}</span></div></td>
+          <td class="rc-thumb-cell">${(c.photos || [])[0] ? html`<img class="rc-thumb" src="${c.photos[0]}" alt="" />` : html`<span class="rc-thumb rc-thumb-empty">🚗</span>`}</td>
+          <td><strong class="rc-stock-link">${c.stockNumber || u.stockNumber || ''}</strong><div><span class="rc-type-chip rc-type-${c.stockType}">${c.stockType === 'new' ? 'New' : 'Used'}</span></div></td>
           <td class="rc-veh"><strong>${vehicle(u)}</strong>${c.trim ? ` ${c.trim}` : ''}<div class="rc-muted">${c.vin || ''}</div><div class="rc-muted">${[c.color, c.mileage ? `${Number(c.mileage).toLocaleString()} mi` : ''].filter(Boolean).join(' · ')}</div>
             ${c.status === 'sold' ? html`<span class="rc-flag">Sold</span>` : ''}</td>
           <td>${u.status === 'active' ? html`<span class="rc-timer ${paceClass(u.hoursInStep, u.stepGoalHours)}">${hoursText(u.hoursInStep)}</span>` : html`<span class="rc-muted">${new Date(u.doneAt).toLocaleDateString()}</span>`}</td>
@@ -142,13 +147,24 @@ function renderCars() {
           <td class="rc-work">${u.needsApproval ? html`<span class="rc-flag rc-flag-warn">${u.needsApproval} to approve</span>` : ''}
             ${u.items.some(i => i.roId && !['done', 'declined'].includes(i.status)) ? html`<span class="rc-flag">In service</span>` : ''}
             <div class="rc-muted">Est ${money(u.estimate)} · Spent ${money(u.spent)}</div></td>
-          <td class="rc-note-cell">${note ? html`<div class="rc-note-text">${note.text}</div><div class="rc-muted">${note.by} · ${new Date(note.at).toLocaleDateString()}</div>` : html`<span class="rc-muted">--</span>`}</td>
+          <td class="rc-note-cell"><div class="rc-notes-log">${notes.length ? notes.slice(0, 4).map(nt => html`<div class="rc-log-entry"><span class="rc-muted">${nt.by} · ${fmtDate(nt.at)}</span><div>${nt.text}</div></div>`) : html`<span class="rc-muted">No notes</span>`}
+            ${notes.length > 4 ? html`<div class="rc-muted">+ ${notes.length - 4} more (open the car)</div>` : ''}</div>
+            ${board.can.work ? html`<button type="button" class="rc-note-plus" data-row-note="${u.id}" title="Add a note" aria-label="Add a note">+</button>` : ''}</td>
         </tr>`;
       })}</tbody></table>` : html`<p class="rc-empty-big">No cars here.</p>`}`;
 }
 
 const carsEl = document.querySelector('.rc-cars');
-carsEl.addEventListener('click', (e) => {
+carsEl.addEventListener('click', async (e) => {
+  const mv = e.target.closest('[data-row-move]');
+  if (mv) { e.stopPropagation(); openMoveMenu(mv, board.units.find(x => x.id === mv.dataset.rowMove)); return; }
+  const nb = e.target.closest('[data-row-note]');
+  if (nb) {
+    e.stopPropagation();
+    const text = prompt('Add a note:');
+    if (text && text.trim()) { try { await api(`/recon/units/${nb.dataset.rowNote}/notes`, 'POST', { text }); await refresh(); } catch (err) { alert(err.message); } }
+    return;
+  }
   const st = e.target.closest('[data-step]');
   if (st) { stepFilter = st.dataset.step; renderCars(); return; }
   const row = e.target.closest('[data-unit]');
@@ -178,6 +194,24 @@ carsEl.addEventListener('drop', async (e) => {
   if (u && u.step !== st.dataset.dropStep) await moveUnit(u, st.dataset.dropStep);
 });
 
+// The ▾ on a car: next step first, then any step, then the ways out.
+function openMoveMenu(anchor, u) {
+  document.querySelectorAll('.rc-move-menu').forEach(m => m.remove());
+  const steps = board.settings.steps;
+  const nxt = nextStepOf(u);
+  const menu = document.createElement('div');
+  menu.className = 'rc-move-menu';
+  menu.innerHTML = html`${nxt ? html`<button type="button" data-to="${nxt.key}" class="rc-move-next">Next: ${steps.indexOf(nxt) + 1}. ${nxt.label} ▸</button>` : ''}
+    <div class="rc-move-list">${steps.filter(s2 => s2.key !== u.step).map(s2 => html`<button type="button" data-to="${s2.key}">${steps.indexOf(s2) + 1}. ${s2.label}</button>`)}</div>
+    <button type="button" data-to="ready" class="rc-move-ready">✓ Frontline Ready</button><button type="button" data-to="wholesale">Wholesale</button>`.toString();
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = `${Math.min(window.innerHeight - 20 - Math.min(menu.offsetHeight, 420), r.bottom + 4) + window.scrollY}px`;
+  menu.style.left = `${r.left + window.scrollX}px`;
+  menu.addEventListener('click', (ev) => { const b = ev.target.closest('[data-to]'); if (b) { menu.remove(); moveUnit(u, b.dataset.to); } });
+  setTimeout(() => document.addEventListener('click', function close(ev) { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } }), 0);
+}
+
 async function moveUnit(u, step) {
   if (step === READY) {
     const open = u.items.filter(i => i.status === 'proposed' || i.status === 'approved');
@@ -187,119 +221,187 @@ async function moveUnit(u, step) {
   try { await api(`/recon/units/${u.id}/move`, 'POST', { step }); await refresh(); } catch (err) { alert(err.message); }
 }
 
-// ---------- One car ----------
+// ---------- One car (its own page) ----------
+const PHASE_LABELS = { mechanical: 'Mechanical', detail: 'Detail', cosmetic: 'Cosmetic repair', other: 'Other' };
+const STATUS_LABELS = { proposed: 'Needs approval', approved: 'Approved', declined: 'Declined', done: 'Done' };
+let prevTab = 'cars';
+let phaseFilter = '';
+const selectedItems = new Set();
+
 function openUnit(id) {
   openUnitId = id;
-  renderDrawer();
-  document.getElementById('rcDrawer').hidden = false;
-  document.getElementById('rcBackdrop').hidden = false;
+  if (tab !== 'car') prevTab = tab;
+  tab = 'car';
+  selectedItems.clear();
+  phaseFilter = '';
+  history.replaceState(null, '', `#unit=${id}`);
+  render();
+  window.scrollTo(0, 0);
 }
 function closeUnit() {
   openUnitId = null;
-  document.getElementById('rcDrawer').hidden = true;
-  document.getElementById('rcBackdrop').hidden = true;
+  tab = prevTab;
+  history.replaceState(null, '', location.pathname);
+  render();
 }
-document.getElementById('rcBackdrop').addEventListener('click', closeUnit);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openUnitId) closeUnit(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && tab === 'car' && !document.querySelector('.modal.active')) closeUnit();
+});
 
-function renderDrawer() {
+const nextStepOf = u => {
+  const steps = board.settings.steps;
+  const i = steps.findIndex(s2 => s2.key === u.step);
+  return i >= 0 && i < steps.length - 1 ? steps[i + 1] : null;
+};
+const fmtDate = iso => (iso ? new Date(iso).toLocaleString([], { month: 'numeric', day: 'numeric', year: '2-digit', hour: 'numeric', minute: '2-digit' }) : '--');
+const daysAgo = iso => (iso ? Math.floor((Date.now() - new Date(iso)) / 86400000) : null);
+const infoRow = (label, value) => html`<div class="rc-info-row"><span>${label}</span><strong>${value === '' || value === null || value === undefined ? '—' : value}</strong></div>`;
+
+function renderCarPage() {
+  const el = document.getElementById('rcCar');
   const u = board.units.find(x => x.id === openUnitId);
-  const el = document.getElementById('rcDrawer');
-  if (!u) { closeUnit(); return; }
+  if (!u) { el.innerHTML = html`<p class="rc-empty-big">This car isn't in recon anymore. <button type="button" class="link-btn" data-d="close">Back</button></p>`; return; }
+  const c = u.car || {};
   const work = board.can.work;
   const approve = board.can.approve;
   const active = u.status === 'active';
   const steps = board.settings.steps;
-  const idx = steps.findIndex(s => s.key === u.step);
-  const next = idx >= 0 && idx < steps.length - 1 ? steps[idx + 1] : null;
-  const toService = u.items.filter(i => i.status === 'approved' && ['mechanical', 'tires'].includes(i.category) && !i.roId);
+  const next = nextStepOf(u);
+  const goalH = board.settings.goalDays * 24;
+  const photo = (c.photos || [])[0];
+  const items = u.items.filter(i => !phaseFilter || i.category === phaseFilter);
+  const toService = u.items.filter(i => i.status === 'approved' && i.category === 'mechanical' && !i.roId);
+  const f = u.fields || {};
   el.innerHTML = html`
-    <div class="rc-d-head">
-      <div>
-        <h2>${vehicle(u)}</h2>
-        <div class="rc-card-sub">${[u.car && u.car.stockNumber ? `Stock #${u.car.stockNumber}` : '', u.car && u.car.vin, u.car && u.car.mileage ? `${Number(u.car.mileage).toLocaleString()} mi` : ''].filter(Boolean).join(' · ')}</div>
-        <div class="rc-card-sub">Car cost ${money(u.car && u.car.cost)} · asking ${money(u.car && u.car.price)}</div>
+    <div class="rc-car-head">
+      <button type="button" class="btn-secondary btn-small" data-d="close">&larr; Back</button>
+      <span class="rc-car-step">${active ? u.stepLabel : u.status === 'done' ? 'Frontline Ready' : u.removedReason || 'Out of recon'}</span>
+      <strong class="rc-car-title">${c.stockNumber || u.stockNumber || ''}</strong>
+      <span class="rc-car-sub">${vehicle(u)}${c.trim ? ` ${c.trim}` : ''}${c.color ? `, ${c.color}` : ''}${c.mileage ? `, ${Number(c.mileage).toLocaleString()} mi` : ''}</span>
+      <span class="rc-car-actions">
+        ${work && active && next ? html`<button type="button" class="btn-primary btn-small" data-move="${next.key}">Next: ${next.label} ▸</button>` : ''}
+        ${work && active ? html`<select data-d="step" aria-label="Move to step"><option value="">Move to…</option>${steps.filter(s2 => s2.key !== u.step).map((s2, i) => html`<option value="${s2.key}">${steps.indexOf(s2) + 1}. ${s2.label}</option>`)}
+          <option value="ready">✓ Frontline Ready</option><option value="wholesale">Wholesale</option></select>` : ''}
+        ${work && !active ? html`<button type="button" class="btn-secondary btn-small" data-d="reopen">Back into recon</button>` : ''}
+        <button type="button" class="btn-secondary btn-small" data-d="print">Print</button>
+        ${work && active ? html`<button type="button" class="btn-secondary btn-small" data-d="remove" title="Take out of recon">Remove</button>` : ''}
+      </span>
+    </div>
+
+    <div class="rc-info">
+      <div class="rc-info-photo">
+        ${photo ? html`<img src="${photo}" alt="" />` : html`<div class="rc-noimg">🚗<span>No photo yet</span></div>`}
+        ${(c.photos || []).length > 1 ? html`<span class="rc-muted">${c.photos.length} photos</span>` : ''}
       </div>
-      <button type="button" class="rc-x" data-d="close" aria-label="Close">✕</button>
-    </div>
-
-    <div class="rc-d-section">
-      <div class="rc-d-now">
-        <div><span class="rc-d-label">${active ? 'Now in' : 'Finished'}</span><strong>${active ? u.stepLabel : u.status === 'done' ? 'Frontline Ready' : u.removedReason || 'Out of recon'}</strong></div>
-        ${active ? html`<div><span class="rc-d-label">In this step</span><strong class="${paceClass(u.hoursInStep, u.stepGoalHours)}">${hoursText(u.hoursInStep)}</strong><em>goal ${hoursText(u.stepGoalHours)}</em></div>` : ''}
-        <div><span class="rc-d-label">${active ? 'In recon' : 'Took'}</span><strong class="${paceClass(u.totalHours, board.settings.goalDays * 24)}">${daysText(u.totalHours)}</strong><em>goal ${board.settings.goalDays}d</em></div>
+      <div class="rc-info-col">
+        ${infoRow('Stock #', c.stockNumber)}${infoRow('VIN', c.vin)}${infoRow('Recon step', active ? u.stepLabel : u.status === 'done' ? 'Frontline Ready' : u.removedReason)}
+        ${infoRow('Year', c.year)}${infoRow('Make', c.make)}${infoRow('Model', c.model)}${infoRow('Trim', c.trim)}${infoRow('Body', c.bodyStyle)}${infoRow('Exterior', c.color)}
       </div>
-      ${work && active ? html`<div class="rc-d-move">
-        ${next ? html`<button type="button" class="btn-primary btn-small" data-move="${next.key}">Next: ${next.label} →</button>` : ''}
-        <button type="button" class="btn-secondary btn-small rc-ready-btn" data-move="ready">✓ Frontline Ready</button>
-        <button type="button" class="btn-secondary btn-small" data-move="wholesale">Wholesale</button>
-        <select data-d="step" aria-label="Move to step"><option value="">Move to…</option>${steps.filter(s => s.key !== u.step).map(s => html`<option value="${s.key}">${s.label}</option>`)}</select>
-      </div>` : ''}
-      ${work && !active ? html`<div class="rc-d-move"><button type="button" class="btn-secondary btn-small" data-d="reopen">Back into recon</button></div>` : ''}
+      <div class="rc-info-col">
+        ${infoRow('Interior', c.interiorColor)}${infoRow('Odometer', c.mileage ? Number(c.mileage).toLocaleString() : '')}${infoRow('Price', money(c.price))}
+        ${infoRow('Transmission', c.transmission)}${infoRow('Engine', c.engine)}${infoRow('Drivetrain', c.drivetrain)}
+        <div class="rc-info-row"><span>In step</span><strong class="${active ? paceClass(u.hoursInStep, u.stepGoalHours) : ''}">${active ? hoursText(u.hoursInStep) : '—'}</strong></div>
+        <div class="rc-info-row"><span>In recon</span><strong class="${paceClass(u.totalHours, goalH)}">${daysText(u.totalHours)}</strong></div>
+        ${infoRow('In stock', c.daysInStock === null || c.daysInStock === undefined ? '' : `${c.daysInStock} days`)}
+      </div>
+      <div class="rc-info-col">
+        ${infoRow('New / used', c.stockType === 'new' ? 'New' : 'Used')}
+        ${infoRow('Acquired', c.dateAdded ? `${new Date(c.dateAdded).toLocaleDateString()}, ${daysAgo(c.dateAdded)} days ago` : '')}
+        ${infoRow('Started recon', `${fmtDate(u.startedAt)}${u.startedBy ? ` · ${u.startedBy.name}` : ''}`)}
+        ${u.doneAt ? infoRow(u.status === 'done' ? 'Frontline' : 'Left recon', fmtDate(u.doneAt)) : ''}
+        ${infoRow('Car cost', money(c.cost))}${infoRow('Work total', money(u.estimate))}${infoRow('Approved', money(u.approved))}${infoRow('Spent', money(u.spent))}
+      </div>
+      <div class="rc-info-col rc-info-store">
+        ${['other1', 'other2', 'other3', 'other4', 'other5', 'other6'].map((k, i) => html`<label class="rc-info-row"><span>Other ${i + 1}</span>
+          <input type="text" data-field="${k}" value="${f[k] || ''}" ${work ? '' : html`disabled`} /></label>`)}
+        <label class="rc-info-row"><span>Inspection</span><input type="datetime-local" data-info="inspectionDate" value="${u.inspectionDate ? new Date(new Date(u.inspectionDate).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}" ${work ? '' : html`disabled`} /></label>
+        <label class="rc-info-row"><span>Inspection RO #</span><input type="text" data-info="inspectionRo" value="${u.inspectionRo || ''}" ${work ? '' : html`disabled`} /></label>
+      </div>
     </div>
 
-    <div class="rc-d-section">
-      <div class="rc-d-title">Steps</div>
-      <ol class="rc-timeline">${u.history.map(h => {
-        const end = h.leftAt ? new Date(h.leftAt) : new Date();
-        const hrs = (end - new Date(h.enteredAt)) / 3600000;
-        const goal = (steps.find(s => s.key === h.step) || {}).goalHours;
-        return html`<li class="${h.leftAt ? '' : 'rc-tl-now'}"><span class="rc-tl-dot"></span><span class="rc-tl-label">${h.label}</span>
-          <span class="rc-tl-time ${h.step === READY || h.step === WHOLESALE ? '' : paceClass(hrs, goal)}">${h.step === READY || h.step === WHOLESALE ? new Date(h.enteredAt).toLocaleDateString() : hoursText(hrs)}</span><span class="rc-tl-by">${h.by}</span></li>`;
-      })}</ol>
+    <div class="rc-work">
+      <div class="rc-work-head">
+        <h3>Work items <span class="rc-count">${u.items.length}</span></h3>
+        <span>Total <strong>${money(u.estimate)}</strong> · Approved ${money(u.approved)} · Spent ${money(u.spent)}</span>
+        ${u.needsApproval ? html`<span class="rc-flag rc-flag-warn">${u.needsApproval} need approval</span>` : ''}
+      </div>
+      <div class="rc-work-tools">
+        ${work ? html`<label class="rc-inline"><input type="checkbox" data-d="all" ${items.length && items.every(i => selectedItems.has(i.id)) ? html`checked` : ''} /> Select all</label>
+          <select data-d="bulk" aria-label="Change status"><option value="">Change status…</option>
+            ${approve ? html`<option value="approved">Approved</option><option value="declined">Declined</option><option value="proposed">Needs approval</option>` : ''}
+            <option value="done">Done</option></select>` : ''}
+        <select data-d="phase" aria-label="Phase"><option value="">All phases</option>${Object.entries(PHASE_LABELS).map(([k, l]) => html`<option value="${k}" ${phaseFilter === k ? html`selected` : ''}>${l} (${u.items.filter(i => i.category === k).length})</option>`)}</select>
+        <span class="rc-tools-right">
+          ${work && toService.length ? html`<button type="button" class="btn-secondary btn-small" data-d="service">Send ${toService.length} to service</button>` : ''}
+          ${work ? html`<button type="button" class="btn-primary btn-small" data-d="pick">+ Add work items</button>` : ''}
+        </span>
+      </div>
+      ${items.length ? items.map(i => itemCard(u, i, work, approve)) : html`<p class="rc-empty-big">${u.items.length ? 'No work items in this phase.' : 'No work items yet. Add them from the list.'}</p>`}
     </div>
 
-    <div class="rc-d-section">
-      <div class="rc-d-title">Work <span class="rc-d-totals">Estimate ${money(u.estimate)} · Approved ${money(u.approved)} · Spent ${money(u.spent)}</span></div>
-      ${u.items.length ? u.items.map(i => html`<div class="rc-item rc-item-${i.status}" data-item="${i.id}">
-        <div class="rc-item-top">
-          <span class="rc-cat">${CATEGORY_LABELS[i.category]}</span>
-          <strong>${i.description}</strong>
-          <span class="rc-item-status">${ITEM_LABELS[i.status] || i.status}</span>
-        </div>
-        <div class="rc-item-meta">
-          <span>Estimate ${money(i.estimate)}</span>
-          ${i.actual !== null && i.actual !== undefined ? html`<span>Actual ${money(i.actual)}</span>` : ''}
-          ${i.vendor ? html`<span>${i.vendor}</span>` : ''}
-          ${i.roNumber ? html`<a href="/" data-ro="${i.roId}">RO-${i.roNumber}${i.roStatus && i.roStatus !== 'closed' ? ` · ${i.roStatus.replace('_', ' ')}` : ''}</a>` : ''}
-          <span class="rc-muted">added by ${i.addedBy}${i.approvedBy ? ` · ${i.status === 'declined' ? 'declined' : 'approved'} by ${i.approvedBy}` : ''}</span>
-        </div>
-        ${work ? html`<div class="rc-item-actions">
-          ${approve && i.status === 'proposed' ? html`<button type="button" class="btn-primary btn-small" data-item-set="approved">Approve</button><button type="button" class="btn-secondary btn-small" data-item-set="declined">Decline</button>` : ''}
-          ${i.status === 'approved' && !i.roId ? html`<button type="button" class="btn-secondary btn-small" data-item-set="done">Mark done…</button>` : ''}
-        </div>` : ''}
-      </div>`) : html`<p class="rc-empty">No work added yet.</p>`}
-      ${work && toService.length ? html`<button type="button" class="btn-primary btn-small rc-service-btn" data-d="service">Send ${toService.length} approved item${toService.length === 1 ? '' : 's'} to service (internal RO)</button>` : ''}
-      ${work && active ? html`<form class="rc-add-item" id="rcAddItem">
-        <select name="category">${Object.entries(CATEGORY_LABELS).map(([k, l]) => html`<option value="${k}">${l}</option>`)}</select>
-        <input name="description" placeholder="What needs doing, e.g. front brakes" required />
-        <input name="estimate" type="number" min="0" step="1" placeholder="Estimate $" />
-        <input name="vendor" placeholder="Vendor (optional)" />
-        ${approve ? html`<label class="rc-inline"><input type="checkbox" name="approve" checked /> Approve</label>` : ''}
-        <button type="submit" class="btn-secondary btn-small">Add</button>
-      </form>` : ''}
-    </div>
-
-    <div class="rc-d-section">
-      <div class="rc-d-title">Notes</div>
-      ${(u.notes || []).slice().reverse().map(nt => html`<div class="rc-note"><div>${nt.text}</div><span class="rc-muted">${nt.by} · ${new Date(nt.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span></div>`)}
-      ${work ? html`<form class="rc-add-note" id="rcAddNote"><input name="text" placeholder="Add a note..." required /><button type="submit" class="btn-secondary btn-small">Save</button></form>` : ''}
-    </div>
-    ${work && active ? html`<div class="rc-d-section rc-d-foot"><button type="button" class="link-btn" data-d="remove">Take out of recon (sold, wholesaled...)</button></div>` : ''}`;
+    <div class="rc-car-bottom">
+      <div class="rc-d-section">
+        <div class="rc-d-title">Steps</div>
+        <ol class="rc-timeline">${u.history.map(h => {
+          const end = h.leftAt ? new Date(h.leftAt) : new Date();
+          const hrs = (end - new Date(h.enteredAt)) / 3600000;
+          const goal = (steps.find(s2 => s2.key === h.step) || {}).goalHours;
+          const exit = h.step === READY || h.step === WHOLESALE;
+          return html`<li class="${h.leftAt ? '' : 'rc-tl-now'}"><span class="rc-tl-dot"></span><span class="rc-tl-label">${h.label}</span>
+            <span class="rc-tl-time ${exit ? '' : paceClass(hrs, goal)}">${exit ? new Date(h.enteredAt).toLocaleDateString() : hoursText(hrs)}</span><span class="rc-tl-by">${h.by}</span></li>`;
+        })}</ol>
+      </div>
+      <div class="rc-d-section">
+        <div class="rc-d-title">Notes</div>
+        ${work ? html`<form class="rc-add-note" id="rcAddNote"><input name="text" placeholder="Add a note..." required /><button type="submit" class="btn-secondary btn-small">Save</button></form>` : ''}
+        ${(u.notes || []).slice().reverse().map(nt => html`<div class="rc-note"><div>${nt.text}</div><span class="rc-muted">${nt.by} · ${fmtDate(nt.at)}</span></div>`)}
+      </div>
+    </div>`;
 }
 
-const drawer = document.getElementById('rcDrawer');
-drawer.addEventListener('click', async (e) => {
+function itemCard(u, i, work, approve) {
+  const locked = i.costPosted || i.roId || i.status === 'done';
+  const dis = work && !locked ? '' : html`disabled`;
+  const canStatus = work && !i.roId && !i.costPosted;
+  const opts = ['proposed', 'approved', 'declined', 'done'].filter(s2 => s2 === i.status || s2 === 'done' || approve);
+  return html`<div class="rc-item2 rc-item-${i.status}" data-item="${i.id}">
+    <div class="rc-item2-head">
+      ${work ? html`<input type="checkbox" data-sel ${selectedItems.has(i.id) ? html`checked` : ''} aria-label="Select" />` : ''}
+      <strong>${i.description}</strong><span class="rc-cat">${PHASE_LABELS[i.category] || i.category}</span>
+      ${i.roNumber ? html`<a href="/#ro=${i.roId}" target="dealerdomus" class="rc-ro-link">RO-${i.roNumber}${i.roStatus && i.roStatus !== 'closed' ? ` · ${i.roStatus.replace('_', ' ')}` : ''}</a>` : ''}
+      ${work && !locked ? html`<button type="button" class="recon-remove rc-item-del" data-del title="Remove" aria-label="Remove">✕</button>` : ''}
+    </div>
+    <div class="rc-item2-body">
+      <div class="rc-item2-status">
+        <select data-status ${canStatus ? '' : html`disabled`} aria-label="Status">${opts.map(s2 => html`<option value="${s2}" ${i.status === s2 ? html`selected` : ''}>${STATUS_LABELS[s2]}</option>`)}</select>
+        <span class="rc-muted">${i.approvedBy ? `${i.status === 'declined' ? 'Declined' : 'Approved'} by ${i.approvedBy} · ${fmtDate(i.approvedAt)}` : `Added by ${i.addedBy} · ${fmtDate(i.addedAt)}`}</span>
+      </div>
+      <label class="rc-item2-wide">Additional information<input type="text" data-f="info" value="${i.info || ''}" ${work ? '' : html`disabled`} /></label>
+      <div class="rc-item2-money">
+        <label>Parts $<input type="number" min="0" step="0.01" data-f="partsPrice" value="${i.partsPrice || ''}" ${dis} /></label>
+        <label>Labor hrs<input type="number" min="0" step="0.1" data-f="laborHours" value="${i.laborHours || ''}" ${dis} /></label>
+        <label>Labor rate<input type="number" min="0" step="0.01" data-f="laborRate" value="${i.laborRate ?? ''}" ${dis} /></label>
+        <label>Total<input type="number" min="0" step="0.01" data-f="estimate" value="${i.estimate || ''}" ${dis || (Number(i.partsPrice) || Number(i.laborHours) ? html`disabled` : '')} title="Parts + labor hours × rate, or type a total" /></label>
+        ${i.actual !== null && i.actual !== undefined ? html`<label>Actual<input type="text" value="${money(i.actual)}" disabled /></label>` : ''}
+      </div>
+      <label class="rc-item2-wide">Online description <span class="rc-muted">(for the listing)</span><input type="text" data-f="onlineDescription" value="${i.onlineDescription || ''}" ${work ? '' : html`disabled`} /></label>
+      <label class="rc-item2-vendor">Vendor<input type="text" data-f="vendor" value="${i.vendor || ''}" ${dis} /></label>
+    </div>
+  </div>`;
+}
+
+const carEl = document.getElementById('rcCar');
+carEl.addEventListener('click', async (e) => {
   const u = board.units.find(x => x.id === openUnitId);
   const t = e.target;
   try {
     if (t.closest('[data-d="close"]')) return closeUnit();
+    if (t.closest('[data-d="print"]')) return window.print();
     const move = t.closest('[data-move]');
     if (move) return moveUnit(u, move.dataset.move);
-    const ro = t.closest('[data-ro]');
-    if (ro) { e.preventDefault(); window.open(`/#ro=${ro.dataset.ro}`, 'dealerdomus'); return; }
     if (t.closest('[data-d="reopen"]')) { await api(`/recon/units/${u.id}/reopen`, 'POST', {}); return refresh(); }
     if (t.closest('[data-d="service"]')) { await api(`/recon/units/${u.id}/send-to-service`, 'POST'); return refresh(); }
+    if (t.closest('[data-d="pick"]')) return openPicker(u);
     if (t.closest('[data-d="remove"]')) {
       const reason = prompt('Why is it leaving recon?', 'Sold');
       if (reason === null) return;
@@ -307,33 +409,103 @@ drawer.addEventListener('click', async (e) => {
       closeUnit();
       return refresh();
     }
-    const set = t.closest('[data-item-set]');
-    if (set) {
-      const itemId = t.closest('[data-item]').dataset.item;
-      const body = { status: set.dataset.itemSet };
-      if (body.status === 'done') {
+    if (t.closest('[data-del]')) {
+      const id = t.closest('[data-item]').dataset.item;
+      if (!confirm('Remove this work item?')) return;
+      await api(`/recon/units/${u.id}/items/${id}`, 'DELETE');
+      return refresh();
+    }
+  } catch (err) { alert(err.message); }
+});
+carEl.addEventListener('change', async (e) => {
+  const u = board.units.find(x => x.id === openUnitId);
+  const t = e.target;
+  try {
+    if (t.dataset.d === 'step' && t.value) return moveUnit(u, t.value);
+    if (t.dataset.d === 'phase') { phaseFilter = t.value; return renderCarPage(); }
+    if (t.dataset.d === 'all') {
+      u.items.filter(i => !phaseFilter || i.category === phaseFilter).forEach(i => (t.checked ? selectedItems.add(i.id) : selectedItems.delete(i.id)));
+      return renderCarPage();
+    }
+    if (t.dataset.sel !== undefined) { const id = t.closest('[data-item]').dataset.item; if (t.checked) selectedItems.add(id); else selectedItems.delete(id); return; }
+    if (t.dataset.d === 'bulk' && t.value) {
+      if (!selectedItems.size) { alert('Select work items first.'); t.value = ''; return; }
+      await api(`/recon/units/${u.id}/items/status`, 'POST', { ids: [...selectedItems], status: t.value });
+      selectedItems.clear();
+      return refresh();
+    }
+    if (t.dataset.field) { await api(`/recon/units/${u.id}/info`, 'PUT', { fields: { [t.dataset.field]: t.value } }); return refresh(); }
+    if (t.dataset.info) { await api(`/recon/units/${u.id}/info`, 'PUT', { [t.dataset.info]: t.value ? new Date(t.value).toISOString() : '' }); return refresh(); }
+    const itemEl = t.closest('[data-item]');
+    if (!itemEl) return;
+    const itemId = itemEl.dataset.item;
+    if (t.dataset.status !== undefined) {
+      const body = { status: t.value };
+      if (t.value === 'done') {
         const item = u.items.find(i => i.id === itemId);
         const actual = prompt(`What did "${item.description}" actually cost? It's added to the car's cost.`, item.estimate || '');
-        if (actual === null) return;
+        if (actual === null) { t.value = item.status; return; }
         body.actual = actual;
       }
       await api(`/recon/units/${u.id}/items/${itemId}`, 'PUT', body);
       return refresh();
     }
-  } catch (err) { alert(err.message); }
+    if (t.dataset.f) { await api(`/recon/units/${u.id}/items/${itemId}`, 'PUT', { [t.dataset.f]: t.value }); return refresh(); }
+  } catch (err) { alert(err.message); refresh().catch(() => {}); }
 });
-drawer.addEventListener('change', (e) => {
-  if (e.target.dataset.d === 'step' && e.target.value) moveUnit(board.units.find(x => x.id === openUnitId), e.target.value);
-});
-drawer.addEventListener('submit', async (e) => {
+carEl.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
+  try { await api(`/recon/units/${openUnitId}/notes`, 'POST', { text: f.get('text') }); await refresh(); } catch (err) { alert(err.message); }
+});
+
+// ----- Add work items from the store's list -----
+let pickUnit = null;
+const picked = new Set();
+function openPicker(u) {
+  pickUnit = u;
+  picked.clear();
+  document.getElementById('rcPickFilter').value = '';
+  document.getElementById('rcPickCustom').value = '';
+  document.getElementById('rcPickPhases').innerHTML = html`${Object.entries(PHASE_LABELS).map(([k, l]) => html`<label class="rc-inline"><input type="checkbox" data-ph="${k}" checked /> ${l}</label>`)}`;
+  document.getElementById('rcPickCustomPhase').innerHTML = html`${Object.entries(PHASE_LABELS).map(([k, l]) => html`<option value="${k}">${l}</option>`)}`;
+  renderPicker();
+  document.getElementById('rcPickModal').classList.add('active');
+  document.getElementById('rcPickFilter').focus();
+}
+function renderPicker() {
+  const u = pickUnit;
+  const words = document.getElementById('rcPickFilter').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const alpha = document.querySelector('input[name="rcPickSort"]:checked').value === 'alpha';
+  const shownPhases = [...document.querySelectorAll('[data-ph]')].filter(x => x.checked).map(x => x.dataset.ph);
+  const have = new Set(u.items.map(i => i.description.toLowerCase()));
+  document.getElementById('rcPickList').innerHTML = html`${shownPhases.map(ph => {
+    let names = (board.settings.catalog[ph] || []).filter(nm => words.every(w => nm.toLowerCase().includes(w)));
+    if (alpha) names = [...names].sort((a, b) => a.localeCompare(b));
+    const all = board.settings.catalog[ph] || [];
+    return html`<div class="rc-pick-group"><div class="rc-pick-head"><strong>${PHASE_LABELS[ph]}</strong>
+      <span>${all.length} on the list</span><span>${all.filter(nm => have.has(nm.toLowerCase())).length} on the car</span>
+      <span class="rc-pick-adding">adding ${[...picked].filter(k => k.startsWith(`${ph}|`)).length}</span></div>
+      <div class="rc-pick-grid">${names.map(nm => {
+        const onCar = have.has(nm.toLowerCase());
+        return html`<label class="rc-pick-item ${onCar ? 'rc-pick-have' : ''}"><input type="checkbox" data-pick="${ph}|${nm}" ${onCar || picked.has(`${ph}|${nm}`) ? html`checked` : ''} ${onCar ? html`disabled` : ''} /> ${nm}</label>`;
+      })}${names.length ? '' : html`<span class="rc-muted">Nothing matches.</span>`}</div></div>`;
+  })}`;
+}
+document.getElementById('rcPickFilter').addEventListener('input', renderPicker);
+document.getElementById('rcPickModal').addEventListener('change', (e) => {
+  if (e.target.dataset.pick) { if (e.target.checked) picked.add(e.target.dataset.pick); else picked.delete(e.target.dataset.pick); renderPicker(); }
+  else if (e.target.dataset.ph !== undefined || e.target.name === 'rcPickSort') renderPicker();
+});
+document.getElementById('rcPickCancel').addEventListener('click', () => document.getElementById('rcPickModal').classList.remove('active'));
+document.getElementById('rcPickAdd').addEventListener('click', async () => {
+  const items = [...picked].map(k => { const [category, ...rest] = k.split('|'); return { category, description: rest.join('|') }; });
+  const custom = document.getElementById('rcPickCustom').value.trim();
+  if (custom) items.push({ category: document.getElementById('rcPickCustomPhase').value, description: custom });
+  if (!items.length) { alert('Pick at least one work item.'); return; }
   try {
-    if (e.target.id === 'rcAddItem') {
-      await api(`/recon/units/${openUnitId}/items`, 'POST', { category: f.get('category'), description: f.get('description'), estimate: f.get('estimate'), vendor: f.get('vendor'), approve: f.get('approve') === 'on' });
-    } else if (e.target.id === 'rcAddNote') {
-      await api(`/recon/units/${openUnitId}/notes`, 'POST', { text: f.get('text') });
-    }
+    await api(`/recon/units/${pickUnit.id}/items/bulk`, 'POST', { items });
+    document.getElementById('rcPickModal').classList.remove('active');
     await refresh();
   } catch (err) { alert(err.message); }
 });
@@ -491,9 +663,12 @@ document.getElementById('rcTypes').addEventListener('click', (e) => {
   try {
     me = await api('/auth/me');
     document.getElementById('rcUser').textContent = me.name;
-    const car = new URLSearchParams(location.hash.slice(1)).get('car');
+    const params = new URLSearchParams(location.hash.slice(1));
+    const car = params.get('car');
+    const unitParam = params.get('unit');
     await refresh();
-    if (car) {
+    if (unitParam && board.units.some(x => x.id === unitParam)) openUnit(unitParam);
+    else if (car) {
       const u = board.units.find(x => x.car && x.car.id === car && x.status === 'active');
       if (u) { stepFilter = u.step; render(); openUnit(u.id); } else if (board.notStarted.some(c => c.id === car)) { tab = 'waiting'; render(); }
     }

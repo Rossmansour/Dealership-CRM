@@ -46,11 +46,33 @@
   <section class="rc-view" data-rc-view="approvals" hidden><div id="rcApprovals"></div></section>
   <section class="rc-view" data-rc-view="waiting" hidden><div id="rcWaiting"></div></section>
   <section class="rc-view" data-rc-view="performance" hidden><div id="rcPerformance"></div></section>
+  <section class="rc-view" data-rc-view="car" hidden><div id="rcCar"></div></section>
 </div>
 
-<!-- One car's recon -->
-<div class="rc-drawer-backdrop" id="rcBackdrop" hidden></div>
-<aside class="rc-drawer" id="rcDrawer" hidden aria-label="Car recon"></aside>
+<!-- Add work items from the store's list -->
+<div class="modal" id="rcPickModal">
+  <div class="modal-content rc-pick">
+    <h2>Add work items</h2>
+    <div class="rc-pick-body">
+      <aside class="rc-pick-side">
+        <label>Type to filter <input type="text" id="rcPickFilter" /></label>
+        <div class="rc-pick-label">Sort</div>
+        <label class="rc-inline"><input type="radio" name="rcPickSort" value="order" checked /> List order</label>
+        <label class="rc-inline"><input type="radio" name="rcPickSort" value="alpha" /> A to Z</label>
+        <div class="rc-pick-label">Phases</div>
+        <div id="rcPickPhases"></div>
+        <div class="rc-pick-label">Not on the list?</div>
+        <input type="text" id="rcPickCustom" placeholder="Type a work item" />
+        <select id="rcPickCustomPhase"></select>
+      </aside>
+      <div class="rc-pick-list" id="rcPickList"></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="rcPickCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="rcPickAdd">Add</button>
+    </div>
+  </div>
+</div>
 
 <!-- Steps & goals -->
 <div class="modal" id="rcSetupModal">
