@@ -261,6 +261,7 @@ function renderRoDetail() {
     </div>`;
   renderRoTotals();
   if (isNew) renderWhoPicker();
+  if (edit && typeof attachRoPartPickers === 'function') attachRoPartPickers();
 }
 
 function renderJob(j, i) {
@@ -318,7 +319,11 @@ function renderJob(j, i) {
           <td class="ro-num">${svcMoney((Number(p.qty) || 0) * (Number(p.price) || 0))}</td>
           <td>${edit ? html`<button type="button" class="recon-remove" data-remove-part title="Remove part" aria-label="Remove part">✕</button>` : ''}</td></tr>`)}
       </tbody></table>` : html`<p class="audit-note">No parts on this job.</p>`}
-      ${edit ? html`<button type="button" class="btn-secondary btn-small" data-add-part>+ Add part</button>` : ''}
+      ${edit ? html`<div class="ro-part-tools">
+        ${userCan('viewParts') ? html`<div class="ro-part-find" data-part-find="${i}"></div>` : ''}
+        <button type="button" class="btn-secondary btn-small" data-add-part>+ Part by hand</button>
+        ${currentRO.id && userCan('viewParts') ? html`<button type="button" class="btn-secondary btn-small" data-special-order>Special order</button>` : ''}
+      </div>` : ''}
     </div>
     <div class="ro-job-foot">Labor ${svcMoney(labor)} · Parts ${svcMoney(parts)}</div>
   </div>`;
@@ -462,6 +467,7 @@ detail.addEventListener('click', async (e) => {
   if (t.closest('[data-remove-job]')) { currentRO.jobs.splice(i, 1); if (!currentRO.jobs.length) currentRO.jobs.push(blankJob()); renderRoDetail(); markRoDirty(); return; }
   if (t.closest('[data-add-part]')) { job.parts.push({ number: '', description: '', qty: 1, cost: '', price: '' }); renderRoDetail(); markRoDirty(); return; }
   if (t.closest('[data-remove-part]')) { job.parts.splice(Number(t.closest('[data-part]').dataset.part), 1); renderRoDetail(); markRoDirty(); return; }
+  if (t.closest('[data-special-order]')) { openSpecialOrderModal({ roId: currentRO.id, roNumber: currentRO.roNumber, leadId: currentRO.leadId }); return; }
   if (t.closest('[data-clock]')) { await clockJob(job, t.closest('[data-clock]').dataset.clock); return; }
   if (t.closest('[data-tech-save]') || t.closest('[data-tech-done]')) {
     const body = { cause: job.cause, correction: job.correction };

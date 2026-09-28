@@ -17,6 +17,7 @@
 //   shop supplies = a % of customer-pay labor, up to a cap
 //   tax         = the store's tax rate on customer-pay parts (and labor, if
 //                 the store taxes labor) and shop supplies
+// Parts picked from the shelf come off it when the RO closes.
 // Internal jobs on a car in inventory are reconditioning: when the RO
 // closes, their total is added to that car's cost, so the car's gross is
 // right when it sells.
@@ -120,6 +121,7 @@ function cleanPart(p) {
   p = p || {};
   return {
     id: text(p.id, 40) || crypto.randomUUID(),
+    partId: p.partId ? text(p.partId, 60) : null, // from the parts shelf
     number: text(p.number, 40), description: text(p.description, 120),
     qty: Math.max(0, round2(p.qty === undefined || p.qty === '' ? 1 : p.qty)),
     cost: Math.max(0, round2(p.cost)), price: Math.max(0, round2(p.price))
@@ -444,6 +446,12 @@ router.post('/service/ros/:id/close', allow('writeRepairOrders'), wrap(async (re
     ro.closedAt = now;
     ro.closedBy = { id: req.user.id, name: req.user.name };
     ro.closedTotals = totals(ro, settings, pays);
+    // Parts from the shelf come off it now.
+    for (const job of ro.jobs) {
+      for (const p of job.parts || []) {
+        if (p.partId && n(p.qty)) await require('./parts').moveStock(q, req, p.partId, -n(p.qty), { type: 'ro', cost: p.cost, ref: `RO-${ro.roNumber}` });
+      }
+    }
     if (ro.carId && ro.closedTotals.internalTotal > 0) {
       const car = await store.get(q, 'cars', req.dealershipId, ro.carId, { forUpdate: true });
       if (car) {

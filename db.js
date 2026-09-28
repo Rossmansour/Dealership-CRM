@@ -265,6 +265,36 @@ const MIGRATIONS = [
     PRIMARY KEY (dealership_id, id)
   );
   ALTER TABLE users ADD COLUMN pay jsonb NOT NULL DEFAULT '{}';
+  `,
+  `
+  -- Parts: the parts on the shelf, every stock movement (received, used on
+  -- an RO, sold over the counter, adjusted), counter tickets (P-1001...),
+  -- and special orders for a customer.
+  CREATE TABLE parts (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE TABLE part_moves (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE TABLE parts_tickets (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, ticket_number integer NOT NULL, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id), UNIQUE (dealership_id, ticket_number)
+  );
+  ALTER TABLE dealerships ADD COLUMN next_ticket_number integer NOT NULL DEFAULT 1001;
+  CREATE TABLE special_orders (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
   `
 ];
 
@@ -322,7 +352,8 @@ async function tx(fn) {
 // Every function takes `q` -- either the pool or a transaction client --
 // plus the dealership the request is acting for.
 
-const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks', 'repair_orders', 'service_appointments']);
+const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks', 'repair_orders', 'service_appointments',
+  'parts', 'part_moves', 'parts_tickets', 'special_orders']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);
@@ -368,6 +399,11 @@ async function insert(q, table, dealershipId, record) {
     await q.query(
       'INSERT INTO appraisals (dealership_id, id, appraisal_number, data) VALUES ($1, $2, $3, $4)',
       [dealershipId, record.id, record.appraisalNumber, record]
+    );
+  } else if (table === 'parts_tickets') {
+    await q.query(
+      'INSERT INTO parts_tickets (dealership_id, id, ticket_number, data) VALUES ($1, $2, $3, $4)',
+      [dealershipId, record.id, record.ticketNumber, record]
     );
   } else if (table === 'repair_orders') {
     await q.query(
@@ -448,6 +484,16 @@ async function takeNextRoNumber(q, dealershipId) {
   return rows[0].ro_number;
 }
 
+// Same idea for parts counter tickets (P-1001...).
+async function takeNextTicketNumber(q, dealershipId) {
+  const { rows } = await q.query(
+    `UPDATE dealerships SET next_ticket_number = next_ticket_number + 1
+     WHERE id = $1 RETURNING next_ticket_number - 1 AS ticket_number`,
+    [dealershipId]
+  );
+  return rows[0].ticket_number;
+}
+
 // Same idea for customer numbers.
 async function takeNextCustomerNumber(q, dealershipId) {
   const { rows } = await q.query(
@@ -472,5 +518,6 @@ module.exports = {
   takeNextDealNumber,
   takeNextAppraisalNumber,
   takeNextCustomerNumber,
-  takeNextRoNumber
+  takeNextRoNumber,
+  takeNextTicketNumber
 };

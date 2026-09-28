@@ -99,17 +99,19 @@ function summarize(data, from, to, includeChargebacks) {
 
 // ---------- Data loading ----------
 async function loadData(dealershipId) {
-  const [deals, cars, appraisals, leads, repairOrders, dealership] = await Promise.all([
+  const [deals, cars, appraisals, leads, repairOrders, partsTickets, parts, dealership] = await Promise.all([
     store.list(store.pool, 'deals', dealershipId),
     store.list(store.pool, 'cars', dealershipId),
     store.list(store.pool, 'appraisals', dealershipId),
     store.list(store.pool, 'leads', dealershipId),
     store.list(store.pool, 'repair_orders', dealershipId),
+    store.list(store.pool, 'parts_tickets', dealershipId),
+    store.list(store.pool, 'parts', dealershipId),
     store.getDealership(store.pool, dealershipId)
   ]);
   const settings = (dealership && dealership.settings) || {};
   return {
-    deals: deals.map(({ creditApp, ...d }) => d), cars, appraisals, leads: leads.map(({ creditApp, ...l }) => l), repairOrders,
+    deals: deals.map(({ creditApp, ...d }) => d), cars, appraisals, leads: leads.map(({ creditApp, ...l }) => l), repairOrders, partsTickets, parts,
     settings, storeHours: hours.cleanStoreHours(settings.storeHours)
   };
 }
@@ -238,12 +240,13 @@ function storeReport(data, key) {
 
 // ---------- Fixed ops (service & parts), from closed repair orders ----------
 // Service gross = labor sold - what the techs are paid for it. Parts gross =
-// parts sold - parts cost. Counted in the month the RO closed.
+// parts sold - parts cost, on ROs and over the counter. Counted in the month
+// the RO or ticket closed.
 function fixedSummary(data, from, to) {
   const out = {
     ros: 0, roIds: [], hours: 0, customerHours: 0,
     customerLabor: 0, warrantyLabor: 0, internalLabor: 0, laborSale: 0, laborCost: 0,
-    partsSale: 0, partsCost: 0
+    partsSale: 0, partsCost: 0, counterSale: 0, counterCost: 0, tickets: 0, ticketIds: []
   };
   for (const ro of data.repairOrders || []) {
     if (ro.status !== 'closed' || !ro.closedTotals) continue;
@@ -258,6 +261,15 @@ function fixedSummary(data, from, to) {
     out.laborSale += n(c.laborSale); out.laborCost += n(c.laborCost);
     out.partsSale += n(c.partsSale); out.partsCost += n(c.partsCost);
   }
+  // Counter sales (parts tickets) count toward parts.
+  for (const t of data.partsTickets || []) {
+    if (t.status !== 'closed' || !t.closedTotals) continue;
+    const at = new Date(t.closedAt).getTime();
+    if (!(at >= from && at < to)) continue;
+    out.tickets++; out.ticketIds.push(t.id);
+    out.counterSale += n(t.closedTotals.sale); out.counterCost += n(t.closedTotals.cost);
+  }
+  out.partsSale += out.counterSale; out.partsCost += out.counterCost;
   out.serviceGross = out.laborSale - out.laborCost;
   out.partsGross = out.partsSale - out.partsCost;
   out.gross = out.serviceGross + out.partsGross;
@@ -281,6 +293,10 @@ function fixedReport(data, key) {
   const roById = new Map((data.repairOrders || []).map(r => [r.id, r]));
   return {
     month: key, available: true,
+    partsStock: (() => {
+      const live = (data.parts || []).filter(p => !p.inactive);
+      return { skus: live.length, value: live.reduce((s, p) => s + Math.max(0, n(p.onHand)) * n(p.cost), 0) };
+    })(),
     pace: { elapsedDays: days.elapsed, totalDays: days.total, factor: days.elapsed ? days.total / days.elapsed : 0 },
     mtd, lastMonth: fixedSummary(data, ...range(shiftMonth(key, -1))), lastYear: fixedSummary(data, ...range(shiftMonth(key, -12))),
     trend, plan: planFor(data.settings, key),

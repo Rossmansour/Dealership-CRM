@@ -121,6 +121,16 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
 - New roles: **Service Advisor** and **Technician**
 
+**Parts** (left sidebar → Parts)
+- **Inventory**: part #, description, brand, OEM/aftermarket/used, bin, vendor, cost, price, and when to reorder. Shows **on hand**, what's **on open ROs and tickets**, and what's **available**, plus the shelf value at cost
+- **Stock only moves with a record**: received (cost becomes the weighted average), used on an RO, sold over the counter, or a count adjustment (reason required). Each part shows its full history
+- **On repair orders**: "Find in stock" adds a part with its cost and price. It's held while the RO is open and comes off the shelf when the RO closes. "Special order" asks the parts department for a part that isn't in stock
+- **Counter tickets (P-1001...)**: retail, wholesale, or internal (shop use); tax on retail only (per Service Setup). Closing takes the parts off the shelf
+- **Special orders**: requested (by service or parts) → ordered (vendor, PO) → received (goes on the shelf; a new part is set up if needed) → customer notified → done
+- **Reorder list**: parts at or below their reorder point, with how many to order
+- **Dashboard → Service & Parts**: parts gross now includes counter sales
+- Techs can look parts up but don't see cost
+
 **Round Robin & Store Hours** (Admin → 🔄 Round Robin & Store Hours)
 - **Two rotations at once**: every new lead gets a salesperson (Sales 1) **and** a BDC agent (BDC 1), each from its own rotation, taking turns in the order you set (▲▼ to reorder)
 - Each rotation can be turned on or off and limited to certain lead sources (e.g. BDC only for website and CarGurus leads)

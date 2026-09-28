@@ -154,13 +154,15 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
   { key: 'service', label: 'Service', views: ['service', 'serviceappts'], permissions: ['viewService'],
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
+  { key: 'parts', label: 'Parts', views: ['parts', 'partstickets', 'partsorders'], permissions: ['viewParts'],
+    icon: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>' },
   { key: 'accounting', label: 'Accounting', views: ['accounting'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>' }
 ];
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', accounting: 'accounting', execdash: 'execDashboard'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
@@ -205,6 +207,9 @@ function showView(view) {
   if (view === 'execdash') openExecDashboard();
   if (view === 'service') openServiceView();
   if (view === 'serviceappts') openServiceAppointments();
+  if (view === 'parts') openPartsView();
+  if (view === 'partstickets') openTicketsView();
+  if (view === 'partsorders') openOrdersView();
   window.scrollTo(0, 0);
 }
 

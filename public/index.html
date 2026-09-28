@@ -54,6 +54,15 @@
     <button type="button" class="nav-icon" data-view="assistant" data-module="crm" title="AI Assistant" aria-label="AI Assistant">
       <svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.5H10l-4.5 3.5V16H4z"/><path d="M12 8.2l.8 1.8 1.8.8-1.8.8-.8 1.8-.8-1.8-1.8-.8 1.8-.8z"/></svg>
     </button>
+    <button type="button" class="nav-icon" data-view="parts" data-module="parts" title="Parts Inventory" aria-label="Parts Inventory">
+      <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="partstickets" data-module="parts" title="Counter Tickets" aria-label="Counter Tickets">
+      <svg viewBox="0 0 24 24"><path d="M5 3.5h14v17l-2.3-1.5-2.4 1.5-2.3-1.5-2.3 1.5-2.4-1.5L5 20.5z"/><path d="M8.5 8h7M8.5 11.5h7M8.5 15h4"/></svg>
+    </button>
+    <button type="button" class="nav-icon" data-view="partsorders" data-module="parts" title="Special Orders &amp; Reorder" aria-label="Special Orders and Reorder">
+      <svg viewBox="0 0 24 24"><path d="M3 5h2l2.2 10.5h10.3L19.5 8H7"/><circle cx="9" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/></svg>
+    </button>
     <button type="button" class="nav-icon" data-view="accounting" data-module="accounting" title="Accounting" aria-label="Accounting">
       <svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>
     </button>
@@ -577,6 +586,78 @@
     </div>
     <h2 class="appt-day-title" id="apptDayTitle"></h2>
     <div id="apptList"></div>
+  </section>
+
+  <!-- PARTS: the shelf -->
+  <section id="partsPanel" class="tab-panel">
+    <div class="panel-header">
+      <input type="text" id="partsSearch" placeholder="Search part #, description, bin, brand..." />
+      <select id="partsFilter">
+        <option value="">All parts</option>
+        <option value="low">Low stock</option>
+        <option value="inactive">Inactive</option>
+      </select>
+      <button type="button" class="btn-primary" id="newPartBtn">+ New Part</button>
+    </div>
+    <div class="ro-summary" id="partsSummary"></div>
+    <div class="table-scroll">
+      <table class="data-table parts-table">
+        <thead><tr><th>Part #</th><th>Description</th><th>Bin</th><th>On hand</th><th>On ROs / tickets</th><th>Available</th><th class="parts-cost-col">Cost</th><th>Price</th><th>Reorder at</th></tr></thead>
+        <tbody id="partsTableBody"></tbody>
+      </table>
+    </div>
+    <p id="partsEmpty" class="no-deals-note" hidden>No parts here yet.</p>
+  </section>
+
+  <!-- PARTS: counter tickets -->
+  <section id="partsTickets" class="tab-panel">
+    <div id="ticketListView">
+      <div class="panel-header">
+        <select id="ticketFilter">
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+          <option value="">All</option>
+        </select>
+        <button type="button" class="btn-primary" id="newTicketBtn">+ New Ticket</button>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Ticket</th><th>Date</th><th>Customer</th><th>Type</th><th>Lines</th><th>Total</th><th>Status</th></tr></thead>
+          <tbody id="ticketTableBody"></tbody>
+        </table>
+      </div>
+      <p id="ticketEmpty" class="no-deals-note" hidden>No tickets here.</p>
+    </div>
+    <div id="ticketDetailView" hidden></div>
+  </section>
+
+  <!-- PARTS: special orders and the reorder list -->
+  <section id="partsOrders" class="tab-panel">
+    <div class="panel-header">
+      <select id="soFilter">
+        <option value="open">Open special orders</option>
+        <option value="">All special orders</option>
+      </select>
+      <button type="button" class="btn-primary" id="newSoBtn">+ Special Order</button>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th>Requested</th><th>Part</th><th>Qty</th><th>For</th><th>Vendor / PO</th><th>Status</th><th></th></tr></thead>
+        <tbody id="soTableBody"></tbody>
+      </table>
+    </div>
+    <p id="soEmpty" class="no-deals-note" hidden>No special orders.</p>
+    <div id="reorderSection">
+      <h2 class="appt-day-title">Reorder list</h2>
+      <p class="send-text-hint">Parts at or below their reorder point (counting what's already on open ROs and tickets).</p>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Part #</th><th>Description</th><th>Vendor</th><th>Available</th><th>Reorder at</th><th>Order</th><th></th></tr></thead>
+          <tbody id="reorderTableBody"></tbody>
+        </table>
+      </div>
+      <p id="reorderEmpty" class="no-deals-note" hidden>Nothing to reorder.</p>
+    </div>
   </section>
 
   <!-- ACCOUNTING (placeholder -- a later module) -->
@@ -1537,7 +1618,92 @@
   </div>
 </div>
 
+<!-- Part: details, receive, adjust, history -->
+<div class="modal" id="partModal">
+  <div class="modal-content modal-wide">
+    <h2 id="partModalTitle">New Part</h2>
+    <form id="partForm">
+      <div class="form-row-3">
+        <label>Part # <input type="text" id="pmNumber" required /></label>
+        <label>Description <input type="text" id="pmDescription" /></label>
+        <label>Brand <input type="text" id="pmBrand" /></label>
+      </div>
+      <div class="form-row-3">
+        <label>Source <select id="pmSource"><option value="oem">OEM</option><option value="aftermarket">Aftermarket</option><option value="used">Used</option></select></label>
+        <label>Bin <input type="text" id="pmBin" /></label>
+        <label>Vendor <input type="text" id="pmVendor" /></label>
+      </div>
+      <div class="form-row-3">
+        <label id="pmCostLabel">Cost <input type="number" id="pmCost" min="0" step="0.01" /></label>
+        <label>Price <input type="number" id="pmPrice" min="0" step="0.01" /></label>
+        <label id="pmOnHandLabel">Starting count <input type="number" id="pmOnHand" min="0" step="1" /></label>
+      </div>
+      <div class="form-row-3">
+        <label>Reorder when available is at or below <input type="number" id="pmReorderPoint" min="0" step="1" /></label>
+        <label>Order this many <input type="number" id="pmReorderQty" min="0" step="1" /></label>
+        <label class="inline-check pm-inactive"><input type="checkbox" id="pmInactive" /> Inactive (no longer stocked)</label>
+      </div>
+      <label>Notes <input type="text" id="pmNotes" /></label>
+      <p class="send-text-status-error" id="pmMsg"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="pmCancelBtn">Close</button>
+        <button type="submit" class="btn-primary" id="pmSaveBtn">Save</button>
+      </div>
+    </form>
+    <div id="pmStock" hidden>
+      <div class="ca-section-title">Stock</div>
+      <div class="pm-stock-line" id="pmStockLine"></div>
+      <div class="pm-actions" id="pmActions">
+        <div class="pm-action">
+          <strong>Receive</strong>
+          <input type="number" id="pmRecvQty" min="1" step="1" placeholder="Qty" />
+          <input type="number" id="pmRecvCost" min="0" step="0.01" placeholder="Cost each" />
+          <input type="text" id="pmRecvInvoice" placeholder="Invoice #" />
+          <button type="button" class="btn-primary btn-small" id="pmRecvBtn">Receive</button>
+        </div>
+        <div class="pm-action">
+          <strong>Count / adjust</strong>
+          <input type="number" id="pmCount" min="0" step="1" placeholder="Actual count" />
+          <input type="text" id="pmAdjReason" placeholder="Reason (count, damaged...)" />
+          <button type="button" class="btn-secondary btn-small" id="pmAdjBtn">Set count</button>
+        </div>
+      </div>
+      <div class="ca-section-title">History</div>
+      <div id="pmMoves"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Special order -->
+<div class="modal" id="soModal">
+  <div class="modal-content">
+    <h2>Special Order</h2>
+    <form id="soForm">
+      <label>Part from inventory (optional) <div id="soPartPicker"></div></label>
+      <div class="form-row-2">
+        <label>Part # <input type="text" id="soNumber" /></label>
+        <label>Qty <input type="number" id="soQty" min="1" step="1" value="1" /></label>
+      </div>
+      <label>Description <input type="text" id="soDescription" /></label>
+      <label>Customer <div id="soCustomerPicker"></div></label>
+      <p class="send-text-hint" id="soRoNote"></p>
+      <div class="form-row-3 so-money">
+        <label>Cost <input type="number" id="soCost" min="0" step="0.01" /></label>
+        <label>Price <input type="number" id="soPrice" min="0" step="0.01" /></label>
+        <label>Deposit <input type="number" id="soDeposit" min="0" step="0.01" /></label>
+      </div>
+      <label>Notes <input type="text" id="soNotes" /></label>
+      <p class="send-text-status-error" id="soMsg"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" id="soCancelBtn">Cancel</button>
+        <button type="submit" class="btn-primary">Request</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="app.js"></script>
 <script src="service-ui.js"></script>
+<script src="parts-ui.js"></script>
 </body>
 </html>
