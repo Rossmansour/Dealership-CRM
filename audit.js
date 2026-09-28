@@ -49,10 +49,15 @@ const sameNumber = (a, b) => isNumberLike(a) && isNumberLike(b) && Number(a) ===
 // Field-by-field differences between two versions of a record, as
 // { "path.to.field": { from, to } }. Nested objects (like a credit app's
 // applicant) are compared field by field; arrays are compared as a whole.
+// Bookkeeping kept on the record itself, not worth a line in the log
+// (a car's price history and its market snapshot).
+const NOT_LOGGED = new Set(['priceHistory', 'market']);
+
 function diff(before, after, prefix = '') {
   const changes = {};
   const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
   for (const key of keys) {
+    if (!prefix && NOT_LOGGED.has(key)) continue;
     const path = prefix ? `${prefix}.${key}` : key;
     const a = before ? before[key] : undefined;
     const b = after ? after[key] : undefined;

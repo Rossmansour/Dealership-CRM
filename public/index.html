@@ -275,6 +275,35 @@
     </table>
   </section>
 
+  <!-- MARKET PRICING (Vehicle Management) -->
+  <section id="pricingPanel" class="tab-panel">
+    <div class="panel-header pr-head">
+      <select id="prType" aria-label="Which cars"><option value="">All cars</option><option value="used">Used</option><option value="new">New</option></select>
+      <select id="prShow" aria-label="Show">
+        <option value="">Everything</option>
+        <option value="over">Priced over market</option>
+        <option value="under">Priced under market</option>
+        <option value="change">Suggested price differs</option>
+        <option value="nodata">No market data</option>
+        <option value="locked">Locked</option>
+      </select>
+      <input type="text" id="prSearch" placeholder="Stock #, vehicle..." />
+      <span class="pr-head-right">
+        <button type="button" class="btn-secondary" id="prRefreshBtn">↻ Refresh market</button>
+        <button type="button" class="btn-primary" id="prApplyBtn" disabled>Apply suggested (0)</button>
+        <button type="button" class="btn-secondary" id="prRulesBtn">⚙ Pricing rules</button>
+      </span>
+    </div>
+    <div id="prBanner"></div>
+    <div class="ro-summary" id="prSummary"></div>
+    <div class="table-scroll">
+      <table class="data-table pr-table">
+        <thead><tr><th><input type="checkbox" id="prAll" aria-label="Select all" /></th><th>Car</th><th>Days</th><th>All-in</th><th>Price</th><th>Market</th><th>% of mkt</th><th>Rank</th><th>Suggested</th><th>Gross</th><th>Auto</th></tr></thead>
+        <tbody id="prBody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- APPRAISALS (Vehicle Management) -->
   <section id="appraisals" class="tab-panel">
     <div id="appraisalListView">
@@ -1707,7 +1736,39 @@
 </div>
 
 <script src="app.js"></script>
+<!-- Market pricing rules -->
+<div class="modal" id="prRulesModal">
+  <div class="modal-content">
+    <h2>Pricing rules</h2>
+    <p class="send-text-hint">Each car is priced against the same cars for sale near you. Its price is adjusted for miles, and the middle price is the market.</p>
+    <label class="pr-toggle"><input type="checkbox" id="prAuto" /><span><strong>Auto-pricing:</strong> once a day, move every car that isn't locked to its suggested price</span></label>
+    <div class="form-grid pr-rules">
+      <label>Store ZIP <input type="text" id="prZip" inputmode="numeric" maxlength="5" /></label>
+      <label>Search radius (miles) <input type="number" id="prRadius" min="10" max="500" /></label>
+      <label>Model years either side <input type="number" id="prYears" min="0" max="3" /></label>
+      <label>Price at % of market (fresh car) <input type="number" id="prPct" min="50" max="150" step="0.5" /></label>
+      <label>Minimum gross ($) <input type="number" id="prMinGross" step="50" /></label>
+      <label>Most a price moves at once ($) <input type="number" id="prMaxChange" min="0" step="100" /></label>
+      <label>$ per mile difference <input type="number" id="prPerMile" min="0" max="1" step="0.01" /></label>
+      <label>Round to ($) <select id="prRound"><option value="1">$1</option><option value="10">$10</option><option value="100">$100</option><option value="500">$500</option></select></label>
+      <label>Fewest similar cars to price <input type="number" id="prMinComps" min="1" max="20" /></label>
+      <label class="pr-toggle"><input type="checkbox" id="prNew" /><span>Price new cars too</span></label>
+    </div>
+    <div class="pr-aging">
+      <strong>As cars age</strong> <span class="send-text-hint">After this many days in stock, price at this % of market</span>
+      <div id="prAgingRows"></div>
+      <button type="button" class="btn-secondary btn-small" id="prAddAging">+ Add step</button>
+    </div>
+    <p class="send-text-status-error" id="prRulesMsg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="prRulesCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="prRulesSave">Save</button>
+    </div>
+  </div>
+</div>
+
 <script src="service-ui.js"></script>
 <script src="parts-ui.js"></script>
+<script src="pricing-ui.js"></script>
 </body>
 </html>

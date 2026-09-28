@@ -2505,3 +2505,35 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .modal-content .rc-pick-side .rc-inline { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 13px; }
 .modal-content .rc-pick-side .rc-inline input { width: auto; margin: 0; }
 #rcPickPhases { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---------- Market Pricing ---------- */
+.pr-head { flex-wrap: wrap; }
+.pr-head-right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.pr-banner { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; background: var(--highlight-bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; margin: 0 0 12px; font-size: 13px; }
+.pr-banner-warn { border-left: 4px solid var(--amber); }
+.pr-auto { margin-left: auto; color: var(--text-secondary); }
+.pr-auto-on { color: var(--green); font-weight: 600; }
+.pr-table td { vertical-align: top; }
+.pr-row { cursor: pointer; }
+.pr-row.pr-out { opacity: 0.55; }
+.pr-over { color: var(--red); font-weight: 600; }
+.pr-under { color: var(--blue); font-weight: 600; }
+.pr-at { color: var(--green); font-weight: 600; }
+.pr-down { color: var(--red); font-size: 12px; }
+.pr-up { color: var(--green); font-size: 12px; }
+.pr-floor { font-size: 11px; color: var(--amber); font-weight: 600; }
+.pr-lock { border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); border-radius: 12px; padding: 2px 9px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pr-lock.pr-locked { background: var(--surface-alt); color: var(--heading); font-weight: 600; }
+.pr-detail td { background: var(--surface-alt); }
+.pr-detail-box { padding: 4px 0 8px; font-size: 13px; }
+.pr-why { margin-bottom: 8px; }
+.pr-comps { width: 100%; border-collapse: collapse; font-size: 12px; background: var(--surface); }
+.pr-comps th, .pr-comps td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.pr-comps .pr-mine td { background: var(--highlight-bg); font-weight: 700; }
+.modal .pr-toggle, .pr-toggle { display: flex; flex-direction: row; gap: 8px; align-items: center; margin: 6px 0 10px; font-size: 14px; }
+.pr-toggle input[type=checkbox] { width: auto; flex: none; margin: 0; }
+.pr-rules .pr-toggle { align-self: end; }
+.pr-rules { margin-top: 6px; }
+.pr-aging { margin-top: 12px; }
+.pr-aging-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; font-size: 13px; flex-wrap: wrap; }
+.pr-aging-row input { width: 70px; }

@@ -22,6 +22,7 @@ const dashboard = require('./dashboard');
 const service = require('./service');
 const parts = require('./parts');
 const recon = require('./recon');
+const pricing = require('./pricing');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -99,6 +100,7 @@ app.use('/api', dashboard.router);
 app.use('/api', service.router);
 app.use('/api', parts.router);
 app.use('/api', recon.router);
+app.use('/api', pricing.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -117,7 +119,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // the activity routes, so it (and its audit trail) can't be rewritten by
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
-  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId'],
+  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId', 'market', 'priceHistory', 'priceLocked'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
@@ -489,6 +491,10 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
     if ('soldAs' in updates) updates.soldAs = updates.soldAs === 'wholesale' ? 'wholesale' : 'retail';
     if ('vin' in updates) updates.vin = vinDecoder.normalizeVin(updates.vin);
     if ('doors' in updates) updates.doors = Number(updates.doors) || null;
+    // Every price change is kept (market pricing shows the last one).
+    if ('price' in updates && updates.price !== Number(car.price || 0)) {
+      updates.priceHistory = [...(car.priceHistory || []), { price: updates.price, previous: Number(car.price) || 0, at: new Date().toISOString(), by: req.user.name, reason: 'changed by hand' }].slice(-100);
+    }
 
     // If status is changing to "sold" for the first time, stamp the date.
     if (updates.status === 'sold' && car.status !== 'sold') {
@@ -2980,6 +2986,8 @@ if (require.main === module) {
       });
       // Time-based alerts (tasks coming due, leads nobody has contacted).
       setInterval(() => runAlertSweep().catch(err => console.error('Alert check failed:', err.message)), 60 * 1000);
+      // Market pricing: stores with auto-pricing on get fresh prices once a day.
+      setInterval(() => pricing.autoPriceSweep().catch(err => console.error('Auto-pricing failed:', err.message)), 60 * 60 * 1000);
     })
     .catch(err => {
       console.error('Failed to start:', err);

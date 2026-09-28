@@ -32,6 +32,14 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting** (placeholder for later). Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
 - The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
 
+**Market Pricing -- Vehicle Management → Market Pricing** (managers)
+- Each car is compared with the same cars for sale near the store (year ± 1, make, model, trim, within the radius). Each similar car's price is adjusted for miles, and the middle price is the market
+- For each car: market price, % of market, rank among the similar cars, and a **suggested price** from the store's rules. Click a car to see every similar car and why its price was suggested
+- **Rules**: target % of market, price steps as cars age (e.g. 98% after 30 days, 96% after 45), never below cost + approved recon + a minimum gross, rounding, and how many similar cars are needed
+- **Apply suggested** to the cars you pick, or turn on **auto-pricing**: once a day every car that isn't locked moves to its suggested price (by at most a set amount at a time). **Lock** a car to keep its price
+- Every price change is kept on the car (who or what changed it, and why)
+- Market data comes from MarketCheck (see *Setting up market pricing*). Until it's connected, demo cars use made-up demo listings so the screen can be tried
+
 **Appraisals ("book outs") -- Vehicle Management → Appraisals**
 - Start one from **+ New Appraisal**, a customer's page (**Trade In**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
 - VIN decode fills year, make, model, trim, body, engine, drivetrain, transmission, and fuel; then mileage, colors, condition, and equipment (clickable options by group)
@@ -436,6 +444,14 @@ The AI Assistant and Suggested Reply button need a free Google Gemini API key to
 
 **Swapping providers later:** every AI call in this project funnels through one function, `callAI()`, in `server.js`. Switching to OpenAI, Anthropic, or any other provider only means rewriting that one function -- the redaction logic, the context building, and both API routes stay exactly the same.
 
+## Setting up market pricing
+
+Market Pricing needs live listings of cars for sale near the store. It uses [MarketCheck](https://www.marketcheck.com/apis/)'s car search API (a paid data license).
+
+1. Get a MarketCheck API key.
+2. Set `MARKETCHECK_API_KEY=your-key` in `.env` (or the host's environment settings) and restart.
+3. In **Market Pricing → Pricing rules**, enter the store's ZIP code and radius, set your rules, and click **Refresh market**. Turn on **auto-pricing** when you're happy with the suggestions.
+
 ## Setting up real SMS (Twilio)
 
 The "Send Text" feature on a lead's profile needs a Twilio account to actually send messages.
@@ -506,6 +522,7 @@ car-crm/
 ├── photos.js          # Car photo storage (Cloudinary, or local disk)
 ├── keys.js            # Key status from the key machine (KeyTrak etc.) + integration tokens
 ├── providers.js       # Appraisal data sources: live (NHTSA recalls) and not-yet-connected slots
+├── pricing.js         # Market pricing: similar cars nearby, suggested prices, auto-pricing
 ├── .env.example       # Template for your settings and keys (copy to .env)
 ├── data/db.json       # Sample data, imported once on first start
 ├── test/              # API tests (run against a throwaway Postgres database)
