@@ -109,7 +109,7 @@ function renderRoList() {
     return html`<tr class="ro-row" data-ro-id="${r.id}">
       <td><button type="button" class="deal-number-link" data-ro-open="${r.id}">RO-${r.roNumber}</button></td>
       <td>${new Date(r.openedAt).toLocaleDateString()}</td>
-      <td>${r.customerName || (r.carId ? html`<span class="cp-chip">Internal</span>` : '--')}</td>
+      <td>${r.customerName || (r.carId ? html`<span class="ro-internal">Internal · recon</span>` : '--')}</td>
       <td>${vehicleLabel(r.vehicle)}${r.vehicle && r.vehicle.vin ? html`<div class="inventory-trim">VIN …${r.vehicle.vin.slice(-8)}</div>` : ''}</td>
       <td>${staffName(r.advisorId) || '--'}</td>
       <td>${techs.join(', ') || '--'}${(r.jobs || []).some(j => j.clockedIn) ? html` <span class="ro-clock-dot" title="Clocked in"></span>` : ''}</td>
@@ -839,3 +839,81 @@ async function renderCpService(lead) {
     }
   };
 }
+
+// ---------- Recon ----------
+// Used cars on their way to the front line: not started, in recon (an open
+// internal RO), or front-line ready (recon closed). Recon cost is added to
+// the car when its RO closes.
+
+async function openReconView() {
+  try {
+    await loadServiceData();
+  } catch (err) { document.getElementById('reconBoard').innerHTML = html`<p class="send-text-status-error">${err.message}</p>`; return; }
+  renderRecon();
+}
+
+function reconInfo(car) {
+  const ros = serviceROs.filter(r => r.carId === car.id && r.status !== 'void');
+  const open = ros.filter(r => RO_OPEN.includes(r.status));
+  const closed = ros.filter(r => r.status === 'closed');
+  const cost = closed.reduce((s, r) => s + ((r.closedTotals || r.totals || {}).internalTotal || 0), 0);
+  const pending = open.reduce((s, r) => s + ((r.totals || {}).internalTotal || 0), 0);
+  const firstOpened = ros.length ? Math.min(...ros.map(r => new Date(r.openedAt).getTime())) : null;
+  const lastClosed = closed.length ? Math.max(...closed.map(r => new Date(r.closedAt).getTime())) : null;
+  const stage = open.length ? 'in' : closed.length ? 'ready' : 'todo';
+  const end = stage === 'ready' ? lastClosed : Date.now();
+  return {
+    ros, open, closed, cost, pending, stage,
+    daysInStock: car.dateAdded ? Math.floor((Date.now() - new Date(car.dateAdded)) / 86400000) : null,
+    daysInRecon: firstOpened ? Math.max(0, Math.round((end - firstOpened) / 86400000 * 10) / 10) : null
+  };
+}
+
+function renderRecon() {
+  const filter = document.getElementById('reconFilter').value;
+  const words = document.getElementById('reconSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = cars
+    .filter(c => c.status !== 'sold')
+    .filter(c => filter === 'all' || c.stockType !== 'new')
+    .filter(c => words.every(w => `${c.stockNumber || ''} ${c.vin || ''} ${c.year} ${c.make} ${c.model} ${c.trim || ''}`.toLowerCase().includes(w)))
+    .map(c => ({ car: c, info: reconInfo(c) }));
+  const stages = [['todo', 'Needs recon'], ['in', 'In recon'], ['ready', 'Front-line ready']];
+  const readyDays = list.filter(x => x.info.stage === 'ready' && x.info.daysInRecon !== null).map(x => x.info.daysInRecon);
+  document.getElementById('reconSummary').innerHTML = html`
+    <span><strong>${list.filter(x => x.info.stage === 'todo').length}</strong> need recon</span>
+    <span><strong>${list.filter(x => x.info.stage === 'in').length}</strong> in recon</span>
+    <span><strong>${list.filter(x => x.info.stage === 'ready').length}</strong> front-line ready</span>
+    <span><strong>${readyDays.length ? (readyDays.reduce((a, b) => a + b, 0) / readyDays.length).toFixed(1) : '--'}</strong> avg days in recon</span>
+    <span><strong>${svcMoney(list.reduce((s, x) => s + x.info.cost, 0))}</strong> recon spent</span>`;
+  const canWrite = canWriteRO();
+  document.getElementById('reconBoard').innerHTML = stages.map(([key, label]) => {
+    const items = list.filter(x => x.info.stage === key).sort((a, b) => (b.info.daysInStock || 0) - (a.info.daysInStock || 0));
+    return html`<div class="recon-col"><div class="recon-col-head"><span>${label}</span><span class="cp-count">${items.length}</span></div>
+      ${items.length ? items.map(({ car, info }) => html`<div class="recon-card">
+        <div class="recon-card-top"><span class="recon-card-title">${car.year} ${car.make} ${car.model}</span><span class="inventory-trim">${car.stockNumber ? `#${car.stockNumber}` : ''}</span></div>
+        <div class="recon-card-meta">
+          <span class="${info.daysInStock >= 45 ? 'recon-aged' : ''}">${info.daysInStock ?? '--'} days in stock</span>
+          ${info.daysInRecon !== null ? html`<span>${info.daysInRecon} days in recon</span>` : ''}
+          ${info.cost ? html`<span>Recon ${svcMoney(info.cost)}</span>` : ''}
+          ${info.pending ? html`<span>Open ${svcMoney(info.pending)}</span>` : ''}
+        </div>
+        <div class="recon-card-actions">
+          ${info.open.map(r => html`<button type="button" class="deal-number-link" data-recon-ro="${r.id}">RO-${r.roNumber}</button> ${roStatusBadge(r.status)}`)}
+          ${key === 'ready' ? info.closed.slice(-1).map(r => html`<button type="button" class="link-btn" data-recon-ro="${r.id}">RO-${r.roNumber}</button>`) : ''}
+          ${key !== 'in' && canWrite ? html`<button type="button" class="btn-secondary btn-small" data-recon-start="${car.id}">${key === 'ready' ? 'More recon' : 'Send to recon'}</button>` : ''}
+        </div>
+      </div>`) : html`<p class="audit-note">None</p>`}</div>`;
+  }).join('');
+}
+
+document.getElementById('reconFilter').addEventListener('change', renderRecon);
+document.getElementById('reconSearch').addEventListener('input', renderRecon);
+document.getElementById('reconBoard').addEventListener('click', (e) => {
+  const ro = e.target.closest('[data-recon-ro]');
+  if (ro) { openRoById(ro.dataset.reconRo); return; }
+  const start = e.target.closest('[data-recon-start]');
+  if (start) {
+    const car = cars.find(c => c.id === start.dataset.reconStart);
+    startNewRO({ carId: car.id, vehicle: { vin: String(car.vin || '').toUpperCase(), year: String(car.year || ''), make: car.make, model: car.model, color: car.exteriorColor || '', mileageIn: car.mileage || '' } });
+  }
+});

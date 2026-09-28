@@ -89,7 +89,27 @@ function applyPermissionsToUI() {
   document.getElementById('adminIntegrationsBtn').style.display = userCan('manageIntegrations') ? '' : 'none';
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
+  document.getElementById('adminDemoBtn').style.display = userCan('manageUsers') ? '' : 'none';
 }
+
+// Demo data: a sample store (staff, cars, customers, deals, ROs, parts) to
+// try everything out, and a way to remove exactly that later.
+document.getElementById('adminDemoBtn').addEventListener('click', async () => {
+  const state = await fetch(`${API}/demo`).then(r => r.json()).catch(() => ({}));
+  if (state.loaded) {
+    if (!confirm('Remove all demo data?\n\nThis deletes the demo staff, cars, customers, deals, repair orders, parts, and appointments. Anything your store entered itself stays.')) return;
+    const res = await fetch(`${API}/demo`, { method: 'DELETE' });
+    if (!res.ok) { alert((await res.json().catch(() => ({}))).error || 'Could not remove demo data.'); return; }
+    alert('Demo data removed.');
+  } else {
+    if (!confirm('Load demo data?\n\nAdds sample staff (salespeople, BDC, F&I, service advisors, technicians, parts), cars, customers, deals, repair orders, parts, and appointments -- all marked as demo so you can remove them later from here.')) return;
+    const res = await fetch(`${API}/demo`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { alert(body.error || 'Could not load demo data.'); return; }
+    alert(`Demo data loaded: ${body.staff} staff, ${body.cars} cars, ${body.customers} customers, ${body.deals} deals, ${body.repairOrders} repair orders, ${body.parts} parts, ${body.appointments} appointments.\n\nDemo staff can't sign in until you set a password for them under Users & Roles.`);
+  }
+  location.reload();
+});
 
 let cars = [];
 let vehicleKeys = []; // key status from the key machine (see Key column)
@@ -152,7 +172,7 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
   { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
-  { key: 'service', label: 'Service', views: ['service', 'serviceappts'], permissions: ['viewService'],
+  { key: 'service', label: 'Service', views: ['service', 'serviceappts', 'recon'], permissions: ['viewService'],
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
   { key: 'parts', label: 'Parts', views: ['parts', 'partstickets', 'partsorders'], permissions: ['viewParts'],
     icon: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>' },
@@ -162,23 +182,64 @@ const MODULES = [
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', recon: 'reconPanel', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
+
+// Names of each screen, for the sidebar dropdowns.
+const VIEW_LABELS = {
+  execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', reports: 'Reports',
+  assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', service: 'Repair Orders',
+  serviceappts: 'Appointments', recon: 'Recon', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
+  partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
+};
+const openRailGroups = new Set();
 
 const moduleOfView = view => MODULES.find(m => m.views.includes(view));
 
 // Modules someone can't use (e.g. the dashboard for salespeople) aren't shown.
 const moduleVisible = m => !m.permissions || (currentUser && m.permissions.some(p => currentUser.permissions.includes(p)));
 
+// Each module in the sidebar, with a dropdown of its screens (shown when
+// the sidebar is open). The module you're in starts open.
 function renderModuleNav() {
-  document.getElementById('moduleNav').innerHTML = MODULES.filter(moduleVisible).map(m => html`
-    <button type="button" class="rail-item rail-module" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.label}">
-      ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
-    </button>`).join('');
+  const current = moduleOfView(currentView);
+  document.getElementById('moduleNav').innerHTML = MODULES.filter(moduleVisible).map(m => {
+    const open = openRailGroups.has(m.key) || (current && current.key === m.key && !openRailGroups.has(`-${m.key}`));
+    return html`<div class="rail-group ${open ? 'open' : ''}" data-rail-group="${m.key}">
+      <button type="button" class="rail-item rail-module ${current && current.key === m.key ? 'active' : ''}" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.label}">
+        ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
+        ${m.views.length > 1 ? html`<span class="rail-caret" data-rail-caret="${m.key}" role="button" aria-label="Show ${m.label} screens" title="Show screens">▾</span>` : ''}
+      </button>
+      ${m.views.length > 1 ? html`<div class="rail-sub">${m.views.map(v => html`
+        <button type="button" class="rail-subitem ${v === currentView ? 'active' : ''}" data-rail-view="${v}">${VIEW_LABELS[v] || v}</button>`)}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
+document.getElementById('moduleNav').addEventListener('click', (e) => {
+  const caret = e.target.closest('[data-rail-caret]');
+  if (caret) {
+    e.stopPropagation();
+    const key = caret.dataset.railCaret;
+    const group = caret.closest('.rail-group');
+    const nowOpen = !group.classList.contains('open');
+    group.classList.toggle('open', nowOpen);
+    openRailGroups.delete(key); openRailGroups.delete(`-${key}`);
+    openRailGroups.add(nowOpen ? key : `-${key}`);
+    return;
+  }
+  const sub = e.target.closest('[data-rail-view]');
+  if (sub) {
+    const view = sub.dataset.railView;
+    if (view === 'leads' || view === 'board') clearLeadsListFilter();
+    if (view === 'inventory') clearInventoryListFilter();
+    showView(view);
+  }
+}, true);
+
 window.showModule = function(moduleKey) {
+  if (window.event && window.event.target && window.event.target.closest && window.event.target.closest('[data-rail-caret]')) return;
   const module = MODULES.find(m => m.key === moduleKey);
   if (module.views.includes('leads')) clearLeadsListFilter();
   if (module.views.includes('inventory')) clearInventoryListFilter();
@@ -192,6 +253,8 @@ function showView(view) {
   currentView = view;
   const module = moduleOfView(view);
   document.querySelectorAll('.rail-module').forEach(b => b.classList.toggle('active', b.dataset.module === module.key));
+  document.querySelectorAll('.rail-subitem').forEach(b => b.classList.toggle('active', b.dataset.railView === view));
+  if (!openRailGroups.has(`-${module.key}`)) document.querySelectorAll(`.rail-group[data-rail-group="${module.key}"]`).forEach(g => g.classList.add('open'));
   document.querySelectorAll('.nav-icon[data-view]').forEach(b => { b.style.display = b.dataset.module === module.key ? '' : 'none'; });
   document.getElementById('currentModuleName').textContent = module.label;
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -207,6 +270,7 @@ function showView(view) {
   if (view === 'execdash') openExecDashboard();
   if (view === 'service') openServiceView();
   if (view === 'serviceappts') openServiceAppointments();
+  if (view === 'recon') openReconView();
   if (view === 'parts') openPartsView();
   if (view === 'partstickets') openTicketsView();
   if (view === 'partsorders') openOrdersView();

@@ -63,7 +63,7 @@ body {
   transition: width 0.18s ease;
 }
 /* Expands on hover to show module and count names */
-.rail:hover { width: 240px; }
+.rail:hover { width: 240px; overflow-y: auto; }
 .rail-modules, .rail-attention { display: flex; flex-direction: column; gap: 4px; }
 .rail-divider { height: 1px; background: rgba(255,255,255,0.14); margin: 8px 4px; flex-shrink: 0; }
 .rail-item {
@@ -2206,3 +2206,28 @@ button.gb-value:hover { color: var(--blue); text-decoration: underline; }
 @media (max-width: 700px) { .pm-action strong { width: 100%; } }
 #reorderSection { margin-top: 28px; }
 #pmStock { margin-top: 18px; }
+
+/* ---------- Sidebar dropdowns ---------- */
+.rail-group { display: flex; flex-direction: column; }
+.rail-caret { margin-left: auto; opacity: 0; font-size: 12px; padding: 4px 6px; border-radius: 6px; transition: transform 0.15s ease, opacity 0.15s ease; transform: rotate(-90deg); }
+.rail:hover .rail-caret { opacity: 0.8; }
+.rail-caret:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+.rail-group.open .rail-caret { transform: rotate(0deg); }
+.rail-sub { display: none; flex-direction: column; gap: 1px; padding: 2px 0 6px 47px; }
+.rail:hover .rail-group.open .rail-sub { display: flex; }
+.rail-subitem { border: none; background: none; color: rgba(255,255,255,0.66); font: inherit; font-size: 13px; text-align: left; padding: 6px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.rail-subitem:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.rail-subitem.active { color: #fff; font-weight: 600; background: rgba(255,255,255,0.12); }
+
+/* ---------- Recon ---------- */
+.recon-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.recon-col { background: var(--surface-alt); border-radius: 10px; padding: 10px; min-width: 0; }
+.recon-col-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; color: var(--heading); padding: 2px 4px 10px; }
+.recon-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.recon-card-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.recon-card-title { font-weight: 600; }
+.recon-card-meta { font-size: 12px; color: var(--text-secondary); margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.recon-card-actions { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.recon-aged { color: var(--red); font-weight: 600; }
+@media (max-width: 900px) { .recon-board { grid-template-columns: minmax(0, 1fr); } }
+.ro-internal { font-size: 12px; font-weight: 600; color: var(--text-secondary); background: var(--surface-alt); border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
