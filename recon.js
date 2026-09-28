@@ -26,8 +26,26 @@ const text = (v, max = 300) => String(v ?? '').trim().slice(0, max);
 
 const READY = 'ready'; // the front line -- the end of a retail car's trip
 const WHOLESALE = 'wholesale'; // or out the back door: leaves recon, not counted in days-to-front-line
-const CATEGORIES = ['mechanical', 'tires', 'body', 'glass', 'detail', 'other'];
-const TO_SERVICE = ['mechanical', 'tires'];
+// Work item phases. (Older items used finer categories; they map onto these.)
+const PHASES = ['mechanical', 'detail', 'cosmetic', 'other'];
+const OLD_CATEGORY = { tires: 'mechanical', body: 'cosmetic', glass: 'cosmetic' };
+const phaseOf = c => (PHASES.includes(c) ? c : OLD_CATEGORY[c] || 'other');
+const TO_SERVICE = ['mechanical'];
+const STORE_FIELDS = ['other1', 'other2', 'other3', 'other4', 'other5', 'other6'];
+
+// The work items to pick from, by phase. Stores can change the list.
+const DEFAULT_CATALOG = {
+  mechanical: ['Safety Inspection', 'CPO Inspection', 'Tire/Brake Measurement', 'Oil Change', 'Brakes (Front)', 'Brakes (Rear)',
+    'Rotors (Front)', 'Rotors (Rear)', 'Tires (2)', 'Tires (4)', 'Alignment', 'Battery', 'A/C Service', 'Air Filter (Engine)',
+    'Air Filter (Cabin)', 'Wiper Blades', 'Check Engine Light', 'Engine Diagnosis', 'Suspension', 'Steering', 'Exhaust', 'Fluids',
+    'Belts', 'Transmission', 'Cooling System', 'Electrical', 'Lights / Bulbs', 'Recalls', 'Key (Spare)', 'Key Fob', 'Smog / Emissions',
+    'Seat Belts', 'Spare Tire', 'Shop Supplies'],
+  detail: ['Used Car Detail', 'New Car Detail', 'Interior Shampoo', 'Odor Removal', 'Paint Protection', 'Photos'],
+  cosmetic: ['PDR (Dent Repair)', 'Body Repair', 'Paint', 'Touch Up', 'Bumper Repair', 'Wheel Repair', 'Windshield (Repair)',
+    'Windshield (Replace)', 'Glass', 'Interior Repair', 'Tint', 'Tint (Remove)', 'Bedliner'],
+  other: ['Title', 'Registration', "Owner's Manual", 'Floor Mats', 'Transport', 'Sublet']
+};
+const itemTotal = i => (n(i.partsPrice) || n(i.laborHours) ? round2(n(i.partsPrice) + n(i.laborHours) * n(i.laborRate)) : n(i.estimate));
 const ITEM_STATUSES = ['proposed', 'approved', 'declined', 'done'];
 
 // The store's steps, in order. Front line and Wholesale are always the two
@@ -57,11 +75,13 @@ function reconSettings(settings) {
   const d = defaultReconSettings();
   let steps = Array.isArray(r.steps) && r.steps.length ? r.steps : d.steps;
   if (steps.every(s => FIRST_VERSION_STEPS.includes(s.key))) steps = d.steps;
+  const catalog = {};
+  for (const ph of PHASES) catalog[ph] = Array.isArray(r.catalog && r.catalog[ph]) ? r.catalog[ph] : DEFAULT_CATALOG[ph];
   // An earlier version cut saved lists off at 12 steps. A list that is exactly
   // the first 12 defaults gets the rest back.
   const first12 = d.steps.slice(0, 12).map(s => s.key).join('|');
   if (steps.length === 12 && steps.map(s => s.key).join('|') === first12) steps = [...steps, ...d.steps.slice(12)];
-  return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps };
+  return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps, catalog };
 }
 const stepLabel = (cfg, key) => (key === READY ? 'Frontline Ready' : key === WHOLESALE ? 'Wholesale' : (cfg.steps.find(s => s.key === key) || {}).label || key);
 // Where a car starts: new cars at the first "new" step, everything else at Purchase / Trade (or the first step).
@@ -88,7 +108,7 @@ function itemActual(item, roById) {
 function present(unit, cars, roById, cfg) {
   const car = cars.get(unit.carId) || null;
   const now = Date.now();
-  const items = (unit.items || []).map(i => ({ ...i, ...itemActual(i, roById) }));
+  const items = (unit.items || []).map(i => ({ ...i, category: phaseOf(i.category), estimate: itemTotal(i), ...itemActual(i, roById) }));
   const live = items.filter(i => i.status !== 'declined');
   const step = cfg.steps.find(s => s.key === unit.step);
   const end = unit.status === 'active' ? now : new Date(unit.doneAt || unit.stepEnteredAt).getTime();
@@ -100,6 +120,8 @@ function present(unit, cars, roById, cfg) {
       id: car.id, year: car.year, make: car.make, model: car.model, trim: car.trim || '', stockNumber: car.stockNumber || '', vin: car.vin || '',
       mileage: car.mileage, color: car.exteriorColor || '', price: n(car.price), cost: n(car.cost), status: car.status, dateAdded: car.dateAdded,
       stockType: car.stockType === 'new' ? 'new' : 'used',
+      bodyStyle: car.bodyStyle || '', transmission: car.transmission || '', engine: car.engine || '', drivetrain: car.drivetrain || '',
+      interiorColor: car.interiorColor || '', photos: (car.photos || []).slice(0, 12), frontLineAt: car.frontLineAt || null,
       daysInStock: car.dateAdded ? Math.floor((now - new Date(car.dateAdded).getTime()) / 86400000) : null,
       photo: (car.photos || [])[0] || null
     } : null,
@@ -175,7 +197,12 @@ router.put('/recon/settings', allow('approveRecon'), wrap(async (req, res) => {
       return { key, label: text(s.label, 40) || key, goalHours: Math.max(0, Math.round(n(s.goalHours))) };
     }).filter(s => s.label);
     if (!steps.length) return { error: 'Keep at least one step.' };
-    const next = { goalDays: Math.max(1, Math.round(n(b.goalDays ?? before.goalDays) * 10) / 10), steps };
+    const catalog = {};
+    for (const ph of PHASES) {
+      const list = b.catalog && Array.isArray(b.catalog[ph]) ? b.catalog[ph] : before.catalog[ph];
+      catalog[ph] = [...new Set(list.map(x => text(x, 60)).filter(Boolean))].slice(0, 150);
+    }
+    const next = { goalDays: Math.max(1, Math.round(n(b.goalDays ?? before.goalDays) * 10) / 10), steps, catalog };
     await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, recon: next }]);
     await audit.updated(q, req, 'settings', { ...before, id: 'recon-settings' }, { ...next, id: 'recon-settings' }, 'Recon steps & goals');
     return { settings: next };
@@ -190,7 +217,7 @@ async function withUnit(req, res, fn) {
     if (!unit) return { status: 404, error: 'This car is not in recon.' };
     const settings = (await store.getDealership(q, req.dealershipId)).settings || {};
     const before = JSON.parse(JSON.stringify(unit));
-    const out = await fn(q, unit, reconSettings(settings));
+    const out = await fn(q, unit, reconSettings(settings), settings);
     if (out && out.error) return out;
     const saved = await store.save(q, 'recon_units', req.dealershipId, unit.id, unit);
     await audit.updated(q, req, 'recon_unit', before, saved, out && out.details);
@@ -283,75 +310,155 @@ router.post('/recon/units/:id/remove', allow('workRecon'), wrap(async (req, res)
   });
 }));
 
+// A new work item. Labor is priced at the store's internal labor rate
+// unless another rate is given.
+function newItem(req, b, settings, approve) {
+  const now = new Date().toISOString();
+  const rate = b.laborRate !== undefined && b.laborRate !== '' ? Math.max(0, round2(b.laborRate)) : n(((settings.service || {}).internalLaborRate) ?? 90);
+  const item = {
+    id: crypto.randomUUID(), category: phaseOf(b.category), description: text(b.description, 200),
+    info: text(b.info, 1000), onlineDescription: text(b.onlineDescription, 500),
+    partsPrice: Math.max(0, round2(b.partsPrice)), laborHours: Math.max(0, round2(b.laborHours)), laborRate: rate,
+    estimate: Math.max(0, round2(b.estimate)), actual: null, vendor: text(b.vendor, 60), status: approve ? 'approved' : 'proposed',
+    roId: null, roNumber: null, roJobId: null, costPosted: false,
+    addedBy: req.user.name, addedAt: now, approvedBy: approve ? req.user.name : null, approvedAt: approve ? now : null
+  };
+  item.estimate = itemTotal(item);
+  return item;
+}
+
 // Add a work item. A manager's own items can go straight to approved.
 router.post('/recon/units/:id/items', allow('workRecon'), wrap(async (req, res) => {
   const b = req.body || {};
-  await withUnit(req, res, async (q, unit) => {
-    const description = text(b.description, 200);
-    if (!description) return { error: 'Describe the work.' };
-    const approve = !!b.approve && auth.can(req.user, 'approveRecon');
-    const now = new Date().toISOString();
-    unit.items = [...(unit.items || []), {
-      id: crypto.randomUUID(), category: CATEGORIES.includes(b.category) ? b.category : 'other', description,
-      estimate: Math.max(0, round2(b.estimate)), actual: null, vendor: text(b.vendor, 60), status: approve ? 'approved' : 'proposed',
-      roId: null, roNumber: null, roJobId: null, costPosted: false,
-      addedBy: req.user.name, addedAt: now, approvedBy: approve ? req.user.name : null, approvedAt: approve ? now : null
-    }];
-    return { details: `Added: ${description}` };
+  await withUnit(req, res, async (q, unit, cfg, settings) => {
+    if (!text(b.description)) return { error: 'Describe the work.' };
+    unit.items = [...(unit.items || []), newItem(req, b, settings, !!b.approve && auth.can(req.user, 'approveRecon'))];
+    return { details: `Added: ${text(b.description, 200)}` };
   });
 }));
 
-// Change a work item: approve / decline (managers), edit, or mark done with
-// its actual cost -- which is added to the car's cost right then.
+// Add several work items at once (from the list), skipping any already on the car.
+router.post('/recon/units/:id/items/bulk', allow('workRecon'), wrap(async (req, res) => {
+  const list = Array.isArray((req.body || {}).items) ? req.body.items.slice(0, 100) : [];
+  await withUnit(req, res, async (q, unit, cfg, settings) => {
+    const have = new Set((unit.items || []).map(i => i.description.toLowerCase()));
+    const add = list.filter(x => text(x.description) && !have.has(text(x.description, 200).toLowerCase()));
+    if (!add.length) return { error: 'Pick at least one new work item.' };
+    unit.items = [...(unit.items || []), ...add.map(x => newItem(req, x, settings, false))];
+    return { details: `Added ${add.length} work items` };
+  });
+}));
+
+// Mark an item done with its actual cost, which is added to the car.
+async function finishItem(q, req, unit, item, actualIn) {
+  const actual = Math.max(0, round2(actualIn ?? itemTotal(item)));
+  item.actual = actual;
+  item.doneAt = new Date().toISOString();
+  if (actual > 0) {
+    const car = await store.get(q, 'cars', req.dealershipId, unit.carId, { forUpdate: true });
+    if (car) {
+      const next = { ...car, cost: round2(n(car.cost) + actual),
+        reconHistory: [...(car.reconHistory || []), { source: 'recon', description: item.description, vendor: item.vendor, amount: actual, date: item.doneAt }] };
+      await store.save(q, 'cars', req.dealershipId, car.id, next);
+      await audit.updated(q, req, 'car', car, next, `Recon: ${item.description}`);
+    }
+    item.costPosted = true;
+  }
+}
+
+// Change an item's status. Returns an error message or null.
+async function setStatus(q, req, unit, item, status, actual) {
+  if (status === item.status) return null;
+  if (!ITEM_STATUSES.includes(status)) return 'Pick a status.';
+  if (['approved', 'declined', 'proposed'].includes(status) && !auth.can(req.user, 'approveRecon')) return 'A manager approves or declines recon work.';
+  if (item.costPosted || item.roId) return item.roId ? `This work is on RO-${item.roNumber}; it finishes when the RO closes.` : 'This item is already done.';
+  if (status === 'done') await finishItem(q, req, unit, item, actual);
+  if (['approved', 'declined'].includes(status)) { item.approvedBy = req.user.name; item.approvedAt = new Date().toISOString(); }
+  if (status === 'proposed') { item.approvedBy = null; item.approvedAt = null; }
+  item.status = status;
+  return null;
+}
+
+// Change a work item: status (managers approve / decline), its notes and
+// online description, and -- until it's done or on an RO -- its pricing.
 router.put('/recon/units/:id/items/:itemId', allow('workRecon'), wrap(async (req, res) => {
   const b = req.body || {};
   await withUnit(req, res, async (q, unit) => {
     const item = (unit.items || []).find(i => i.id === req.params.itemId);
     if (!item) return { error: 'Work item not found.' };
-    if ('status' in b && b.status !== item.status) {
-      if (!ITEM_STATUSES.includes(b.status)) return { error: 'Pick a status.' };
-      if (['approved', 'declined'].includes(b.status) && !auth.can(req.user, 'approveRecon')) {
-        return { status: 403, error: 'A manager approves or declines recon work.' };
-      }
-      if (item.costPosted || item.roId) return { error: item.roId ? `This work is on RO-${item.roNumber}; it finishes when the RO closes.` : 'This item is already done.' };
-      if (b.status === 'done') {
-        const actual = Math.max(0, round2(b.actual ?? item.estimate));
-        item.actual = actual;
-        item.doneAt = new Date().toISOString();
-        if (actual > 0) {
-          const car = await store.get(q, 'cars', req.dealershipId, unit.carId, { forUpdate: true });
-          if (car) {
-            const next = { ...car, cost: round2(n(car.cost) + actual),
-              reconHistory: [...(car.reconHistory || []), { source: 'recon', description: item.description, vendor: item.vendor, amount: actual, date: item.doneAt }] };
-            await store.save(q, 'cars', req.dealershipId, car.id, next);
-            await audit.updated(q, req, 'car', car, next, `Recon: ${item.description}`);
-          }
-          item.costPosted = true;
-        }
-      }
-      if (['approved', 'declined'].includes(b.status)) { item.approvedBy = req.user.name; item.approvedAt = new Date().toISOString(); }
-      item.status = b.status;
+    item.category = phaseOf(item.category);
+    if ('status' in b) {
+      const err = await setStatus(q, req, unit, item, b.status, b.actual);
+      if (err) return { status: err.startsWith('A manager') ? 403 : 400, error: err };
     }
+    if ('info' in b) item.info = text(b.info, 1000);
+    if ('onlineDescription' in b) item.onlineDescription = text(b.onlineDescription, 500);
     if (!item.costPosted && !item.roId) {
       if ('description' in b) item.description = text(b.description, 200) || item.description;
-      if ('estimate' in b && item.status === 'proposed') item.estimate = Math.max(0, round2(b.estimate));
       if ('vendor' in b) item.vendor = text(b.vendor, 60);
-      if ('category' in b && CATEGORIES.includes(b.category)) item.category = b.category;
+      if ('category' in b) item.category = phaseOf(b.category);
+      for (const f of ['partsPrice', 'laborHours', 'laborRate']) if (f in b) item[f] = Math.max(0, round2(b[f]));
+      if ('estimate' in b && !n(item.partsPrice) && !n(item.laborHours)) item.estimate = Math.max(0, round2(b.estimate));
+      item.estimate = itemTotal(item);
     }
     return { details: `${item.description}: ${item.status}` };
   });
 }));
 
-// Send approved mechanical and tire work to the service department as one
+// Change the status of several items at once.
+router.post('/recon/units/:id/items/status', allow('workRecon'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const ids = new Set(Array.isArray(b.ids) ? b.ids : []);
+  await withUnit(req, res, async (q, unit) => {
+    const items = (unit.items || []).filter(i => ids.has(i.id));
+    if (!items.length) return { error: 'Select work items first.' };
+    let changed = 0;
+    const skipped = [];
+    for (const item of items) {
+      const err = await setStatus(q, req, unit, item, b.status);
+      if (err && err.startsWith('A manager')) return { status: 403, error: err };
+      if (err) skipped.push(item.description); else changed++;
+    }
+    return { details: `${changed} set to ${b.status}${skipped.length ? `; skipped ${skipped.join(', ')}` : ''}` };
+  });
+}));
+
+router.delete('/recon/units/:id/items/:itemId', allow('workRecon'), wrap(async (req, res) => {
+  await withUnit(req, res, async (q, unit) => {
+    const item = (unit.items || []).find(i => i.id === req.params.itemId);
+    if (!item) return { error: 'Work item not found.' };
+    if (item.costPosted || item.roId) return { error: 'Work that is done or on an RO stays on the car.' };
+    unit.items = unit.items.filter(i => i !== item);
+    return { details: `Removed: ${item.description}` };
+  });
+}));
+
+// The store's own fields on the car's recon (Other 1-6, inspection date and RO #).
+router.put('/recon/units/:id/info', allow('workRecon'), wrap(async (req, res) => {
+  const b = req.body || {};
+  await withUnit(req, res, async (q, unit) => {
+    unit.fields = { ...(unit.fields || {}) };
+    for (const f of STORE_FIELDS) if (b.fields && f in b.fields) unit.fields[f] = text(b.fields[f], 120);
+    if ('inspectionDate' in b) unit.inspectionDate = b.inspectionDate ? new Date(b.inspectionDate).toISOString() : null;
+    if ('inspectionRo' in b) unit.inspectionRo = text(b.inspectionRo, 30);
+    return { details: 'Details' };
+  });
+}));
+
+// Send approved mechanical work to the service department as one
 // internal RO on the car.
 router.post('/recon/units/:id/send-to-service', allow('workRecon'), wrap(async (req, res) => {
   await withUnit(req, res, async (q, unit) => {
-    const items = (unit.items || []).filter(i => i.status === 'approved' && TO_SERVICE.includes(i.category) && !i.roId);
-    if (!items.length) return { error: 'Approve mechanical or tire work first.' };
+    const items = (unit.items || []).filter(i => i.status === 'approved' && TO_SERVICE.includes(phaseOf(i.category)) && !i.roId);
+    if (!items.length) return { error: 'Approve mechanical work first.' };
     if (!auth.can(req.user, 'writeRepairOrders')) return { status: 403, error: 'A service advisor or manager opens the RO.' };
     const made = await require('./service').createRo(q, req, {
       carId: unit.carId, notes: 'From recon',
-      jobs: items.map(i => ({ concern: `Recon: ${i.description}`, payType: 'internal' }))
+      jobs: items.map(i => ({
+        concern: `Recon: ${i.description}${i.info ? ` -- ${i.info}` : ''}`, payType: 'internal',
+        hours: n(i.laborHours) || undefined, rate: n(i.laborHours) ? n(i.laborRate) : undefined,
+        parts: n(i.partsPrice) ? [{ description: `${i.description} parts`, qty: 1, cost: 0, price: n(i.partsPrice) }] : []
+      }))
     });
     if (made.error) return { error: made.error };
     items.forEach((i, k) => { i.roId = made.ro.id; i.roNumber = made.ro.roNumber; i.roJobId = made.ro.jobs[k].id; });

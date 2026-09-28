@@ -107,6 +107,32 @@ test('new cars go through recon too, starting at a "new" step; wholesale is a wa
   assert.ok((await as(manager, 'GET', '/recon/board')).body.units.some(x => x.id === u.id && x.step === 'wholesale'), 'shows under Wholesale');
 });
 
+test('work items like the shop uses them: pick from the list, price parts and labor, bulk status, store fields', async () => {
+  const c = (await as(manager, 'POST', '/cars', { year: 2020, make: 'Audi', model: 'Q5', price: 30000, cost: 25000, mileage: 40000, stockType: 'used' })).body;
+  let u = (await as(advisor, 'POST', '/recon/units', { carId: c.id })).body;
+  const board = (await as(advisor, 'GET', '/recon/board')).body;
+  assert.ok(board.settings.catalog.mechanical.includes('Oil Change'), 'a list of work items by phase');
+  u = (await as(advisor, 'POST', `/recon/units/${u.id}/items/bulk`, { items: [{ description: 'Oil Change', category: 'mechanical' }, { description: 'Used Car Detail', category: 'detail' }, { description: 'PDR (Dent Repair)', category: 'cosmetic' }] })).body;
+  assert.strictEqual(u.items.length, 3);
+  u = (await as(advisor, 'POST', `/recon/units/${u.id}/items/bulk`, { items: [{ description: 'oil change', category: 'mechanical' }] }));
+  assert.strictEqual(u.status, 400, 'items already on the car are skipped');
+  let unitNow = (await as(advisor, 'GET', '/recon/board')).body.units.find(x => x.car.id === c.id);
+  const oil = unitNow.items[0];
+  unitNow = (await as(advisor, 'PUT', `/recon/units/${unitNow.id}/items/${oil.id}`, { partsPrice: 60, laborHours: 0.5, laborRate: 100, info: 'Synthetic', onlineDescription: 'Fresh oil change' })).body;
+  assert.strictEqual(unitNow.items[0].estimate, 110, 'parts + hours x rate');
+  assert.strictEqual(unitNow.items[0].info, 'Synthetic');
+  assert.strictEqual((await as(advisor, 'POST', `/recon/units/${unitNow.id}/items/status`, { ids: unitNow.items.map(i => i.id), status: 'approved' })).status, 403, 'managers approve');
+  unitNow = (await as(manager, 'POST', `/recon/units/${unitNow.id}/items/status`, { ids: unitNow.items.slice(0, 2).map(i => i.id), status: 'approved' })).body;
+  assert.deepStrictEqual(unitNow.items.map(i => i.status), ['approved', 'approved', 'proposed']);
+  unitNow = (await as(advisor, 'DELETE', `/recon/units/${unitNow.id}/items/${unitNow.items[2].id}`)).body;
+  assert.strictEqual(unitNow.items.length, 2);
+  const sent = (await as(advisor, 'POST', `/recon/units/${unitNow.id}/send-to-service`)).body;
+  const ro = (await as(advisor, 'GET', `/service/ros/${sent.items[0].roId}`)).body;
+  assert.deepStrictEqual([ro.jobs[0].hours, ro.jobs[0].rate, ro.jobs[0].parts[0].price], [0.5, 100, 60], 'the RO gets the hours, rate, and parts');
+  unitNow = (await as(advisor, 'PUT', `/recon/units/${unitNow.id}/info`, { fields: { other1: 'Lot B' }, inspectionDate: '2031-01-02T10:00:00Z', inspectionRo: '1690006' })).body;
+  assert.deepStrictEqual([unitNow.fields.other1, unitNow.inspectionRo], ['Lot B', '1690006']);
+});
+
 test('steps and goals are the managers\' to set', async () => {
   assert.strictEqual((await as(tech, 'PUT', '/recon/settings', { goalDays: 3 })).status, 403);
   const s = (await as(manager, 'PUT', '/recon/settings', { goalDays: 4, steps: [{ label: 'Inspection', goalHours: 12 }, { label: 'Detail', goalHours: 24 }] })).body;
