@@ -20,6 +20,7 @@ const alerts = require('./alerts');
 const reports = require('./reports');
 const dashboard = require('./dashboard');
 const service = require('./service');
+const parts = require('./parts');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -93,6 +94,7 @@ app.use('/api', alerts.router);
 app.use('/api', reports.router);
 app.use('/api', dashboard.router);
 app.use('/api', service.router);
+app.use('/api', parts.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;

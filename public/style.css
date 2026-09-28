@@ -2182,3 +2182,27 @@ button.gb-value:hover { color: var(--blue); text-decoration: underline; }
   .appt-actions { justify-content: flex-start; width: 100%; }
   .form-row-3 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Parts ---------- */
+.ro-part-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ro-part-find { flex: 1; min-width: 220px; max-width: 420px; }
+.ro-card .part-picker input { margin: 0; }
+.tk-find { margin-bottom: 10px; max-width: 480px; }
+.parts-table tbody tr { cursor: pointer; }
+.parts-table tbody tr:hover td { background: var(--highlight-bg); }
+.pm-stock-line { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+.pm-stock-line strong { color: var(--heading); font-size: 16px; }
+.pm-actions { display: grid; gap: 8px; margin-bottom: 14px; }
+.pm-action { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface-alt); border-radius: 8px; padding: 8px 10px; }
+.pm-action strong { min-width: 110px; font-size: 13px; }
+.modal-content .pm-action input { width: auto; flex: 1; min-width: 90px; margin: 0; }
+.pm-moves { font-size: 12px; }
+.modal-content label.pm-inactive { align-self: end; margin-bottom: 18px; }
+.so-status { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 10px; background: var(--surface-alt); color: var(--text-secondary); white-space: nowrap; }
+.so-ordered { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
+.so-received, .so-notified { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.so-cancelled { text-decoration: line-through; }
+.so-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 700px) { .pm-action strong { width: 100%; } }
+#reorderSection { margin-top: 28px; }
+#pmStock { margin-top: 18px; }

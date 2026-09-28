@@ -55,7 +55,11 @@ const PERMISSIONS = {
   // see the shop and clock their own jobs; sales managers can follow recon.
   viewService: ['admin', 'general_manager', 'service_manager', 'service_advisor', 'technician', 'parts_manager', 'sales_manager'],
   writeRepairOrders: ['admin', 'general_manager', 'service_manager', 'service_advisor'],
-  editServiceSettings: ['admin', 'general_manager', 'service_manager'] // labor rates, shop tax, and tech pay
+  editServiceSettings: ['admin', 'general_manager', 'service_manager'], // labor rates, shop tax, and tech pay
+  // Parts: the service side can look parts up and request special orders;
+  // the parts department runs the stock, counter sales, and ordering.
+  viewParts: ['admin', 'general_manager', 'parts_manager', 'service_manager', 'service_advisor', 'technician'],
+  writeParts: ['admin', 'general_manager', 'parts_manager', 'service_manager']
 };
 
 function can(user, permission) {
