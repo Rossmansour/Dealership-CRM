@@ -150,6 +150,37 @@ test('every car that finished recon stays on the board, however long ago', async
   assert.ok(board.units.some(x => x.id === u.id && x.status === 'done'), 'a car finished years ago still shows under Frontline Ready');
 });
 
+test('a trade is stocked in and put in recon when its deal is delivered', async () => {
+  const lead = (await as(manager, 'POST', '/leads', { name: 'Trade Tina', source: 'walk-in' })).body;
+  const sale = (await as(manager, 'POST', '/cars', { year: 2024, make: 'Toyota', model: 'RAV4', price: 33000, cost: 29000, mileage: 8000, stockType: 'used' })).body;
+  const deal = (await as(manager, 'POST', '/deals', { leadId: lead.id, carId: sale.id })).body;
+  await as(manager, 'PUT', `/deals/${deal.id}`, { hasTrade: true, tradeYear: 2015, tradeMake: 'Nissan', tradeModel: 'Altima', tradeVin: '1N4AL3AP5FC123456', tradeMileage: 110000, tradeInValue: 6000 });
+  const traded = () => as(manager, 'GET', '/cars').then(r => r.body.filter(c => c.sourceDealId === deal.id));
+  assert.strictEqual((await traded()).length, 0, 'not while the deal is working');
+  const done = (await as(manager, 'PUT', `/deals/${deal.id}`, { status: 'delivered' })).body;
+  const [tradeCar] = await traded();
+  assert.ok(tradeCar, 'the trade is in inventory');
+  assert.deepStrictEqual([tradeCar.stockType, tradeCar.cost, tradeCar.stockNumber, tradeCar.make], ['used', 6000, `T${deal.dealNumber}`, 'Nissan']);
+  assert.strictEqual(done.tradeCarId, tradeCar.id);
+  await as(manager, 'PUT', `/deals/${deal.id}`, { status: 'finalized' });
+  assert.strictEqual((await traded()).length, 1, 'only once');
+  const u = (await as(manager, 'GET', '/recon/board')).body.units.find(x => x.carId === tradeCar.id);
+  assert.strictEqual(u.step, 'purchase_trade');
+  const panel = (await as(manager, 'GET', `/recon/units/${u.id}/appraisal`)).body;
+  assert.strictEqual(panel.appraisal, null);
+  assert.strictEqual(panel.market.ready, true);
+  assert.strictEqual((await as(sales, 'GET', `/recon/units/${u.id}/appraisal`)).status, 403);
+});
+
+test('the appraisal panel shows what was paid and planned', async () => {
+  const a = (await as(manager, 'POST', '/appraisals', { year: 2019, make: 'Subaru', model: 'Outback', mileage: 60000, offer: 15000, targetRetail: 21000, targetGross: 3000, recon: [{ description: 'Tires', cost: 700 }, { description: 'Detail', cost: 200 }] })).body;
+  const got = (await as(manager, 'POST', `/appraisals/${a.id}/acquire`, { acquiredFor: 14800, stockNumber: 'U555' })).body;
+  const u = (await as(manager, 'GET', '/recon/board')).body.units.find(x => x.carId === got.car.id);
+  assert.ok(u, 'an acquired appraisal goes into recon');
+  const panel = (await as(manager, 'GET', `/recon/units/${u.id}/appraisal`)).body;
+  assert.deepStrictEqual([panel.appraisal.acv, panel.appraisal.plannedRecon, panel.appraisal.targetRetail, panel.appraisal.targetGross], [14800, 900, 21000, 3000]);
+});
+
 test('steps and goals are the managers\' to set', async () => {
   assert.strictEqual((await as(tech, 'PUT', '/recon/settings', { goalDays: 3 })).status, 403);
   const s = (await as(manager, 'PUT', '/recon/settings', { goalDays: 4, steps: [{ label: 'Inspection', goalHours: 12 }, { label: 'Detail', goalHours: 24 }] })).body;

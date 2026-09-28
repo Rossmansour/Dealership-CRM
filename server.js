@@ -117,11 +117,11 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // the activity routes, so it (and its audit trail) can't be rewritten by
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
-  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId'],
+  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
-  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'deliveredAt', 'finalizedAt'],
+  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
@@ -1895,6 +1895,41 @@ async function syncCarStatusToDeal(q, req, deal) {
   await audit.updated(q, req, 'car', car, updated, `Automatic, from deal D-${deal.dealNumber}`);
 }
 
+// When a deal with a trade is delivered, the trade is stocked in as a used
+// car on its own: cost is the appraised ACV (or the trade allowance), stock
+// number T + the deal number, and it goes straight into recon at
+// Purchase / Trade. The trade's appraisal (if any) is marked acquired.
+async function stockInTrade(q, req, deal) {
+  if (!['delivered', 'closed', 'finalized'].includes(deal.status) || !deal.hasTrade || deal.tradeCarId) return deal;
+  const appraisal = (await store.list(q, 'appraisals', req.dealershipId)).find(a => a.dealId === deal.id && a.status !== 'lost');
+  const link = carId => store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, tradeCarId: carId });
+  if (appraisal && appraisal.carId) return link(appraisal.carId);
+  const src = appraisal && appraisal.make ? appraisal
+    : { year: deal.tradeYear, make: deal.tradeMake, model: deal.tradeModel, vin: deal.tradeVin, mileage: deal.tradeMileage };
+  if (!src.year || !src.make || !src.model) return deal; // not enough to stock it in
+  const vin = vinDecoder.normalizeVin(src.vin || deal.tradeVin);
+  const cars = await store.list(q, 'cars', req.dealershipId);
+  const already = vin && cars.find(c => c.vin === vin && c.status !== 'sold');
+  if (already) return link(already.id);
+  const acv = Number(appraisal && appraisal.offer) || Number(deal.tradeInValue) || 0;
+  const car = {
+    ...buildCar({ ...src, vin, stockType: 'used', stockNumber: `T${deal.dealNumber}`, cost: acv,
+      price: Number(appraisal && appraisal.targetRetail) || 0, status: 'available' }),
+    equipment: (appraisal && appraisal.equipment) || [],
+    sourceAppraisalId: appraisal ? appraisal.id : null,
+    sourceDealId: deal.id
+  };
+  await store.insert(q, 'cars', req.dealershipId, car);
+  await audit.created(q, req, 'car', car, `Trade stocked in from deal D-${deal.dealNumber}`);
+  if (appraisal) {
+    await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
+      ...appraisal, status: 'acquired', acquiredFor: acv, acquiredAt: new Date().toISOString(), carId: car.id, closedAt: new Date().toISOString()
+    });
+  }
+  await recon.addCar(q, req, car);
+  return link(car.id);
+}
+
 app.put('/api/deals/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
@@ -1924,7 +1959,7 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });
     await audit.updated(q, req, 'deal', deal, saved);
     await syncCarStatusToDeal(q, req, saved);
-    return saved;
+    return stockInTrade(q, req, saved);
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
   res.json(updated);
@@ -2376,17 +2411,15 @@ function similarModel(a, b) {
   return x === y || (Math.min(x.length, y.length) >= 3 && (x.startsWith(y) || y.startsWith(x)));
 }
 
-app.get('/api/appraisals/:id/retail-performance', wrap(async (req, res) => {
-  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
-  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
-  const { year, make, model } = appraisal;
-  if (!make || !model) return res.json({ ready: false });
-
-  const cars = (await store.list(store.pool, 'cars', req.dealershipId)).filter(c =>
-    c.id !== appraisal.carId &&
+// How cars like this one have done here: sold (price, gross, days to sell)
+// and in stock now. Used by appraisals and by recon's appraisal panel.
+async function retailPerformance(q, dealershipId, { year, make, model }, excludeCarId) {
+  if (!make || !model) return { ready: false };
+  const cars = (await store.list(q, 'cars', dealershipId)).filter(c =>
+    c.id !== excludeCarId &&
     squashName(c.make) === squashName(make) && similarModel(c.model, model) &&
     (!year || !c.year || Math.abs(Number(c.year) - Number(year)) <= 2));
-  const deals = await store.list(store.pool, 'deals', req.dealershipId);
+  const deals = await store.list(q, 'deals', dealershipId);
   const days = (from, to) => Math.max(0, Math.round((new Date(to) - new Date(from)) / 86400000));
   const avg = list => list.length ? Math.round(list.reduce((s, n) => s + n, 0) / list.length) : null;
 
@@ -2403,7 +2436,7 @@ app.get('/api/appraisals/:id/retail-performance', wrap(async (req, res) => {
   }).sort((a, b) => String(b.dateSold).localeCompare(String(a.dateSold)));
   const inStock = cars.filter(c => c.status !== 'sold');
 
-  res.json({
+  return {
     ready: true,
     matching: `${year ? `${Number(year) - 2}-${Number(year) + 2} ` : ''}${make} ${model}`,
     sold: {
@@ -2418,6 +2451,33 @@ app.get('/api/appraisals/:id/retail-performance', wrap(async (req, res) => {
       avgAskingPrice: avg(inStock.map(c => Number(c.price) || 0)),
       avgDaysInStock: avg(inStock.filter(c => c.dateAdded).map(c => days(c.dateAdded, new Date())))
     }
+  };
+}
+
+app.get('/api/appraisals/:id/retail-performance', wrap(async (req, res) => {
+  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
+  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
+  res.json(await retailPerformance(store.pool, req.dealershipId, appraisal, appraisal.carId));
+}));
+
+// Recon's appraisal panel: the car's appraisal (what the store paid, the
+// recon it planned on, the retail it aimed for) and how cars like it have
+// sold, so the used-car manager can weigh each work item against the gross.
+app.get('/api/recon/units/:id/appraisal', allow('viewRecon'), wrap(async (req, res) => {
+  const unit = await store.get(store.pool, 'recon_units', req.dealershipId, req.params.id);
+  if (!unit) return res.status(404).json({ error: 'This car is not in recon.' });
+  const car = await store.get(store.pool, 'cars', req.dealershipId, unit.carId);
+  if (!car) return res.status(404).json({ error: 'Car not found' });
+  const appraisals = await store.list(store.pool, 'appraisals', req.dealershipId);
+  const a = appraisals.find(x => x.id === car.sourceAppraisalId) || appraisals.find(x => x.carId === car.id) || null;
+  res.json({
+    appraisal: a && {
+      id: a.id, appraisalNumber: a.appraisalNumber, source: a.source, condition: a.condition || '',
+      acv: a.acquiredFor ?? a.offer ?? null, offer: a.offer ?? null, targetRetail: a.targetRetail ?? null, targetGross: a.targetGross ?? null,
+      otherCosts: Number(a.otherCosts) || 0, plannedRecon: (a.recon || []).reduce((s, r) => s + (Number(r.cost) || 0), 0),
+      reconLines: (a.recon || []).slice(0, 20), appraisedBy: a.appraisedBy ? a.appraisedBy.name : '', notes: String(a.notes || '').slice(0, 500)
+    },
+    market: await retailPerformance(store.pool, req.dealershipId, car, car.id)
   });
 }));
 
@@ -2448,6 +2508,7 @@ app.post('/api/appraisals/:id/acquire', allow('editInventory'), wrap(async (req,
     };
     await store.insert(q, 'cars', req.dealershipId, car);
     await audit.created(q, req, 'car', car, `From appraisal A-${appraisal.appraisalNumber}`);
+    await recon.addCar(q, req, car);
 
     const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
       ...appraisal, status: 'acquired', acquiredFor: Number(acquiredFor), acquiredAt: new Date().toISOString(),
