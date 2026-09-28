@@ -1,4 +1,6 @@
-# Dealership Inventory & CRM
+# DealerDomus
+
+*The all-in-one dealer management system: CRM, inventory, deals, and dashboards in one place.*
 
 A lightweight web app for managing a small used-car dealership's inventory and customer leads — built from firsthand experience running a car business.
 

@@ -2902,7 +2902,7 @@ if (require.main === module) {
             ? `Car photos: stored in Cloudinary (${photos.cloudinaryConfig().cloudName})`
             : 'Car photos: stored on this server\'s disk (set CLOUDINARY_URL to keep them across redeploys)');
         }
-        console.log(`Car CRM server running at http://localhost:${PORT}`);
+        console.log(`DealerDomus running at http://localhost:${PORT}`);
       });
       // Time-based alerts (tasks coming due, leads nobody has contacted).
       setInterval(() => runAlertSweep().catch(err => console.error('Alert check failed:', err.message)), 60 * 1000);
