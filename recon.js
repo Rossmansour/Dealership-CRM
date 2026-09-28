@@ -55,7 +55,7 @@ function defaultReconSettings() {
   return {
     goalDays: 5,
     steps: [
-      step('new_import', 'New - Import', 24), step('new_transport', 'New - In Transport', 120),
+      step('new_import', 'New - Import', 24), step('new_transport', 'New - In Transport', 120), step('new_pdi', 'New - PDI', 24),
       step('purchase_trade', 'Purchase / Trade', 24), step('used_transport', 'Used - In Transport', 120),
       step('trade_not_cleared', 'Trade Not Cleared', 48), step('loaner', 'Loaner', 0),
       step('write_up', 'Write Up', 8), step('detail_ready', 'Detail Ready', 24), step('detail_complete', 'Detail Complete', 8),
@@ -69,6 +69,11 @@ function defaultReconSettings() {
 // The first version's steps. A store still on exactly that list (never
 // changed by hand) moves to the current defaults automatically.
 const FIRST_VERSION_STEPS = ['inspect', 'approve', 'mechanical', 'body', 'detail', 'photos'];
+// The second version's steps (before New - PDI). A store still on exactly
+// that list gets New - PDI added after New - In Transport.
+const SECOND_VERSION_KEYS = ['new_import', 'new_transport', 'purchase_trade', 'used_transport', 'trade_not_cleared', 'loaner', 'write_up',
+  'detail_ready', 'detail_complete', 'smog', 'insp_ready', 'parts_estimate', 'ucm_approval', 'approved_declined', 'order_parts',
+  'parts_hold', 'repair', 'offsite_sublet', 'vendor'];
 
 function reconSettings(settings) {
   const r = (settings && settings.recon) || {};
@@ -79,15 +84,51 @@ function reconSettings(settings) {
   for (const ph of PHASES) catalog[ph] = Array.isArray(r.catalog && r.catalog[ph]) ? r.catalog[ph] : DEFAULT_CATALOG[ph];
   // An earlier version cut saved lists off at 12 steps. A list that is exactly
   // the first 12 defaults gets the rest back.
-  const first12 = d.steps.slice(0, 12).map(s => s.key).join('|');
-  if (steps.length === 12 && steps.map(s => s.key).join('|') === first12) steps = [...steps, ...d.steps.slice(12)];
+  const keys = steps.map(s => s.key).join('|');
+  if (keys === SECOND_VERSION_KEYS.slice(0, 12).join('|')) steps = d.steps;
+  else if (keys === SECOND_VERSION_KEYS.join('|')) {
+    const at = steps.findIndex(s => s.key === 'new_transport') + 1;
+    steps = [...steps.slice(0, at), d.steps.find(s => s.key === 'new_pdi'), ...steps.slice(at)];
+  }
   return { goalDays: r.goalDays > 0 ? n(r.goalDays) : d.goalDays, steps, catalog };
 }
 const stepLabel = (cfg, key) => (key === READY ? 'Frontline Ready' : key === WHOLESALE ? 'Wholesale' : (cfg.steps.find(s => s.key === key) || {}).label || key);
-// Where a car starts: new cars at the first "new" step, everything else at Purchase / Trade (or the first step).
+// Where a car starts: new cars at New - PDI (or the first "new" step), used
+// cars at Purchase / Trade (or the first step).
 function firstStep(cfg, car) {
-  const isNew = car.stockType === 'new';
-  return cfg.steps.find(s => (isNew ? /new/i.test(s.key) : s.key === 'purchase_trade')) || cfg.steps[0];
+  if (car.stockType === 'new') return cfg.steps.find(s => s.key === 'new_pdi') || cfg.steps.find(s => /new/i.test(s.key)) || cfg.steps[0];
+  return cfg.steps.find(s => s.key === 'purchase_trade') || cfg.steps[0];
+}
+
+function newUnit(car, step, by) {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(), carId: car.id, stockNumber: car.stockNumber || '', vehicleLabel: [car.year, car.make, car.model].filter(Boolean).join(' '),
+    status: 'active', step: step.key, stepEnteredAt: now, startedAt: now, doneAt: null,
+    history: [{ step: step.key, label: step.label, enteredAt: now, leftAt: null, by: by.name }],
+    items: [], notes: [], startedBy: by
+  };
+}
+
+// Every car added to inventory goes straight into recon at its first step.
+async function addCar(q, req, car) {
+  if (!car || car.status === 'sold') return null;
+  const cfg = reconSettings((await store.getDealership(q, req.dealershipId)).settings);
+  const unit = newUnit(car, firstStep(cfg, car), { id: req.user.id, name: req.user.name });
+  await store.insert(q, 'recon_units', req.dealershipId, unit);
+  await audit.created(q, req, 'recon_unit', unit);
+  return unit;
+}
+
+// Cars in stock that have never been in recon (added before this, or
+// brought in some other way) are put in now.
+async function catchUp(req) {
+  await store.tx(async q => {
+    await q.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`recon-catch-up:${req.dealershipId}`]);
+    const [cars, units] = await Promise.all([store.list(q, 'cars', req.dealershipId), store.list(q, 'recon_units', req.dealershipId)]);
+    const seen = new Set(units.map(u => u.carId));
+    for (const car of cars) if (car.status !== 'sold' && !seen.has(car.id)) await addCar(q, req, car);
+  });
 }
 
 // ---------- Work items and money ----------
@@ -156,6 +197,7 @@ const allow = auth.requirePermission;
 
 // Everything the recon screen shows.
 router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
+  await catchUp(req);
   const { units, cars, ros, settings } = await load(store.pool, req.dealershipId);
   const cfg = reconSettings(settings);
   const carById = new Map(cars.map(c => [c.id, c]));
@@ -163,17 +205,10 @@ router.get('/recon/board', allow('viewRecon'), wrap(async (req, res) => {
   // Every car in recon, every car that finished (Frontline Ready), and every
   // car wholesaled out of it. (Cars taken out for other reasons are left off.)
   const shown = units.filter(u => u.status === 'active' || u.status === 'done' || (u.status === 'removed' && u.step === WHOLESALE));
-  const inRecon = new Set(units.filter(u => u.status !== 'removed').map(u => u.carId));
-  const notStarted = cars.filter(c => c.status !== 'sold' && !inRecon.has(c.id)).map(c => ({
-    id: c.id, year: c.year, make: c.make, model: c.model, trim: c.trim || '', stockNumber: c.stockNumber || '', mileage: c.mileage,
-    stockType: c.stockType === 'new' ? 'new' : 'used', vin: c.vin || '',
-    dateAdded: c.dateAdded, price: n(c.price)
-  }));
   res.json({
     settings: cfg,
     can: { work: auth.can(req.user, 'workRecon'), approve: auth.can(req.user, 'approveRecon') },
-    units: shown.map(u => present(u, carById, roById, cfg)),
-    notStarted
+    units: shown.map(u => present(u, carById, roById, cfg))
   });
 }));
 
@@ -238,14 +273,8 @@ router.post('/recon/units', allow('workRecon'), wrap(async (req, res) => {
     const existing = (await store.list(q, 'recon_units', req.dealershipId)).find(u => u.carId === carId && u.status === 'active');
     if (existing) return { error: 'This car is already in recon.' };
     const cfg = reconSettings((await store.getDealership(q, req.dealershipId)).settings);
-    const now = new Date().toISOString();
     const first = cfg.steps.find(s => s.key === (req.body || {}).step) || firstStep(cfg, car);
-    const unit = {
-      id: crypto.randomUUID(), carId, stockNumber: car.stockNumber || '', vehicleLabel: [car.year, car.make, car.model].filter(Boolean).join(' '),
-      status: 'active', step: first.key, stepEnteredAt: now, startedAt: now, doneAt: null,
-      history: [{ step: first.key, label: first.label, enteredAt: now, leftAt: null, by: req.user.name }],
-      items: [], notes: [], startedBy: { id: req.user.id, name: req.user.name }
-    };
+    const unit = newUnit(car, first, { id: req.user.id, name: req.user.name });
     await store.insert(q, 'recon_units', req.dealershipId, unit);
     await audit.created(q, req, 'recon_unit', unit);
     return { unit };
@@ -475,4 +504,4 @@ router.post('/recon/units/:id/notes', allow('workRecon'), wrap(async (req, res) 
   });
 }));
 
-module.exports = { router, reconSettings, defaultReconSettings, present, READY, WHOLESALE };
+module.exports = { router, reconSettings, defaultReconSettings, present, addCar, READY, WHOLESALE };
