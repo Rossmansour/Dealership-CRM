@@ -2592,44 +2592,6 @@ document.getElementById('printAppraisalBtn').addEventListener('click', () => win
 // ----- Starting an appraisal from a customer or a deal's trade-in -----
 
 
-// The deal page's trade-in section: start an appraisal from the trade
-// details, or show the linked one with a button to use its offer.
-function renderDealTradeAppraisal(deal) {
-  const el = document.getElementById('dealTradeAppraisal');
-  const linked = appraisals.filter(a => a.dealId === deal.id).slice(-1)[0];
-  if (!linked) {
-    el.innerHTML = html`<button type="button" class="btn-secondary btn-small" onclick="appraiseDealTrade()">Appraise this trade</button>`;
-    return;
-  }
-  el.innerHTML = html`
-    <div class="trade-appraisal-linked">
-      <span>Appraisal <button type="button" class="link-btn" onclick="openAppraisal(${js(linked.id)})">A-${linked.appraisalNumber}</button>
-        · ${APPRAISAL_STATUS_LABELS[linked.status]} · offer ${money(linked.offer)}</span>
-      ${linked.offer ? html`<button type="button" class="btn-secondary btn-small" onclick="useAppraisalOffer(${js(linked.id)})">Use offer as trade value</button>` : ''}
-    </div>`;
-}
-
-window.appraiseDealTrade = function() {
-  const deal = deals.find(d => d.id === currentWorkspaceDealId);
-  if (!deal) return;
-  startAppraisal({
-    dealId: deal.id,
-    leadId: deal.leadId || null,
-    vin: cleanVin(document.getElementById('dealTradeVin').value),
-    year: document.getElementById('dealTradeYear').value,
-    make: document.getElementById('dealTradeMake').value,
-    model: document.getElementById('dealTradeModel').value,
-    mileage: document.getElementById('dealTradeMileage').value
-  });
-};
-
-window.useAppraisalOffer = function(appraisalId) {
-  const a = appraisals.find(x => x.id === appraisalId);
-  if (!a || !a.offer) return;
-  document.getElementById('dealTradeInValue').value = a.offer;
-  document.getElementById('dealTradeInValue').dispatchEvent(new Event('input', { bubbles: true }));
-};
-
 window.openAppraisalFromCar = function(appraisalId) {
   document.getElementById('carModal').classList.remove('active');
   openAppraisal(appraisalId);
@@ -2719,16 +2681,6 @@ document.getElementById('carVin').addEventListener('input', (e) => {
   const isNewCar = !document.getElementById('carId').value;
   if (isNewCar && VIN_PATTERN.test(cleanVin(e.target.value))) decodeCarVin();
 });
-
-document.getElementById('decodeTradeVinBtn').addEventListener('click', () => decodeVinInto({
-  inputId: 'dealTradeVin',
-  statusId: 'dealTradeVinStatus',
-  fill: data => {
-    if (data.year) document.getElementById('dealTradeYear').value = data.year;
-    if (data.make) document.getElementById('dealTradeMake').value = data.make;
-    if (data.model) document.getElementById('dealTradeModel').value = [data.model, data.trim].filter(Boolean).join(' ');
-  }
-}));
 
 // ---------- Car modal ----------
 
@@ -3077,8 +3029,6 @@ function attachSearchPicker(select, kind) {
 }
 
 attachSearchPicker(document.getElementById('leadCarId'), 'car');
-attachSearchPicker(document.getElementById('dealAssignedLeadId'), 'lead');
-attachSearchPicker(document.getElementById('dealAssignedCarId'), 'car');
 attachSearchPicker(document.getElementById('apLeadId'), 'lead');
 
 // ---------- Lead modal ----------
@@ -4551,77 +4501,9 @@ window.openDealWorkspace = function(dealId) {
   document.getElementById('workspaceTitle').textContent = `Deal #D-${deal.dealNumber}`;
   document.getElementById('dealStatusSelect').value = deal.status;
   document.getElementById('dealTypeSelect').value = deal.dealType || 'retail';
-  document.getElementById('workingDealId').value = deal.id;
 
-  // Customer/Vehicle can be assigned now or left blank and filled in later --
-  // populate the pickers with everything available, defaulting to "none"
-  // when the deal doesn't have one yet.
-  const leadSelect = document.getElementById('dealAssignedLeadId');
-  leadSelect.innerHTML = '<option value="">-- No customer assigned yet --</option>' +
-    leads.map(l => html`<option value="${l.id}">${l.name}</option>`).join('');
-  leadSelect.value = deal.leadId || '';
-
-  const carSelect = document.getElementById('dealAssignedCarId');
-  carSelect.innerHTML = '<option value="">-- No vehicle assigned yet --</option>' +
-    cars.filter(c => c.status !== 'sold' || c.id === deal.carId)
-      .map(c => html`<option value="${c.id}" data-price="${c.price}">${c.year} ${c.make} ${c.model} - $${c.price.toLocaleString()}</option>`)
-      .join('');
-  carSelect.value = deal.carId || '';
-  updateServiceTieIn(deal.carId);
-
-  // Shared fields
-  document.getElementById('dealVehiclePrice').value = deal.vehiclePrice;
-  document.getElementById('dealRebate').value = deal.rebate;
-  document.getElementById('dealTradeInValue').value = deal.tradeInValue;
-  document.getElementById('dealTradeInPayoff').value = deal.tradeInPayoff;
-  renderDealTradeAppraisal(deal);
-  document.getElementById('dealTradeVin').value = deal.tradeVin || '';
-  document.getElementById('dealTradeVinStatus').innerHTML = '';
-  document.getElementById('dealTradeYear').value = deal.tradeYear || '';
-  document.getElementById('dealTradeMake').value = deal.tradeMake || '';
-  document.getElementById('dealTradeModel').value = deal.tradeModel || '';
-  document.getElementById('dealTradeMileage').value = deal.tradeMileage || '';
-  document.getElementById('dealDownPayment').value = deal.downPayment;
-  document.getElementById('dealTaxRate').value = deal.taxRate;
-  document.getElementById('dealTermMonths').value = deal.termMonths;
-  document.getElementById('dealState').value = deal.state || (deal.creditApp && deal.creditApp.applicant ? deal.creditApp.applicant.state : '') || '';
-
-  // Retail-only fields
-  document.getElementById('dealTitleFee').value = deal.titleFee || 75;
-  document.getElementById('dealRegistrationFee').value = deal.registrationFee || 50;
-  document.getElementById('dealApr').value = deal.apr || 6.5;
-
-  // Lease-only fields
-  document.getElementById('dealMsrp').value = deal.msrp || 0;
-  document.getElementById('dealAcquisitionFee').value = deal.acquisitionFee || 595;
-  document.getElementById('dealCashBack').value = deal.cashBack || 0;
-  document.getElementById('dealResidualPercent').value = deal.residualPercent || 50;
-  document.getElementById('dealAnnualMiles').value = deal.annualMiles || 12000;
-  document.getElementById('dealMoneyFactor').value = deal.moneyFactor || 0;
-  document.getElementById('dealSecurityDeposit').value = deal.securityDeposit || 0;
-  document.getElementById('dealAdvancedPayments').value = deal.advancedPayments || 0;
-
-  // F&I products (shared)
-  document.getElementById('dealDocFee').value = deal.docFee || 150;
-  document.getElementById('dealLicenseFee').value = deal.licenseFee || 0;
-  document.getElementById('dealDealerFees').value = deal.dealerFees || 0;
-  document.getElementById('dealGapPremium').value = deal.gapPremium || 0;
-  document.getElementById('dealFiProductCost').value = deal.fiProductCost || 0;
-  document.getElementById('dealReserve').value = deal.reserve || 0;
-  document.getElementById('dealIncentives').value = deal.incentives || 0;
-  document.getElementById('dealChargebackAmount').value = deal.chargebackAmount || 0;
-  document.getElementById('dealChargebackDate').value = deal.chargebackDate ? deal.chargebackDate.slice(0, 10) : '';
-  document.getElementById('dealAccounting').hidden = !userCan('editDealAccounting');
-  document.getElementById('dealServicePremium').value = deal.servicePremium || 0;
-  document.getElementById('dealMaintenancePremium').value = deal.maintenancePremium || 0;
-  document.getElementById('dealAftermarketAmount').value = deal.aftermarketAmount || 0;
-
-  const hasTradeCheckbox = document.getElementById('hasTradeCheckbox');
-  hasTradeCheckbox.checked = !!deal.hasTrade;
-  document.getElementById('tradeFields').style.display = deal.hasTrade ? 'grid' : 'none';
-
-  updateDealTypePanels(deal.dealType || 'retail');
-  renderDealSummary(deal);
+  // The deal screen (deal-ui.js)
+  openDealScreen(deal);
 
   // Build the credit application form fresh each time, since its shape
   // (business vs individual, with or without a co-applicant) changes
@@ -4651,100 +4533,10 @@ function closeDealFullPage() {
 }
 
 document.getElementById('backToDealsBtn').addEventListener('click', async () => {
+  if (dxHasUnsaved() && !confirm('Leave this deal without saving your changes?')) return;
   closeDealFullPage();
   await loadAll();
   showView('deals');
-});
-
-// Switching deal type shows/hides the panels that only apply to that type,
-// and swaps a couple of field labels ("Vehicle Price" vs "Selling Price",
-// "Down Payment" vs "Cash Down") so the same shared inputs read naturally
-// either way instead of needing two separate sets of fields.
-function updateDealTypePanels(dealType) {
-  const isLease = dealType === 'lease';
-  const isCash = dealType === 'cash';
-
-  document.getElementById('retailPanel').style.display = isLease ? 'none' : 'block';
-  document.getElementById('leasePanel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('msrpLabel').style.display = isLease ? 'block' : 'none';
-  document.getElementById('termLabel').style.display = isCash ? 'none' : 'block';
-  document.getElementById('aprLabel').style.display = isCash ? 'none' : 'block';
-
-  document.getElementById('vehiclePriceLabel').firstChild.textContent = isLease ? 'Selling Price ' : 'Vehicle Price ';
-  document.getElementById('downPaymentLabel').firstChild.textContent = isLease ? 'Cash Down ' : 'Down Payment ';
-
-  // Cash deals have no financing at all -- there's no monthly payment to
-  // show, just a lump sum due. Retail/lease both show a monthly figure.
-  document.getElementById('readoutAmountFinancedRow').style.display = (isLease || isCash) ? 'none' : 'flex';
-  document.getElementById('paymentHighlightBox').style.display = isCash ? 'none' : 'block';
-}
-
-document.getElementById('dealTypeSelect').addEventListener('change', (e) => {
-  updateDealTypePanels(e.target.value);
-});
-
-// Populates the read-only computed figures (gross cap cost, net cap cost,
-// residual, amount financed, monthly payment, etc.) from the deal's last
-// saved calculation. These only update after a Save, same limitation the
-// desking form always had -- there's no live recalculation as you type.
-function renderDealSummary(deal) {
-  const isLease = (deal.dealType || 'retail') === 'lease';
-  const isCash = (deal.dealType || 'retail') === 'cash';
-
-  if (isLease) {
-    document.getElementById('readoutGrossCapCost').textContent = `$${(deal.grossCapCost || 0).toLocaleString()}`;
-    document.getElementById('readoutCapReduction').textContent = `$${(deal.totalCapReduction || 0).toLocaleString()}`;
-    document.getElementById('readoutNetCapCost').textContent = `$${(deal.netCapCost || 0).toLocaleString()}`;
-    document.getElementById('readoutResidualAmount').textContent = `$${(deal.residualAmount || 0).toLocaleString()}`;
-    document.getElementById('readoutDueAtSigning').textContent = `$${(deal.dueAtSigning || 0).toLocaleString()}`;
-  }
-
-  if (isCash) {
-    // No financing at all for a cash deal -- "amount financed" becomes the
-    // one lump sum due, shown via the Total Deal Cost readout instead of
-    // a monthly payment that doesn't apply.
-    document.getElementById('readoutTotalDealCost').previousElementSibling.textContent = 'Total Due';
-  } else {
-    document.getElementById('readoutTotalDealCost').previousElementSibling.textContent = 'Total Deal Cost';
-    document.getElementById('readoutAmountFinanced').textContent = `$${(deal.amountFinanced || 0).toLocaleString()}`;
-    document.getElementById('readoutMonthlyPayment').textContent = `$${(deal.monthlyPayment || 0).toLocaleString()}/mo`;
-    document.getElementById('readoutTermLine').textContent = `for ${deal.termMonths} months`;
-  }
-
-  document.getElementById('readoutTotalDealCost').textContent = `$${(deal.totalDealCost || 0).toLocaleString()}`;
-}
-
-// Groundwork for the future Service module: this reads a car's openROs
-// field (an empty array today, since Service doesn't exist yet) so a
-// sales manager can eventually see "this trade/vehicle has an open repair
-// order" right from the deal page. The data seam exists now; the Service
-// module that actually populates it is a separate, later build.
-function updateServiceTieIn(carId) {
-  const container = document.getElementById('serviceTieIn');
-  const textEl = document.getElementById('serviceTieInText');
-  const car = cars.find(c => c.id === carId);
-
-  if (!car) {
-    container.style.display = 'none';
-    return;
-  }
-
-  container.style.display = 'block';
-  const openROs = car.openROs || [];
-  textEl.textContent = openROs.length > 0
-    ? `${openROs.length} open RO${openROs.length > 1 ? 's' : ''}`
-    : 'No open ROs';
-}
-
-// Picking a vehicle auto-fills its price, same convenience as before --
-// just now it can happen anytime from within the workspace, not only at
-// deal creation.
-document.getElementById('dealAssignedCarId').addEventListener('change', (e) => {
-  const selected = e.target.options[e.target.selectedIndex];
-  if (selected && selected.dataset.price) {
-    document.getElementById('dealVehiclePrice').value = selected.dataset.price;
-  }
-  updateServiceTieIn(e.target.value);
 });
 
 // Sub-tab switching within the workspace
@@ -4759,15 +4551,6 @@ document.querySelectorAll('.sub-tab-btn').forEach(btn => {
   btn.addEventListener('click', () => switchSubTab(btn.dataset.subtab));
 });
 
-// Trade-in toggle
-document.getElementById('hasTradeCheckbox').addEventListener('change', (e) => {
-  document.getElementById('tradeFields').style.display = e.target.checked ? 'grid' : 'none';
-  if (!e.target.checked) {
-    document.getElementById('dealTradeInValue').value = 0;
-    document.getElementById('dealTradeInPayoff').value = 0;
-  }
-});
-
 // Deal status dropdown (in the header) saves immediately on change
 document.getElementById('dealStatusSelect').addEventListener('change', async (e) => {
   await fetch(`${API}/deals/${currentWorkspaceDealId}`, {
@@ -4776,189 +4559,6 @@ document.getElementById('dealStatusSelect').addEventListener('change', async (e)
     body: JSON.stringify({ status: e.target.value })
   });
   await loadAll();
-});
-
-function buildDeskingPayload() {
-  return {
-    leadId: document.getElementById('dealAssignedLeadId').value || null,
-    carId: document.getElementById('dealAssignedCarId').value || null,
-    dealType: document.getElementById('dealTypeSelect').value,
-    vehiclePrice: document.getElementById('dealVehiclePrice').value,
-    msrp: document.getElementById('dealMsrp').value,
-    rebate: document.getElementById('dealRebate').value,
-    hasTrade: document.getElementById('hasTradeCheckbox').checked,
-    tradeInValue: document.getElementById('dealTradeInValue').value,
-    tradeInPayoff: document.getElementById('dealTradeInPayoff').value,
-    tradeVin: cleanVin(document.getElementById('dealTradeVin').value),
-    tradeYear: document.getElementById('dealTradeYear').value,
-    tradeMake: document.getElementById('dealTradeMake').value,
-    tradeModel: document.getElementById('dealTradeModel').value,
-    tradeMileage: document.getElementById('dealTradeMileage').value,
-    downPayment: document.getElementById('dealDownPayment').value,
-    taxRate: document.getElementById('dealTaxRate').value,
-    termMonths: document.getElementById('dealTermMonths').value,
-    state: document.getElementById('dealState').value,
-    titleFee: document.getElementById('dealTitleFee').value,
-    registrationFee: document.getElementById('dealRegistrationFee').value,
-    apr: document.getElementById('dealApr').value,
-    acquisitionFee: document.getElementById('dealAcquisitionFee').value,
-    cashBack: document.getElementById('dealCashBack').value,
-    residualPercent: document.getElementById('dealResidualPercent').value,
-    annualMiles: document.getElementById('dealAnnualMiles').value,
-    moneyFactor: document.getElementById('dealMoneyFactor').value,
-    securityDeposit: document.getElementById('dealSecurityDeposit').value,
-    advancedPayments: document.getElementById('dealAdvancedPayments').value,
-    docFee: document.getElementById('dealDocFee').value,
-    licenseFee: document.getElementById('dealLicenseFee').value,
-    dealerFees: document.getElementById('dealDealerFees').value,
-    gapPremium: document.getElementById('dealGapPremium').value,
-    ...(userCan('editDealAccounting') ? {
-      fiProductCost: document.getElementById('dealFiProductCost').value,
-      reserve: document.getElementById('dealReserve').value,
-      incentives: document.getElementById('dealIncentives').value,
-      chargebackAmount: document.getElementById('dealChargebackAmount').value,
-      chargebackDate: document.getElementById('dealChargebackDate').value ? `${document.getElementById('dealChargebackDate').value}T12:00:00` : null
-    } : {}),
-    servicePremium: document.getElementById('dealServicePremium').value,
-    maintenancePremium: document.getElementById('dealMaintenancePremium').value,
-    aftermarketAmount: document.getElementById('dealAftermarketAmount').value,
-  };
-}
-
-// Desking form: save & recalculate. Both the header Save button and the
-// form's own submit button trigger this same save -- one authoritative
-// save path regardless of which button was clicked.
-async function saveDeskingForm() {
-  const payload = buildDeskingPayload();
-
-  const res = await fetch(`${API}/deals/${currentWorkspaceDealId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const updatedDeal = await res.json();
-
-  await loadAll();
-  renderDealSummary(updatedDeal);
-}
-
-document.getElementById('deskingForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await saveDeskingForm();
-});
-
-document.getElementById('saveDealBtn').addEventListener('click', async () => {
-  await saveDeskingForm();
-});
-
-document.getElementById('viewProposalFromWorkspaceBtn').addEventListener('click', () => {
-  viewProposal(currentWorkspaceDealId);
-});
-
-document.getElementById('autoCalcFeesBtn').addEventListener('click', async () => {
-  const statusEl = document.getElementById('autoCalcFeesStatus');
-
-  // Save the Credit Application first, silently. This guarantees whatever
-  // address was just typed in is actually persisted before anything reads
-  // it -- removing the dependency on remembering a separate "Save Credit
-  // Application" click, which is an easy step to skip and previously meant
-  // a freshly-typed address could be lost the moment the page reloaded.
-  await saveCreditAppForm();
-
-  const dealStateField = document.getElementById('dealState');
-  const primaryStateField = document.getElementById('primaryState');
-  // The customer's address (and its state) lives on the Credit Application
-  // tab -- that's the live source of truth. The Desking tab's own State
-  // field is only a fallback for a deal with no customer/address on file
-  // yet, and gets kept in sync below so both fields always agree.
-  const state = (primaryStateField && primaryStateField.value) ? primaryStateField.value : (dealStateField ? dealStateField.value : '');
-  if (dealStateField && state) dealStateField.value = state;
-  const carId = document.getElementById('dealAssignedCarId').value;
-  const price = document.getElementById('dealVehiclePrice').value;
-  const car = cars.find(c => c.id === carId);
-  const vehicleYear = car ? car.year : '';
-
-  // Read the ZIP and County directly from the live Credit Application
-  // fields, not from the last-saved deal data -- if the address was just
-  // typed in but "Save Credit Application" hasn't been clicked yet, the
-  // saved copy would still be blank/stale, and this button should use
-  // whatever's actually on screen right now.
-  const zipField = document.getElementById('primaryZip');
-  const countyField = document.getElementById('primaryCounty');
-  const cityField = document.getElementById('primaryCity');
-  const zip = zipField ? zipField.value : '';
-  const county = countyField ? countyField.value : '';
-  const city = cityField ? cityField.value : '';
-
-  if (!price) {
-    statusEl.innerHTML = `<div class="send-text-status-error">Enter a vehicle price first.</div>`;
-    return;
-  }
-  if (!zip) {
-    statusEl.innerHTML = `<div class="send-text-status-error">No ZIP code found -- enter the customer's address on the Credit Application tab first (you don't need to save it, just fill it in).</div>`;
-    return;
-  }
-
-  statusEl.innerHTML = `<div style="font-size:13px;color:var(--text-muted);">Calculating...</div>`;
-
-  try {
-    const res = await fetch(`${API}/fees/calculate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state, zip, price, vehicleYear, county, city })
-    });
-    const result = await res.json();
-
-    if (!res.ok) {
-      statusEl.innerHTML = html`<div class="send-text-status-error">${result.error}</div>`;
-      return;
-    }
-
-    document.getElementById('dealTaxRate').value = result.taxRate;
-    document.getElementById('dealLicenseFee').value = result.licenseFee;
-    document.getElementById('dealTitleFee').value = result.titleFee;
-    document.getElementById('dealRegistrationFee').value = result.registrationFee;
-
-    const tradeNote = result.tradeInReducesTaxableAmount
-      ? 'trade-in reduces taxable amount'
-      : 'full price is taxable, trade-in does not reduce it';
-    const countyNote = result.county ? `${result.county} County` : 'statewide base rate -- county not recognized';
-    const sourceNote = result.rateSource && !result.rateSource.startsWith('no match') ? ` [rate: ${result.rateSource}]` : ' [no matching Taxes & Fees record -- add one via 🗺️ Taxes & Fees]';
-    statusEl.innerHTML = html`<div class="send-text-status-success">✓ Calculated for ${result.stateUsed}, ${countyNote} (${tradeNote}).${sourceNote} Estimate only -- verify against your state's current DMV schedule.</div>`;
-  } catch (err) {
-    statusEl.innerHTML = `<div class="send-text-status-error">Could not reach the server.</div>`;
-  }
-});
-
-// "Duplicate as New Scenario" -- clones the current deal's numbers into a
-// brand new deal (its own Deal #), so a rep can compare e.g. a 36 vs
-// 48-month lease side by side instead of overwriting the only copy.
-// This is a lighter-weight version of true side-by-side scenarios (like
-// "Scenario #2" tabs in a real DMS) -- each alternative just gets its own
-// full deal record rather than living inside one shared deal.
-document.getElementById('duplicateScenarioBtn').addEventListener('click', async () => {
-  const sourceDeal = deals.find(d => d.id === currentWorkspaceDealId);
-  if (!sourceDeal) return;
-
-  const payload = buildDeskingPayload();
-  const createRes = await fetch(`${API}/deals`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ leadId: payload.leadId, carId: payload.carId })
-  });
-  const newDeal = await createRes.json();
-
-  // Now push the full set of current numbers onto the fresh deal, so the
-  // "new scenario" starts as an exact copy the rep can then tweak (change
-  // the term, switch retail to lease, etc.) to compare against the original.
-  await fetch(`${API}/deals/${newDeal.id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  await loadAll();
-  openDealWorkspace(newDeal.id);
 });
 
 // ---------- Credit Application (dynamic: individual/business + co-applicant) ----------
@@ -4993,11 +4593,8 @@ function selectOptionsHtml(options, selected) {
 // fields shouldn't be able to silently disagree with each other.
 window.syncDealStateFromCreditApp = function(prefix) {
   if (prefix !== 'primary') return; // co-applicant's state doesn't drive the deal's state
-  const dealStateField = document.getElementById('dealState');
   const primaryStateField = document.getElementById('primaryState');
-  if (dealStateField && primaryStateField && primaryStateField.value) {
-    dealStateField.value = primaryStateField.value;
-  }
+  if (primaryStateField && primaryStateField.value) dxSetState(primaryStateField.value.trim().toUpperCase());
 };
 
 // Called when a ZIP field changes in the credit application -- looks up
