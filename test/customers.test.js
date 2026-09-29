@@ -148,4 +148,11 @@ test('activities record who logged them', async () => {
   assert.strictEqual(a.by.id, sales.id);
   const odd = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'carrier-pigeon', text: 'x' })).body;
   assert.strictEqual(odd.type, 'note');
+  // "Talked with them" (Attempted -> Engaged on the pipeline): calls, texts, and emails only.
+  const call = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'call', text: 'Talked trade', reached: true })).body;
+  assert.strictEqual(call.reached, true);
+  const vm = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'call', text: 'Voicemail' })).body;
+  assert.strictEqual(vm.reached, undefined);
+  const note = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'note', text: 'x', reached: true })).body;
+  assert.strictEqual(note.reached, undefined);
 });

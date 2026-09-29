@@ -961,6 +961,9 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
     date: new Date().toISOString(),
     by: { id: req.user.id, name: req.user.name }
   };
+  // A call, text, or email where they actually talked back (moves the
+  // customer from Attempted to Engaged on the Sales Pipeline).
+  if (['call', 'text', 'email'].includes(activity.type) && (req.body.reached === true || req.body.reached === 'true')) activity.reached = true;
   const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
   res.status(201).json(activity);

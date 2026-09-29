@@ -1394,7 +1394,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 
 // ---------- Sales Pipeline (home screen) ----------
 // Every open customer sits in exactly one stage, from how far along they
-// are: Engaged (in contact) -> Visit (came to the showroom) -> Proposal
+// are: New (nobody has reached out) -> Attempted (a call, text, or email
+// logged, but no conversation) -> Engaged (talked with them, they replied,
+// or an appointment is set) -> Visit (came to the showroom) -> Proposal
 // (a deal is being worked) -> Delivered (bought -- a delivered/closed deal,
 // or marked Won). Lost customers aren't in the pipeline.
 
@@ -1414,11 +1416,14 @@ const ICONS = {
 };
 
 const PIPELINE_STAGES = [
-  { key: 'engaged', label: 'Engaged', icon: ICONS.chat },
-  { key: 'visit', label: 'Visit', icon: ICONS.pin },
-  { key: 'proposal', label: 'Proposal', icon: ICONS.calc },
-  { key: 'delivered', label: 'Delivered', icon: ICONS.flag }
+  { key: 'new', label: 'New', hint: 'Nobody has reached out yet' },
+  { key: 'attempted', label: 'Attempted', hint: 'Called, texted, or emailed -- no conversation yet' },
+  { key: 'engaged', label: 'Engaged', hint: 'Talked with them, they replied, or an appointment is set' },
+  { key: 'visit', label: 'Visit', hint: 'Came to the showroom' },
+  { key: 'proposal', label: 'Proposal', hint: 'A deal is being worked' },
+  { key: 'delivered', label: 'Delivered', hint: 'Bought' }
 ];
+const OUTREACH = ['call', 'text', 'email'];
 const AGED_INVENTORY_DAYS = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -1427,8 +1432,13 @@ function pipelineStageOf(lead) {
   if (lead.status === 'won' || leadDeals.some(d => ['delivered', 'closed', 'finalized'].includes(d.status))) return 'delivered';
   if (lead.status === 'lost') return null;
   if (leadDeals.some(d => d.status === 'working')) return 'proposal';
-  if ((lead.activities || []).some(a => a.type === 'visit')) return 'visit';
-  return 'engaged';
+  const acts = lead.activities || [];
+  if (acts.some(a => a.type === 'visit')) return 'visit';
+  const engaged = acts.some(a => a.reached || a.type === 'appointment') || lead.status === 'negotiating' ||
+    openTasks.some(t => t.leadId === lead.id && t.type === 'appointment');
+  if (engaged) return 'engaged';
+  if (acts.some(a => OUTREACH.includes(a.type)) || lead.status === 'contacted') return 'attempted';
+  return 'new';
 }
 
 function lastTouch(lead) {
@@ -1467,17 +1477,22 @@ function stageGroups() {
 
 function renderPipeline() {
   const groups = stageGroups();
+  const total = PIPELINE_STAGES.reduce((n, st) => n + groups[st.key].length, 0);
+  // "Got this far": everyone at this step or any later one, as a share of all.
+  let fromHere = total;
   document.getElementById('pipelineStages').innerHTML = PIPELINE_STAGES.map((st, i) => {
     const list = groups[st.key];
     const attention = list.filter(needsFollowUp).length;
     const hot = list.filter(isHot).length;
     const open = st.key !== 'delivered';
+    const reach = total ? Math.round(fromHere / total * 100) : 0;
+    fromHere -= list.length;
     return html`
-      ${i > 0 ? html`<div class="pipeline-chevron ${i === PIPELINE_STAGES.length - 1 ? 'into-delivered' : ''}" aria-hidden="true">${new SafeHtml(ICONS.chevron)}</div>` : ''}
-      <div class="pipeline-stage stage-${st.key}">
-        <div class="pipeline-stage-icon">${new SafeHtml(st.icon)}</div>
+      <div class="pipeline-stage stage-${st.key}" title="${st.hint}">
+        <div class="pipeline-step"><span class="pipeline-step-num">${i + 1}</span><span class="pipeline-stage-label">${st.label}</span></div>
         <button type="button" class="pipeline-count" onclick="openPipelineList(${js(st.key)}, 'all')" title="Show these customers">${list.length.toLocaleString()}</button>
-        <div class="pipeline-stage-label">${st.label}</div>
+        <div class="pipeline-reach" aria-label="${reach}% of customers got this far"><span style="width:${reach}%"></span></div>
+        <div class="pipeline-reach-text">${i === 0 ? 'all customers' : `${reach}% got this far`}</div>
         <div class="pipeline-stage-sub">
           ${open ? html`
             <button type="button" class="pipeline-sub attention" onclick="openPipelineList(${js(st.key)}, 'attention')" title="Need follow-up: no contact in 3+ days">⚠ ${attention}</button>
@@ -3236,9 +3251,9 @@ async function cpSaveLead(fields) {
   return body;
 }
 
-async function cpLogActivity(type, text) {
+async function cpLogActivity(type, text, extra = {}) {
   const res = await fetch(`${API}/leads/${currentProfileLeadId}/activities`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, text })
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, text, ...extra })
   });
   return res.ok;
 }
@@ -3670,13 +3685,15 @@ function renderComposer() {
     el.innerHTML = html`
       <textarea id="cpNoteText" rows="3" placeholder="${prompts[kind]}"></textarea>
       <div class="cp-composer-actions">
+        ${kind === 'note' ? '' : html`<label class="cp-reached"><input type="checkbox" id="cpReached" /> ${kind === 'call' ? 'Talked with them' : 'They replied'}</label>`}
         <span class="cp-composer-status" id="cpNoteStatus"></span>
         <button type="button" class="btn-primary btn-small" id="cpNoteSave">${kind === 'note' ? 'Save Note' : kind === 'call' ? 'Log Call' : 'Log Email'}</button>
       </div>`;
     document.getElementById('cpNoteSave').onclick = async () => {
       const text = document.getElementById('cpNoteText').value.trim();
       if (!text) return document.getElementById('cpNoteText').focus();
-      if (await cpLogActivity(kind, text)) await cpRefresh();
+      const reached = document.getElementById('cpReached');
+      if (await cpLogActivity(kind, text, reached && reached.checked ? { reached: true } : {})) await cpRefresh();
     };
   }
 }
@@ -3892,7 +3909,7 @@ function renderHistory() {
       <div class="activity-icon">${ACTIVITY_ICONS[a.type] || '📝'}</div>
       <div class="activity-body">
         <div class="activity-meta">
-          <span><strong>${ACTIVITY_LABELS[a.type] || 'Note'}</strong>${a.by ? ` · ${a.by.name}` : ''} · ${new Date(a.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+          <span><strong>${ACTIVITY_LABELS[a.type] || 'Note'}</strong>${a.reached ? html` <span class="activity-reached">✓ ${a.type === 'call' ? 'talked' : 'replied'}</span>` : ''}${a.by ? ` · ${a.by.name}` : ''} ·${new Date(a.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
           ${canDelete ? html`<button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>` : ''}
         </div>
         <div class="activity-text">${a.text}</div>
