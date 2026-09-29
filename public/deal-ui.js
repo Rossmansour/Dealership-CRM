@@ -691,6 +691,7 @@ dxRoot.addEventListener('click', async (e) => {
   if (ap) {
     const t = dx.w.trades[Number(ap.dataset.appraise)];
     if (dx.dirty) await dxSave();
+    window.dxPendingTradeIndex = Number(ap.dataset.appraise); // so "Back to deal" links it to this trade
     return startAppraisal({ dealId: dx.deal.id, leadId: dx.w.leadId || null, vin: cleanVin(t.vin || ''), year: t.year, make: t.make, model: t.model, mileage: t.mileage });
   }
   const act = e.target.closest('[data-act]');
@@ -704,6 +705,20 @@ dxRoot.addEventListener('click', async (e) => {
   if (a === 'save-plan') return dxSavePlan(act);
   if (a === 'print-summary') return dxPrintSummary();
 });
+
+// Back from an appraisal started on this deal: show the trade-in page, with
+// that appraisal linked to its trade (saved right away).
+window.dxShowTrade = async function(tradeIndex, appraisalId) {
+  const t = tradeIndex !== null && tradeIndex !== undefined ? dx.w.trades[tradeIndex] : null;
+  if (t && appraisalId && !t.appraisalId && appraisals.some(a => a.id === appraisalId)) {
+    t.appraisalId = appraisalId;
+    dx.dirty = true;
+    await dxSave();
+  }
+  dx.section = 'trades';
+  renderDx();
+  window.scrollTo(0, 0);
+};
 
 async function dxDecodeTrade(i, btn) {
   const t = dx.w.trades[i];
