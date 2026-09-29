@@ -3284,6 +3284,7 @@ let returnToProfileAfterEdit = false;
 let currentProfileLeadId = null;
 let cpTasks = []; // this customer's tasks (open and closed)
 let cpComposerKind = 'note';
+var cpLogVideoInstead = false; // Video tab: log one sent another way instead of sending
 let cpHistoryFilter = 'all';
 let selectedSendTextPhoto = null;
 const leadProfileModal = document.getElementById('leadProfileModal');
@@ -3705,16 +3706,57 @@ function nextHour(hoursAhead = 1) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
 }
 
-function sendTextBoxHtml(idPrefix) {
+// A text box with its own photos and videos: take one with the phone's
+// camera or pick a file (videos go out as a link to a watch page).
+let textAttachments = {}; // prefix -> [{ id, kind, url, name }]
+function sendTextBoxHtml(idPrefix, { video = false, value = '' } = {}) {
+  textAttachments[idPrefix] = [];
   return html`
-    <textarea id="${idPrefix}Input" rows="3" placeholder="Type a text message..."></textarea>
-    <div id="${idPrefix}Photos" class="cp-photo-picker"></div>
+    <textarea id="${idPrefix}Input" rows="3" placeholder="${video ? 'Add a message (optional)' : 'Type a text message...'}">${value}</textarea>
+    ${video ? '' : html`<div id="${idPrefix}Photos" class="cp-photo-picker"></div>`}
+    <div class="cp-attachments" id="${idPrefix}Attached"></div>
     <div class="cp-composer-actions">
-      <button type="button" class="btn-secondary btn-small" data-ai-reply="${idPrefix}">✨ Suggest a reply</button>
+      <label class="btn-secondary btn-small cp-attach-btn" title="${video ? 'Record with your phone or pick a video' : 'Take or pick a photo or video'}">
+        ${video ? '🎥 Record or pick a video' : '📎 Photo / video'}
+        <input type="file" accept="${video ? 'video/*' : 'image/*,video/*'}" ${video ? html`capture="environment"` : html`multiple`} data-attach="${idPrefix}" hidden />
+      </label>
+      ${video ? '' : html`<button type="button" class="btn-secondary btn-small" data-ai-reply="${idPrefix}">✨ Suggest a reply</button>`}
       <span class="cp-composer-status" id="${idPrefix}Status"></span>
-      <button type="button" class="btn-primary btn-small" data-send-text="${idPrefix}">Send Text</button>
+      <button type="button" class="btn-primary btn-small" data-send-text="${idPrefix}">${video ? 'Send Video' : 'Send Text'}</button>
     </div>`;
 }
+
+function renderAttachments(prefix) {
+  const el = document.getElementById(`${prefix}Attached`);
+  if (!el) return;
+  el.innerHTML = (textAttachments[prefix] || []).map(m => html`<span class="cp-attachment">
+    ${m.kind === 'photo' ? html`<img src="${photoThumb(m.url, 48, 36)}" alt="" />` : html`<span class="cp-attachment-video">🎥</span>`}
+    <span class="cp-attachment-name">${m.name || (m.kind === 'photo' ? 'Photo' : 'Video')}</span>
+    <button type="button" data-unattach="${prefix}" data-id="${m.id}" aria-label="Remove" title="Remove">✕</button>
+  </span>`).join('');
+}
+
+async function uploadAttachments(prefix, files) {
+  const status = document.getElementById(`${prefix}Status`);
+  for (const file of files) {
+    if (file.size > 100 * 1024 * 1024) { status.innerHTML = html`<span class="send-text-status-error">${file.name} is over 100MB.</span>`; continue; }
+    status.textContent = `Uploading ${file.name || 'file'}…`;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch(`${API}/leads/${currentProfileLeadId}/media`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { status.innerHTML = html`<span class="send-text-status-error">${data.error || 'Upload failed.'}</span>`; return; }
+      (textAttachments[prefix] = textAttachments[prefix] || []).push(data);
+      renderAttachments(prefix);
+      status.textContent = '';
+    } catch (err) { status.innerHTML = html`<span class="send-text-status-error">Upload failed -- check the connection.</span>`; return; }
+  }
+}
+leadProfileModal.addEventListener('change', (e) => {
+  const input = e.target.closest('[data-attach]');
+  if (input && input.files.length) { uploadAttachments(input.dataset.attach, [...input.files]); input.value = ''; }
+});
 
 function renderComposer() {
   document.querySelectorAll('#cpComposerTabs button').forEach(b => b.classList.toggle('active', b.dataset.kind === cpComposerKind));
@@ -3747,6 +3789,10 @@ function renderComposer() {
         <button type="button" class="btn-primary btn-small" id="cpTaskSave">${appt ? 'Set Appointment' : 'Schedule Task'}</button>
       </div>`;
     document.getElementById('cpTaskSave').onclick = () => scheduleTask(appt ? 'appointment' : document.getElementById('cpTaskType').value);
+  } else if (kind === 'video' && lead.phone && !cpLogVideoInstead) {
+    const car = cars.find(c => c.id === lead.carId) || cars.find(c => c.id === (lead.wishList || [])[0]);
+    el.innerHTML = html`${sendTextBoxHtml('cpVideo', { video: true, value: `Hi ${lead.name.split(' ')[0]}, here's a quick video${car ? ` of the ${car.year} ${car.make} ${car.model}` : ''} for you!` })}
+      <button type="button" class="link-btn cp-log-instead" onclick="cpLogVideoInstead = true; renderComposer()">Sent it another way? Log it instead</button>`;
   } else {
     const prompts = {
       note: 'Type a note about this customer...',
@@ -3774,6 +3820,7 @@ document.getElementById('cpComposerTabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-kind]');
   if (!btn) return;
   cpComposerKind = btn.dataset.kind;
+  cpLogVideoInstead = false;
   renderComposer();
   const first = document.querySelector('#cpComposer textarea, #cpComposer input');
   if (first) first.focus();
@@ -3818,6 +3865,12 @@ leadProfileModal.addEventListener('click', async (e) => {
     if (!same) thumb.classList.add('selected');
     return;
   }
+  const unattach = e.target.closest('[data-unattach]');
+  if (unattach) {
+    const prefix = unattach.dataset.unattach;
+    textAttachments[prefix] = (textAttachments[prefix] || []).filter(m => m.id !== unattach.dataset.id);
+    return renderAttachments(prefix);
+  }
   const send = e.target.closest('[data-send-text]');
   if (send) return sendCustomerText(send.dataset.sendText);
   const ai = e.target.closest('[data-ai-reply]');
@@ -3828,16 +3881,19 @@ async function sendCustomerText(prefix) {
   const input = document.getElementById(`${prefix}Input`);
   const status = document.getElementById(`${prefix}Status`);
   const text = input.value.trim();
-  if (!text && !selectedSendTextPhoto) return input.focus();
+  const attached = textAttachments[prefix] || [];
+  if (prefix === 'cpVideo' && !attached.some(m => m.kind === 'video')) { status.innerHTML = html`<span class="send-text-status-error">Record or pick a video first.</span>`; return; }
+  if (!text && !selectedSendTextPhoto && !attached.length) return input.focus();
   status.textContent = 'Sending...';
   try {
     const res = await fetch(`${API}/leads/${currentProfileLeadId}/send-text`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, photoPath: selectedSendTextPhoto })
+      body: JSON.stringify({ text, photoPath: prefix === 'cpVideo' ? null : selectedSendTextPhoto, mediaIds: attached.map(m => m.id) })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { status.innerHTML = html`<span class="send-text-status-error">Couldn't send: ${data.error}</span>`; return; }
     selectedSendTextPhoto = null;
+    textAttachments[prefix] = [];
     await cpRefresh();
     const again = document.getElementById(`${prefix}Status`);
     if (again) again.innerHTML = html`<span class="send-text-status-success">✓ Sent</span>`;
@@ -4005,11 +4061,14 @@ window.deleteActivity = async function(leadId, activityId) {
 // ----- Conversation: texts as a thread -----
 
 function renderThread(lead) {
-  const texts = (lead.activities || []).filter(a => a.type === 'text').slice().reverse(); // oldest first
+  // Texts, plus videos texted from the CRM (logged ones sent another way aren't messages).
+  const texts = (lead.activities || []).filter(a => a.type === 'text' || (a.type === 'video' && a.direction)).slice().reverse(); // oldest first
+  const views = token => ((lead.media || []).find(m => m.token === token) || {}).views || 0;
   document.getElementById('cpThread').innerHTML = texts.length ? texts.map(t => html`
     <div class="cp-bubble ${t.direction === 'in' ? 'in' : 'out'}">
-      <div>${t.message !== undefined ? (t.message || '(photo)') : t.text}</div>
-      ${t.photo ? html`<img src="${photoThumb(t.photo, 160, 120)}" alt="" loading="lazy" />` : ''}
+      <div>${t.message !== undefined ? (t.message || ((t.videos || []).length ? '' : '(photo)')) : t.text}</div>
+      ${(t.photos || (t.photo ? [t.photo] : [])).map(p => html`<img src="${photoThumb(p, 160, 120)}" alt="" loading="lazy" />`)}
+      ${(t.videos || []).map(v => html`<a class="cp-bubble-video" href="/v/${v.token}" target="_blank" rel="noopener">🎥 Video · ${views(v.token) ? `watched${views(v.token) > 1 ? ` ${views(v.token)}×` : ''}` : 'not watched yet'}</a>`)}
       <div class="cp-bubble-meta">${t.by ? `${t.by.name} · ` : ''}${new Date(t.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
     </div>`).join('') : html`<div class="cp-empty">No texts yet.</div>`;
   document.getElementById('cpThreadCompose').innerHTML = lead.phone ? sendTextBoxHtml('cpThreadText') : html`<p class="audit-note">Add a phone number to text this customer.</p>`;

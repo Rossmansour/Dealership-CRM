@@ -311,6 +311,10 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 **Vehicle Photos & Picture Texts**
 - Upload photos to any car in inventory (Edit Car → Photos section) -- shown as a thumbnail in the Inventory table
 - From a lead's profile, the **Send Text** box lets you attach one of their interested vehicle's photos, sending a real **MMS** (picture text) instead of plain SMS
+- **📎 Photo / video**: take a photo or video with the phone's camera, or pick files from the computer, and send them with the text. Photos go as a picture text; videos go as a link to a simple **watch page** (the store's name, "Hi Rosa, here's your video", the video) because carriers cap picture texts at a few MB. Up to 100MB per file; iPhone .mov videos play everywhere through Cloudinary
+- **Video tab**: 🎥 Record or pick a video → Send Video, with a ready-made message ("Hi Rosa, here's a quick video of the 2024 Tacoma for you!"). Sending it finishes the customer's planned video task. Sent it another way? "Log it instead"
+- **Know when they watch**: when the customer presses play, "🎥 Watched the video" goes on their history, the Conversation shows "watched" (or how many times), and whoever sent it (plus Sales 1 and BDC 1) gets a **Customer watched your video** alert. Replaying within 10 minutes isn't counted twice
+- Only photos and videos uploaded for that customer can be sent to them; watch links are long and random, need no sign-in, and aren't indexed
 - Photos are stored in **Cloudinary** (see "Setting up photo storage" below), so they survive redeploys. Lists load small, automatically resized thumbnails; picture texts get a copy resized to stay under carriers' size limits
 - JPEG, PNG, WebP, GIF, or HEIC; up to 8 photos of 5 MB each per upload. Deleting a photo -- or the whole car -- also deletes it from storage
 

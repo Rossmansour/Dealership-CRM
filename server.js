@@ -48,9 +48,12 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || '';
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || '';
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || '';
 let twilioClient = null;
+let smsFrom = TWILIO_PHONE_NUMBER;
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
   twilioClient = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
+// Tests swap in a pretend Twilio.
+function setSmsClient(client, from = '+15550000000') { twilioClient = client; smsFrom = from; }
 
 // ---------- Photo uploads ----------
 // Uploads are held in memory just long enough to hand to photos.js, which
@@ -62,6 +65,21 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (!photos.ALLOWED_TYPES.has(file.mimetype)) {
       const err = new Error('Photos must be JPEG, PNG, WebP, GIF, or HEIC images.');
+      err.status = 400;
+      return cb(err);
+    }
+    cb(null, true);
+  }
+});
+
+// Photos and videos a salesperson sends a customer: one at a time, up to
+// 100MB (a couple of minutes of phone video).
+const mediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (!photos.ALLOWED_TYPES.has(file.mimetype) && !photos.VIDEO_TYPES.has(file.mimetype)) {
+      const err = new Error('Send a photo (JPEG, PNG, WebP, GIF, HEIC) or a video (MP4, MOV, WebM).');
       err.status = 400;
       return cb(err);
     }
@@ -128,6 +146,66 @@ async function demoRequest(req, res) {
   res.status(201).json({ ok: true });
 }
 
+// A video a salesperson texted a customer: a plain page with the video and
+// the store's name. No sign-in -- the link itself is the key (long and
+// random). When the customer actually presses play, it's noted on their
+// history and the salesperson gets an alert.
+const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function findVideo(token) {
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(String(token))) return null;
+  const { rows } = await store.pool.query(
+    `SELECT l.dealership_id, l.id, d.name AS store FROM leads l JOIN dealerships d ON d.id = l.dealership_id WHERE l.data->'media' @> $1::jsonb LIMIT 1`,
+    [JSON.stringify([{ token }])]);
+  if (!rows.length) return null;
+  const lead = await store.get(store.pool, 'leads', rows[0].dealership_id, rows[0].id);
+  const video = lead && (lead.media || []).find(m => m.token === token);
+  return video ? { dealershipId: rows[0].dealership_id, lead, video, store: rows[0].store } : null;
+}
+app.get('/v/:token', (req, res, next) => (async () => {
+  const found = await findVideo(req.params.token);
+  res.set('Cache-Control', 'no-store');
+  res.set('X-Robots-Tag', 'noindex');
+  if (!found) return res.status(404).send('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><p style="font-family:sans-serif;padding:24px">This video is no longer available.</p>');
+  const { video, lead, store: storeName } = found;
+  const from = video.by && video.by.name ? String(video.by.name).split(' ')[0] : '';
+  const first = String(lead.name || '').split(' ')[0];
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A video for you${storeName ? ` from ${escHtml(storeName)}` : ''}</title>
+<style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f1729;color:#e6e9f0;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{width:100%;max-width:760px;padding:16px}h1{font-size:20px;margin:0 0 4px}p{margin:0 0 14px;color:#a3abbd}video{width:100%;max-height:78vh;border-radius:12px;background:#000}</style></head>
+<body><main><h1>${first ? `Hi ${escHtml(first)}, ` : ''}here's your video</h1><p>${from ? `From ${escHtml(from)}` : ''}${from && storeName ? ' at ' : ''}${storeName ? escHtml(storeName) : ''}</p>
+<video id="v" src="${escHtml(photos.playableVideoUrl(video.url))}" controls playsinline preload="metadata"></video></main>
+<script>document.getElementById('v').addEventListener('play',function once(){this.removeEventListener('play',once);fetch(location.pathname+'/played',{method:'POST'}).catch(function(){});});</script>
+</body></html>`);
+})().catch(next));
+app.post('/v/:token/played', (req, res, next) => (async () => {
+  const found = await findVideo(req.params.token);
+  if (!found) return res.status(404).json({ error: 'Not found' });
+  const who = { dealershipId: found.dealershipId, user: { id: null, name: 'Customer' }, ip: req.ip };
+  await store.tx(async q => {
+    const lead = await store.get(q, 'leads', found.dealershipId, found.lead.id, { forUpdate: true });
+    if (!lead) return;
+    const media = (lead.media || []).map(m => (m.token === req.params.token ? { ...m } : m));
+    const v = media.find(m => m.token === req.params.token);
+    const now = new Date();
+    // One view per 10 minutes (pausing and replaying isn't a new view).
+    if (v.lastViewedAt && now - new Date(v.lastViewedAt) < 10 * 60000) return;
+    v.views = (v.views || 0) + 1;
+    v.firstViewedAt = v.firstViewedAt || now.toISOString();
+    v.lastViewedAt = now.toISOString();
+    const activity = { id: crypto.randomUUID(), type: 'status', text: `🎥 Watched the video${v.views > 1 ? ` again (${v.views} times)` : ''}${v.name ? ` (${v.name})` : ''}`, date: now.toISOString(), by: { id: null, name: lead.name } };
+    await store.save(q, 'leads', found.dealershipId, lead.id, { ...lead, media, activities: [activity, ...(lead.activities || [])] });
+    const userIds = [v.by && v.by.id, lead.sales1Id, lead.bdc1Id].filter(Boolean).map(String);
+    await alerts.notify(q, {
+      dealershipId: found.dealershipId, type: 'video_watched', userIds: [...new Set(userIds)], actorId: null,
+      title: `${lead.name} ${v.views > 1 ? 'watched your video again' : 'just watched your video'}`,
+      body: v.name || '', link: { kind: 'lead', id: lead.id }
+    });
+    await audit.record(q, who, { action: 'video_watched', entityType: 'lead', entityId: lead.id, label: audit.labelFor('lead', lead), details: `Watched a video (${v.views} view${v.views === 1 ? '' : 's'})` });
+  });
+  res.status(204).send();
+})().catch(next));
+
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);
@@ -162,7 +240,8 @@ const SERVER_MANAGED_FIELDS = {
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   // Duplicate Leads changes through /duplicate and /duplicates.
-  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf'],
+  // Photos and videos sent to the customer change through /media and /send-text.
+  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf', 'media'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
@@ -999,13 +1078,45 @@ app.delete('/api/leads/:id/activities/:activityId', allow('deleteRecords'), wrap
 // real message, so it needs its own explicit action rather than being
 // folded into the general activity log form.
 
+// A photo or video to send the customer: uploaded from the phone camera or
+// the computer, kept on the customer so it can be sent (and re-sent).
+app.post('/api/leads/:id/media', mediaUpload.single('file'), wrap(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Pick a photo or video.' });
+  const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
+  if (!lead) return res.status(404).json({ error: 'Lead not found' });
+  let saved;
+  try { saved = await photos.saveMedia(req.file, { dealershipId: req.dealershipId, leadId: lead.id }); } catch (err) {
+    return res.status(502).json({ error: err.hint ? `${err.message} ${err.hint}` : err.message });
+  }
+  const item = {
+    id: crypto.randomUUID(), kind: saved.kind, url: saved.url, name: String(req.file.originalname || '').slice(0, 120), size: req.file.size,
+    // The link a customer opens to watch a video (no sign-in; unguessable).
+    token: saved.kind === 'video' ? crypto.randomBytes(18).toString('base64url') : undefined,
+    at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }, views: 0
+  };
+  const updated = await store.tx(async q => {
+    const current = await store.get(q, 'leads', req.dealershipId, lead.id, { forUpdate: true });
+    if (!current) return null;
+    await store.save(q, 'leads', req.dealershipId, current.id, { ...current, media: [...(current.media || []), item].slice(-100) });
+    return item;
+  });
+  if (!updated) return res.status(404).json({ error: 'Lead not found' });
+  res.status(201).json(item);
+}));
+
+const publicBase = req => (process.env.RENDER_EXTERNAL_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+
+// Sends a text. Photos (the car's, or ones uploaded for this customer) go as
+// a picture text (MMS); a video goes as a link to a watch page, since
+// carriers cap picture texts at a few MB.
 app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
   const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
 
   const { text, photoPath } = req.body;
-  if (!text && !photoPath) return res.status(400).json({ error: 'text or photoPath is required' });
+  const mediaIds = Array.isArray(req.body.mediaIds) ? req.body.mediaIds.map(String).slice(0, 10) : [];
+  if (!text && !photoPath && !mediaIds.length) return res.status(400).json({ error: 'Type a message or attach a photo or video.' });
 
   // Only this dealership's own car photos can be sent.
   if (photoPath) {
@@ -1014,6 +1125,11 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       return res.status(400).json({ error: 'That photo is not on any vehicle in your inventory.' });
     }
   }
+  // And only photos and videos uploaded for this customer.
+  const attached = mediaIds.map(id => (lead.media || []).find(m => m.id === id));
+  if (attached.some(m => !m)) return res.status(400).json({ error: 'That photo or video was not uploaded for this customer.' });
+  const pics = attached.filter(m => m.kind === 'photo');
+  const videos = attached.filter(m => m.kind === 'video');
 
   if (!twilioClient) {
     return res.status(500).json({
@@ -1022,36 +1138,34 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
   }
 
   try {
-    const messagePayload = {
-      body: text || '',
-      from: TWILIO_PHONE_NUMBER,
-      to: lead.phone
-    };
-
-    // Sending a photo turns this into an MMS -- Twilio needs a full,
-    // publicly-reachable URL for the image.
-    if (photoPath) {
-      messagePayload.mediaUrl = [photos.publicPhotoUrl(photoPath, req)];
-    }
+    const links = videos.map(v => `${publicBase(req)}/v/${v.token}`);
+    const body = [text || '', ...links].filter(Boolean).join('\n');
+    const messagePayload = { body, from: smsFrom, to: lead.phone };
+    // Picture texts need full, publicly reachable URLs.
+    const mediaUrl = [...(photoPath ? [photoPath] : []), ...pics.map(p => p.url)].map(u => photos.publicPhotoUrl(u, req));
+    if (mediaUrl.length) messagePayload.mediaUrl = mediaUrl;
 
     const message = await twilioClient.messages.create(messagePayload);
 
-    // Log it in the activity feed automatically so the send is part of
-    // the same history as manually-logged calls/texts/notes.
-    const logText = photoPath
-      ? `${text ? text + ' ' : ''}[photo attached] (sent via ${text ? 'MMS' : 'MMS, no caption'})`
-      : `${text} (sent via SMS)`;
+    // Logged in the history and the Conversation. A video counts as the
+    // customer's video (finishes that planned task) and the day's text.
+    const extras = [pics.length || photoPath ? `${pics.length + (photoPath ? 1 : 0)} photo${pics.length + (photoPath ? 1 : 0) === 1 ? '' : 's'}` : '', videos.length ? `${videos.length} video${videos.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ');
     const activity = {
       id: crypto.randomUUID(),
-      type: 'text',
-      text: logText,
+      type: videos.length ? 'video' : 'text',
+      text: `${text ? `${text} ` : ''}${extras ? `[${extras} attached] ` : ''}(sent by ${mediaUrl.length ? 'picture text' : 'text'})`,
       date: new Date().toISOString(),
       by: { id: req.user.id, name: req.user.name },
       // For the Conversation view: what was actually sent, and which way.
-      direction: 'out', message: text || '', photo: photoPath || null
+      direction: 'out', message: text || '', photo: photoPath || (pics[0] && pics[0].url) || null,
+      photos: [...(photoPath ? [photoPath] : []), ...pics.map(p => p.url)],
+      videos: videos.map(v => ({ id: v.id, url: v.url, token: v.token }))
     };
     await addLeadActivity(req, lead.id, activity, 'send_text');
-    await store.tx(q => taskplan.completeByTouch(q, req, lead.id, activity));
+    await store.tx(async q => {
+      await taskplan.completeByTouch(q, req, lead.id, activity);
+      if (activity.type === 'video') await taskplan.completeByTouch(q, req, lead.id, { ...activity, type: 'text' });
+    });
 
     res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
   } catch (err) {
@@ -3393,4 +3507,4 @@ if (require.main === module) {
 
 const runAlertSweep = () => alerts.sweep(getSettings, storeHours.businessMinutesBetween);
 
-module.exports = { app, bootstrap, runAlertSweep };
+module.exports = { app, bootstrap, runAlertSweep, setSmsClient };
