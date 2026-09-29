@@ -2506,6 +2506,38 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .modal-content .rc-pick-side .rc-inline input { width: auto; margin: 0; }
 #rcPickPhases { display: flex; flex-direction: column; gap: 4px; }
 
+/* ---------- Duplicate Leads ---------- */
+.dup-head { flex-wrap: wrap; align-items: center; }
+.dup-count { font-size: 14px; }
+.dup-rules { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
+.dup-rules h3 { margin: 0 0 4px; font-size: 15px; color: var(--heading); }
+.dup-rules-grid { display: grid; gap: 8px; margin: 10px 0; font-size: 14px; }
+.dup-rules-grid label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dup-rules-grid input[type="checkbox"] { width: auto; margin: 0; }
+.dup-days { width: 80px; }
+.dup-rules-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.dup-card { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--amber); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.dup-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 10px; }
+.dup-reason { font-size: 12px; font-weight: 700; background: rgba(217, 119, 6, 0.14); color: var(--amber); border-radius: 10px; padding: 2px 9px; }
+.dup-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.dup-arrow { align-self: center; font-size: 20px; color: var(--text-muted); }
+.dup-side { background: var(--surface-alt); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.dup-side-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 700; margin-bottom: 4px; }
+.dup-name { background: none; border: 0; padding: 0; font: inherit; font-size: 16px; font-weight: 700; color: var(--blue); cursor: pointer; text-align: left; }
+.dup-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin-top: 6px; font-size: 13px; }
+.dup-rows span { color: var(--text-muted); }
+.dup-rows strong { font-weight: 600; overflow-wrap: anywhere; }
+.dup-hit { background: rgba(217, 119, 6, 0.18); border-radius: 4px; padding: 0 3px; }
+.dup-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; }
+.dup-empty { text-align: center; padding: 40px 16px; background: var(--surface); border: 1px dashed var(--border); border-radius: 10px; }
+.dup-picked { margin: 10px 0; font-size: 13px; min-height: 18px; }
+.dup-note { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.cp-chip-btn { border: 0; cursor: pointer; font: inherit; font-size: 11px; }
+@media (max-width: 700px) {
+  .dup-pair { grid-template-columns: minmax(0, 1fr); }
+  .dup-arrow { transform: rotate(90deg); justify-self: center; }
+}
+
 /* ---------- Market Pricing ---------- */
 .pr-head { flex-wrap: wrap; }
 .pr-head-right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }

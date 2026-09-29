@@ -168,7 +168,7 @@ themeToggleBtn.addEventListener('click', () => {
 const MODULES = [
   { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
-  { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'leads', 'board', 'reports', 'assistant'],
+  { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'leads', 'board', 'duplicates', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', brand: 'Desk Domus', label: 'Sales & F&I', views: ['deals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
@@ -185,14 +185,14 @@ const MODULES = [
 ];
 
 const VIEW_PANELS = {
-  pipeline: 'pipeline', leads: 'leads', board: 'leads', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
+  pipeline: 'pipeline', leads: 'leads', board: 'leads', duplicates: 'duplicatesPanel', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
   reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
 // Names of each screen, for the sidebar dropdowns.
 const VIEW_LABELS = {
-  execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', reports: 'Reports',
+  execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', duplicates: 'Duplicate Leads', reports: 'Reports',
   assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', pricing: 'Market Pricing', service: 'Repair Orders',
   serviceappts: 'Appointments', recon: 'Recon Domus ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
@@ -284,6 +284,7 @@ function showView(view) {
   if (view === 'partstickets') openTicketsView();
   if (view === 'partsorders') openOrdersView();
   if (view === 'pricing') openPricingView();
+  if (view === 'duplicates') openDuplicatesView();
   window.scrollTo(0, 0);
 }
 
@@ -1202,10 +1203,15 @@ document.getElementById('statusFilter').addEventListener('change', renderCars);
 
 // ---------- Leads table ----------
 
+// Customers waiting in Duplicate Leads stay out of the lists and the
+// pipeline until a manager merges them or says they're not duplicates.
+const inDupBucket = l => !!(l.duplicate && ['suspected', 'marked'].includes(l.duplicate.status));
+const workingLeads = () => leads.filter(l => !inDupBucket(l));
+
 function renderLeads() {
   const statusFilter = document.getElementById('leadStatusFilter').value;
-  let filtered = leads.filter(l =>
-    (!statusFilter || l.status === statusFilter) && (!leadsListFilter || leadsListFilter.ids.has(l.id)));
+  let filtered = leads.filter(l => (leadsListFilter ? leadsListFilter.ids.has(l.id) : !inDupBucket(l)) &&
+    (!statusFilter || l.status === statusFilter));
 
   document.getElementById('leadTableBody').innerHTML = filtered.map(l => {
     const car = cars.find(c => c.id === l.carId);
@@ -1265,7 +1271,7 @@ function renderLeadsKanban() {
   const board = document.getElementById('leadsKanbanView');
 
   board.innerHTML = LEAD_PIPELINE_STAGES.map(stage => {
-    const stageLeads = leads.filter(l => l.status === stage.key && (!leadsListFilter || leadsListFilter.ids.has(l.id)));
+    const stageLeads = leads.filter(l => l.status === stage.key && (leadsListFilter ? leadsListFilter.ids.has(l.id) : !inDupBucket(l)));
     return html`
       <div class="kanban-column" data-status="${stage.key}">
         <div class="kanban-column-header"><span>${stage.label}</span><span>${stageLeads.length}</span></div>
@@ -1402,6 +1408,7 @@ const ICONS = {
   userPlus: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6 1.6 0 3 .5 4.1 1.3"/><path d="M18.5 13v7M15 16.5h7"/></svg>',
   key: '<svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="M11.2 11.8L20 3M16.5 6.5l2.5 2.5M14.5 8.5l2 2"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+  copy: '<svg viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="3"/><path d="M3 18.5c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><circle cx="15.5" cy="8.5" r="3"/><path d="M15.5 13.5c3 0 5.5 2 5.5 5"/></svg>',
   chevron: '<svg viewBox="0 0 24 24"><path d="M6 4l7 8-7 8M12 4l7 8-7 8"/></svg>',
   clipboard: '<svg viewBox="0 0 24 24"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/><path d="M9 9h2.5"/></svg>'
 };
@@ -1438,7 +1445,7 @@ function pipelineLeads() {
   const source = document.getElementById('pipelineSourceFilter').value;
   const period = document.getElementById('pipelinePeriodFilter').value;
   const now = new Date();
-  return leads.filter(l => {
+  return workingLeads().filter(l => {
     if (source && l.source !== source) return false;
     const added = new Date(l.dateAdded);
     if (period === 'today') return isToday(l.dateAdded);
@@ -1533,8 +1540,9 @@ window.openPipelineList = function(stageKey, kind) {
 // Store-wide counts used by the tiles and the left rail. Each one knows
 // how to open the list behind its number.
 function attentionCounts() {
-  const followUp = leads.filter(needsFollowUp);
-  const newToday = leads.filter(l => isToday(l.dateAdded));
+  const followUp = workingLeads().filter(needsFollowUp);
+  const newToday = workingLeads().filter(l => isToday(l.dateAdded));
+  const dupes = leads.filter(inDupBucket);
   const keysOutCarIds = new Set(vehicleKeys.filter(k => k.status === 'out').map(k => k.carId));
   const keysOut = cars.filter(c => keysOutCarIds.has(c.id));
   const aged = cars.filter(c => c.status !== 'sold' && (Date.now() - new Date(c.dateAdded)) / DAY_MS >= AGED_INVENTORY_DAYS);
@@ -1549,6 +1557,8 @@ function attentionCounts() {
       open: () => { setLeadsListFilter('Follow-up due', followUp.map(l => l.id)); showView('leads'); } },
     { key: 'newtoday', label: 'New Today', icon: ICONS.userPlus, color: 'blue', count: newToday.length,
       open: () => { setLeadsListFilter('New today', newToday.map(l => l.id)); showView('leads'); } },
+    { key: 'duplicates', label: 'Duplicate Leads', icon: ICONS.copy, color: 'amber', count: dupes.length, railOnly: !dupes.length,
+      open: () => showView('duplicates') },
     { key: 'proposals', label: 'Open Proposals', icon: ICONS.calc, color: 'violet', count: proposals.length, railOnly: true,
       open: () => { showView('deals'); document.getElementById('dealStatusFilter').value = 'working'; renderDeals(); } },
     { key: 'appraisals', label: 'Open Appraisals', icon: ICONS.clipboard, color: 'violet', count: openAppraisals.length, railOnly: true,
@@ -3297,7 +3307,11 @@ function renderCpHeader(lead) {
     <span class="badge ${lead.status}">${statusLabel}</span>
     ${lead.customerNumber ? html`<span class="cp-chip">C-${lead.customerNumber}</span>` : ''}
     ${lead.type === 'business' ? html`<span class="cp-chip">Business</span>` : ''}
-    ${isSnoozed(lead) ? html`<span class="cp-chip cp-chip-warn">Snoozed until ${new Date(lead.snoozedUntil).toLocaleDateString()}</span>` : ''}`;
+    ${isSnoozed(lead) ? html`<span class="cp-chip cp-chip-warn">Snoozed until ${new Date(lead.snoozedUntil).toLocaleDateString()}</span>` : ''}
+    ${inDupBucket(lead) ? html`<button type="button" class="cp-chip cp-chip-warn cp-chip-btn" onclick="closeCustomerPage(); showView('duplicates')" title="Waiting in Duplicate Leads">Possible duplicate of ${(leads.find(l => l.id === lead.duplicate.ofId) || { name: 'another customer' }).name}</button>` : ''}`;
+  const dupBtn = document.getElementById('cpDupBtn');
+  dupBtn.textContent = inDupBucket(lead) ? 'Not a duplicate' : 'Mark duplicate';
+  dupBtn.title = inDupBucket(lead) ? 'Take this customer out of Duplicate Leads' : 'This customer is already in the CRM';
   document.getElementById('cpHeaderContact').innerHTML = html`
     ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a>` : html`<span class="muted">No phone</span>`}
     ${lead.email ? html`<a href="mailto:${lead.email}">✉️ ${lead.email}</a>` : html`<span class="muted">No email</span>`}
@@ -6040,6 +6054,7 @@ async function alertRequest(path, body) {
 // Opens whatever the alert is about.
 async function openAlertTarget(link) {
   if (!link) return;
+  if (link.kind === 'duplicates') { document.getElementById('alertsPanel').hidden = true; closeCustomerPage(); showView('duplicates'); return; }
   const find = () => (link.kind === 'lead' ? leads : link.kind === 'deal' ? deals : appraisals).some(r => r.id === link.id);
   if (!find()) await loadAll();
   if (!find()) { alert('That record is no longer there.'); return; }

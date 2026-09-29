@@ -304,6 +304,33 @@
     </div>
   </section>
 
+  <!-- DUPLICATE LEADS (CRM) -->
+  <section id="duplicatesPanel" class="tab-panel">
+    <div class="panel-header dup-head">
+      <span id="dupCount" class="dup-count"></span>
+      <span class="pr-head-right">
+        <button type="button" class="btn-secondary" id="dupScanBtn" data-manager-only>Check all customers</button>
+        <button type="button" class="btn-secondary" id="dupRulesBtn" data-manager-only>⚙ Duplicate rules</button>
+      </span>
+    </div>
+    <form id="dupRulesForm" class="dup-rules" hidden>
+      <h3>What makes a lead a duplicate</h3>
+      <p class="audit-note">A new lead that matches a customer already in the CRM on any of the checked items goes here instead of to the salespeople.</p>
+      <div class="dup-rules-grid">
+        <label class="check-label"><input type="checkbox" name="phone" /> Same phone number</label>
+        <label class="check-label"><input type="checkbox" name="email" /> Same email</label>
+        <label class="check-label"><input type="checkbox" name="name" /> Same first and last name</label>
+        <label>Only customers added in the last <input type="number" name="lookbackDays" min="0" max="3650" class="dup-days" /> days <span class="audit-note">(0 = any time)</span></label>
+        <label class="check-label"><input type="checkbox" name="holdFromRoundRobin" /> Hold duplicates out of round robin until they're reviewed</label>
+      </div>
+      <div class="dup-rules-actions">
+        <button type="button" class="btn-secondary" id="dupRulesCancel">Cancel</button>
+        <button type="submit" class="btn-primary">Save rules</button>
+      </div>
+    </form>
+    <div id="dupList"></div>
+  </section>
+
   <!-- APPRAISALS (Vehicle Management) -->
   <section id="appraisals" class="tab-panel">
     <div id="appraisalListView">
@@ -900,6 +927,7 @@
       </div>
       <div class="cp-header-side" id="cpHeaderSide"></div>
       <div class="cp-header-buttons">
+        <button type="button" class="btn-secondary btn-small" id="cpDupBtn" title="This customer is already in the CRM">Mark duplicate</button>
         <button type="button" class="btn-secondary btn-small" id="editFromProfileBtn">Edit</button>
         <button type="button" class="cp-close" id="closeProfileBtn" aria-label="Close" title="Close">✕</button>
       </div>
@@ -1670,6 +1698,22 @@
   </div>
 </div>
 
+<!-- Mark a customer as a duplicate -->
+<div class="modal" id="dupMarkModal">
+  <div class="modal-content">
+    <h2>Mark as a duplicate</h2>
+    <p class="send-text-hint">Pick the customer this one already is. It goes to Duplicate Leads, where a manager merges the two.</p>
+    <div id="dupMarkPicker"></div>
+    <div id="dupMarkPicked" class="dup-picked"></div>
+    <label class="dup-note">Note (optional) <input type="text" id="dupMarkNote" maxlength="300" placeholder="e.g. Same person, used a work email" /></label>
+    <p class="send-text-status-error" id="dupMarkMsg"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="dupMarkCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="dupMarkSave" disabled>Mark duplicate</button>
+    </div>
+  </div>
+</div>
+
 <!-- Market pricing rules -->
 <div class="modal" id="prRulesModal">
   <div class="modal-content">
@@ -1706,5 +1750,6 @@
 <script src="pricing-ui.js"></script>
 <script src="docs-ui.js"></script>
 <script src="deal-ui.js"></script>
+<script src="dupes-ui.js"></script>
 </body>
 </html>

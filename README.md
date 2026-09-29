@@ -194,6 +194,15 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Store hours** (time zone, and open/close or closed for each day): response time and the "new lead not contacted" alert count open-store minutes only -- a lead at 11pm called at 9:05am counts as 5 minutes. Reports can switch to around the clock
 - Managers and admins set up the rotation; only admins change store hours
 
+**Duplicate Leads** (CRM Domus → Duplicate Leads)
+- Every new lead (added by hand, from the website, from an appraisal) is checked against the customers already in the CRM. A match goes to the **Duplicate Leads** bucket instead of to a salesperson: it's held out of round robin, the salesperson and BDC agent on the existing customer get an alert that their customer came in again, and managers get an alert that one is waiting
+- **The rules** (managers, ⚙ Duplicate rules): same phone number (last 10 digits, any format), same email (not case-sensitive), and/or same first and last name; optionally only against customers added in the last so many days; and whether duplicates wait out of round robin. Phone and email are on by default
+- **Anyone can mark a customer as a duplicate** from the customer page (Mark duplicate → pick the existing customer, optional note). Whoever marked it can undo it
+- Each duplicate shows **side by side** with the customer it matches, with what matched highlighted, who found it, and when. Duplicates stay out of the Customers list, the board, and the pipeline counts until they're dealt with; the count is on the pipeline and the left rail
+- **Merge** (managers): the existing customer keeps its details and fills in anything missing from the duplicate (phone, email, address, assignments, credit app); notes, vehicles, and both histories are kept; deals, appraisals, tasks, repair orders, service appointments, and parts tickets move over; the duplicate is removed. Logged in the audit log
+- **Not a duplicate** (managers): it goes back with the other customers and, if round robin held it, gets assigned now. The pair isn't flagged again
+- **Check all customers** (managers): runs the rules over every customer already in the CRM (handy after an import); the newer of each matching pair goes to the bucket
+
 **Reports**
 - **Response Time**: how fast new leads got a first call, text, email, or showroom visit (notes don't count; completed call/text/email tasks do). Average and median, % within 5 minutes and 1 hour, a bar chart by time bucket, and tables by salesperson and by source -- including **who never got a response**
 - **Lead Source**: leads, contacted, appointments set and shown, sold, and closing % per source

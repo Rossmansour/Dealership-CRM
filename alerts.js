@@ -19,6 +19,8 @@ const store = require('./db');
 const ALERT_TYPES = [
   { key: 'lead_assigned', category: 'Customers', label: 'Customer assigned to you', description: 'Someone makes you Sales 1/2 or BDC 1/2 on a customer, or transfers one to you.', audience: 'assigned' },
   { key: 'lead_escalation', category: 'Customers', label: 'New lead not contacted', description: 'A new lead has had no call, text, email, or note for longer than the store allows (Admin → Fee Defaults).', audience: ['admin', 'sales_manager'], priority: 'high' },
+  { key: 'lead_came_back', category: 'Customers', label: 'Your customer came in again', description: 'A new lead matches a customer of yours (same phone, email, or name) and went to Duplicate Leads.', audience: 'assigned', priority: 'high' },
+  { key: 'duplicate_found', category: 'Customers', label: 'Possible duplicate lead', description: 'A new lead looks like a customer already in the CRM and is waiting in Duplicate Leads.', audience: ['admin', 'sales_manager'] },
   { key: 'task_assigned', category: 'Tasks & appointments', label: 'Task or appointment assigned to you', description: 'Someone else schedules a task or appointment for you.', audience: 'assigned' },
   { key: 'task_due', category: 'Tasks & appointments', label: 'Task or appointment due', description: 'One of your tasks or appointments is due now.', audience: 'assigned', priority: 'high', sound: true },
   { key: 'trade_needs_appraisal', category: 'Appraisals', label: 'Trade waiting for appraisal', description: 'Sales sent a trade over from a customer page.', audience: ['admin', 'sales_manager'] },
