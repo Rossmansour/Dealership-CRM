@@ -163,22 +163,24 @@ themeToggleBtn.addEventListener('click', () => {
 // Most views are one panel; "leads" and "board" are the same Customers
 // panel shown as a table or as a board.
 
+// Each module is its own DealerDomus product (Desk Domus, Recon Domus...):
+// its brand name shows in the sidebar and the top bar; label says what it is.
 const MODULES = [
   { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
-  { key: 'crm', label: 'CRM', views: ['pipeline', 'leads', 'board', 'reports', 'assistant'],
+  { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'leads', 'board', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
-  { key: 'sales', label: 'Sales & F&I', views: ['deals'],
+  { key: 'sales', brand: 'Desk Domus', label: 'Sales & F&I', views: ['deals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
-  { key: 'vehicles', label: 'Vehicle Management', views: ['inventory', 'appraisals', 'pricing'],
+  { key: 'vehicles', brand: 'Inventory Domus', label: 'Vehicle Management', views: ['inventory', 'appraisals', 'pricing'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M5.5 16.5v2M18.5 16.5v2"/><path d="M6.5 14.5h.01M17.5 14.5h.01"/></svg>' },
-  { key: 'recon', label: 'Recon', views: ['recon'], permissions: ['viewRecon'],
+  { key: 'recon', brand: 'Recon Domus', label: 'Recon', views: ['recon'], permissions: ['viewRecon'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/><path d="M8 3l1.5 2M16 3l-1.5 2M12 2v2.5"/></svg>' },
-  { key: 'service', label: 'Service', views: ['service', 'serviceappts'], permissions: ['viewService'],
+  { key: 'service', brand: 'Service Domus', label: 'Service', views: ['service', 'serviceappts'], permissions: ['viewService'],
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
-  { key: 'parts', label: 'Parts', views: ['parts', 'partstickets', 'partsorders'], permissions: ['viewParts'],
+  { key: 'parts', brand: 'Parts Domus', label: 'Parts', views: ['parts', 'partstickets', 'partsorders'], permissions: ['viewParts'],
     icon: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>' },
-  { key: 'accounting', label: 'Accounting', views: ['accounting'],
+  { key: 'accounting', brand: 'Accounting Domus', label: 'Accounting', views: ['accounting'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>' }
 ];
 
@@ -192,7 +194,7 @@ let currentView = 'pipeline';
 const VIEW_LABELS = {
   execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', reports: 'Reports',
   assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', pricing: 'Market Pricing', service: 'Repair Orders',
-  serviceappts: 'Appointments', recon: 'Recon ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
+  serviceappts: 'Appointments', recon: 'Recon Domus ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
 };
 const openRailGroups = new Set();
@@ -212,8 +214,8 @@ function renderModuleNav() {
   document.getElementById('moduleNav').innerHTML = MODULES.filter(moduleVisible).map(m => {
     const open = openRailGroups.has(m.key) || (current && current.key === m.key && !openRailGroups.has(`-${m.key}`));
     return html`<div class="rail-group ${open ? 'open' : ''}" data-rail-group="${m.key}">
-      <button type="button" class="rail-item rail-module ${current && current.key === m.key ? 'active' : ''}" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.label}">
-        ${new SafeHtml(m.icon)}<span class="rail-label">${m.label}</span>
+      <button type="button" class="rail-item rail-module ${current && current.key === m.key ? 'active' : ''}" data-module="${m.key}" onclick="showModule(${js(m.key)})" title="${m.brand ? `${m.brand} · ${m.label}` : m.label}">
+        ${new SafeHtml(m.icon)}<span class="rail-label">${m.brand || m.label}</span>
         ${m.views.length > 1 ? html`<span class="rail-caret" data-rail-caret="${m.key}" role="button" aria-label="Show ${m.label} screens" title="Show screens">▾</span>` : ''}
       </button>
       ${m.views.length > 1 ? html`<div class="rail-sub">${m.views.filter(viewVisible).map(v => html`
@@ -264,7 +266,7 @@ function showView(view) {
   document.querySelectorAll('.rail-subitem').forEach(b => b.classList.toggle('active', b.dataset.railView === view));
   if (!openRailGroups.has(`-${module.key}`)) document.querySelectorAll(`.rail-group[data-rail-group="${module.key}"]`).forEach(g => g.classList.add('open'));
   document.querySelectorAll('.nav-icon[data-view]').forEach(b => { b.style.display = b.dataset.module === module.key ? '' : 'none'; });
-  document.getElementById('currentModuleName').textContent = module.label;
+  document.getElementById('currentModuleName').textContent = module.brand || module.label;
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById(VIEW_PANELS[view]).classList.add('active');
   document.querySelectorAll('.nav-icon[data-view]').forEach(b => {
