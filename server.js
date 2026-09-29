@@ -23,6 +23,7 @@ const service = require('./service');
 const parts = require('./parts');
 const recon = require('./recon');
 const pricing = require('./pricing');
+const duplicates = require('./duplicates');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -135,6 +136,7 @@ app.use('/api', service.router);
 app.use('/api', parts.router);
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
+app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
 app.use('/api', docs.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
@@ -157,7 +159,8 @@ const SERVER_MANAGED_FIELDS = {
   cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId', 'market', 'priceHistory', 'priceLocked'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
-  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
+  // Duplicate Leads changes through /duplicate and /duplicates.
+  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
@@ -730,9 +733,13 @@ async function createLead(q, req, fields) {
     dateAdded: new Date().toISOString()
   };
   if (lead.carId && !lead.wishList.includes(lead.carId)) lead.wishList = [lead.carId, ...lead.wishList];
-  await assignFromRotations(q, req, lead);
+  // Looks like a customer we already have? It waits in Duplicate Leads
+  // instead of going out by round robin.
+  const dupe = await duplicates.checkNew(q, req.dealershipId, lead);
+  if (!dupe.hold) await assignFromRotations(q, req, lead);
   await store.insert(q, 'leads', req.dealershipId, lead);
   await alertAssignments(q, req, null, lead);
+  if (dupe.original) await duplicates.alertOwners(q, req, lead, dupe.original);
   return lead;
 }
 

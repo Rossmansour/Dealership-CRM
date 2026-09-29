@@ -45,6 +45,7 @@ const PERMISSIONS = {
   viewAuditLog: ['admin', 'general_manager', 'sales_manager'],
   viewAllReports: ['admin', 'general_manager', 'sales_manager', 'finance'], // everyone else sees their own numbers
   manageRotation: ['admin', 'general_manager', 'sales_manager'],  // round robin members, and who's taking leads
+  resolveDuplicates: ['admin', 'general_manager', 'sales_manager'], // merge duplicate leads, the duplicate rules (anyone can mark one)
   // Dashboard: the GM sees the whole store; sales & F&I the variable side;
   // service & parts the fixed side. Goals and expenses follow the same split.
   viewDashboardStore: ['admin', 'general_manager'],
