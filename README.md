@@ -36,6 +36,7 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 
 **Market Pricing -- Vehicle Management → Market Pricing** (managers)
 - Each car is compared with the same cars for sale near the store (year ± 1, make, model, trim, within the radius). Each similar car's price is adjusted for miles, and the middle price is the market
+- **The market is pulled on its own** -- nobody clicks anything: when a car is added or stocked in, when its year, make, model, trim, or miles change, and fresh for every car once a day (with or without auto-pricing). On an appraisal it's pulled when the appraisal opens and a moment after the vehicle or miles are typed, from what's on screen -- no Save needed
 - For each car: market price, % of market, rank among the similar cars, and a **suggested price** from the store's rules. Click a car to see every similar car and why its price was suggested
 - **Rules**: target % of market, price steps as cars age (e.g. 98% after 30 days, 96% after 45), never below cost + approved recon + a minimum gross, rounding, and how many similar cars are needed
 - **Apply suggested** to the cars you pick, or turn on **auto-pricing**: once a day every car that isn't locked moves to its suggested price (by at most a set amount at a time). **Lock** a car to keep its price
@@ -268,6 +269,12 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 
 **Configurable Fee Defaults** (⚙️ Fee Defaults on the Deals tab): Doc Fee, Title Fee, Registration Fee, License Fee, Dealer Fees, Acquisition Fee, and default tax rate auto-fill on every new deal instead of being re-typed -- admin-only editing is planned but not enforced yet
 
+## Marketing site
+
+A public site for DealerDomus lives in `site/` and is served at **/site** (no sign-in): the products with real screenshots from the app, what's coming next, the founding-store pilot, FAQ, and a **Book a demo** form. Demo requests come into DealerDomus itself as a new, hot customer with source *Website* (in the dealership set by `SITE_LEADS_DEALERSHIP_ID`, or the first one), with a hidden anti-bot field and a limit of a few requests per address per hour.
+
+To host it on its own domain later (e.g. dealerdomus.com), deploy the `site/` folder as a static site and point its form at the app with `<meta name="app-url" content="https://app.your-domain">` (the app will then need to allow that site in CORS). Screenshots are in `site/img/`; retake them when screens change.
+
 ## Module structure
 
 This app is organized as a DMS (Dealer Management System) with a left sidebar, similar in spirit to platforms like Tekion or DriveCentric. Hover over the sidebar to see full labels; click a module to switch into it:
@@ -474,7 +481,7 @@ Market Pricing needs live listings of cars for sale near the store. It uses [Mar
 
 1. Get a MarketCheck API key.
 2. Set `MARKETCHECK_API_KEY=your-key` in `.env` (or the host's environment settings) and restart.
-3. In **Market Pricing → Pricing rules**, enter the store's ZIP code and radius, set your rules, and click **Refresh market**. Turn on **auto-pricing** when you're happy with the suggestions.
+3. In **Market Pricing → Pricing rules**, enter the store's ZIP code and radius, and set your rules. Every car's market is pulled on its own from then on (**Refresh market** pulls it right away). Turn on **auto-pricing** when you're happy with the suggestions.
 
 ## Setting up real SMS (Twilio)
 

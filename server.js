@@ -80,6 +80,8 @@ app.get(['/', '/index.html', '/recon.html'], auth.requireLoginForPage);
 // Recon runs in its own browser tab.
 app.get('/recon', auth.requireLoginForPage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'recon.html')));
 app.use(express.static(path.join(__dirname, 'public')));
+// The public marketing site (no sign-in).
+app.use('/site', express.static(path.join(__dirname, 'site')));
 
 // ---------- Request plumbing ----------
 
@@ -93,6 +95,37 @@ const TAX_RATES_SEED_VERSION = 2;
 
 // Every /api route except signing in requires a signed-in user, and acts
 // for that user's dealership (req.dealershipId).
+// "Book a demo" on the marketing site: the request becomes a new customer
+// (source: Website) in DealerDomus's own store -- the dealership set in
+// SITE_LEADS_DEALERSHIP_ID, or the first one. No sign-in; a hidden field
+// catches bots and each address can only send a few an hour.
+const demoRequestsByIp = new Map();
+app.post('/api/public/demo-request', (req, res, next) => demoRequest(req, res).catch(next));
+async function demoRequest(req, res) {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ ok: true }); // a bot filled the hidden field
+  const now = Date.now();
+  const recent = (demoRequestsByIp.get(req.ip) || []).filter(t => now - t < 3600000);
+  if (recent.length >= 5) return res.status(429).json({ error: 'Too many requests -- please try again later.' });
+  const t = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+  const name = t(b.name, 120);
+  const dealership = t(b.dealership, 160);
+  const email = t(b.email, 160);
+  if (!name || !dealership || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Please add your name, dealership, and a valid email.' });
+  recent.push(now);
+  demoRequestsByIp.set(req.ip, recent);
+  const dealershipId = process.env.SITE_LEADS_DEALERSHIP_ID ||
+    (await store.pool.query('SELECT id FROM dealerships ORDER BY created_at LIMIT 1')).rows[0].id;
+  const who = { dealershipId, user: { id: null, name: 'Website', role: 'system' }, ip: req.ip };
+  const notes = [`Demo request from the website`, `Dealership: ${dealership}`, b.role && `Role: ${t(b.role, 60)}`,
+    b.stores && `Rooftops: ${t(b.stores, 20)}`, b.message && `Interested in: ${t(b.message, 1000)}`].filter(Boolean).join('\n');
+  await store.tx(async q => {
+    const lead = await createLead(q, who, { name, email, phone: t(b.phone, 40), source: 'website', notes, hot: true });
+    await audit.created(q, who, 'lead', lead, 'Demo request from the website');
+  });
+  res.status(201).json({ ok: true });
+}
+
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);
@@ -474,6 +507,7 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
     await audit.created(q, req, 'car', newCar);
     await recon.addCar(q, req, newCar); // straight into recon: used at Purchase / Trade, new at New - PDI
   });
+  pricing.pullSoon(req.dealershipId, [newCar.id]); // its market, in the background
   res.status(201).json(newCar);
 }));
 
@@ -505,9 +539,12 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
 
     const saved = await store.save(q, 'cars', req.dealershipId, car.id, { ...car, ...updates });
     await audit.updated(q, req, 'car', car, saved);
+    // A different car (or miles) means a different market: pull it again.
+    if (['year', 'make', 'model', 'trim', 'mileage', 'stockType'].some(f => String(car[f] ?? '') !== String(saved[f] ?? '')) || !car.market) req.pullMarket = true;
     return saved;
   });
   if (!updated) return res.status(404).json({ error: 'Car not found' });
+  if (req.pullMarket) pricing.pullSoon(req.dealershipId, [updated.id]);
   res.json(updated);
 }));
 
@@ -2140,6 +2177,7 @@ async function stockInTrade(q, req, deal) {
     });
   }
   await recon.addCar(q, req, car);
+  req.stockedIn = car.id; // its market gets pulled once the deal is saved
   return link(car.id);
 }
 
@@ -2265,6 +2303,7 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     return stockInTrade(q, req, saved);
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
+  if (req.stockedIn) pricing.pullSoon(req.dealershipId, [req.stockedIn]);
   res.json(updated);
 }));
 
@@ -2631,9 +2670,13 @@ app.post('/api/appraisals/:id/market', wrap(async (req, res) => {
   const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
   if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
   if (!pricing.marketConnected()) return res.status(400).json({ error: 'Market data is not connected yet.' });
-  if (!appraisal.year || !appraisal.make || !appraisal.model) return res.status(400).json({ error: 'Enter the year, make, and model first (or decode the VIN).' });
+  // The screen sends what's typed right now, so the market follows the form
+  // without saving first. Anything it leaves out comes from the appraisal.
+  const b = req.body || {};
+  const pick = f => (b[f] !== undefined && b[f] !== null ? String(b[f]).trim().slice(0, 60) : appraisal[f]);
+  const car = { year: Number(pick('year')) || null, make: pick('make'), model: pick('model'), trim: pick('trim') || '', vin: pick('vin') || '', mileage: Number(pick('mileage')) || 0, stockType: 'used' };
+  if (!car.year || !car.make || !car.model) return res.status(400).json({ error: 'Enter the year, make, and model first (or decode the VIN).' });
   const cfg = pricing.pricingSettings((await getSettings(store.pool, req.dealershipId)));
-  const car = { year: appraisal.year, make: appraisal.make, model: appraisal.model, trim: appraisal.trim, vin: appraisal.vin, mileage: appraisal.mileage, stockType: 'used' };
   let market;
   try {
     market = pricing.snapshot(car, cfg, await pricing.fetchMarket(car, cfg));
@@ -2643,6 +2686,7 @@ app.post('/api/appraisals/:id/market', wrap(async (req, res) => {
   market.suggestedRetail = market.median && market.count >= cfg.minComps
     ? Math.round(market.median * cfg.targetPct / 100 / cfg.roundTo) * cfg.roundTo : null;
   market.comps = market.comps.slice(0, 25);
+  market.for = [car.year, car.make, car.model, car.trim, car.mileage].join('|'); // what it was pulled for
   const saved = await store.tx(async q => {
     const current = await store.get(q, 'appraisals', req.dealershipId, appraisal.id, { forUpdate: true });
     return current && store.save(q, 'appraisals', req.dealershipId, current.id, { ...current, market });
@@ -2837,7 +2881,8 @@ app.post('/api/appraisals/:id/acquire', allow('editInventory'), wrap(async (req,
         status: 'available'
       }),
       equipment: appraisal.equipment || [],
-      sourceAppraisalId: appraisal.id
+      sourceAppraisalId: appraisal.id,
+      market: appraisal.market || undefined // what the appraiser saw, until a fresh pull lands
     };
     await store.insert(q, 'cars', req.dealershipId, car);
     await audit.created(q, req, 'car', car, `From appraisal A-${appraisal.appraisalNumber}`);
@@ -2854,6 +2899,7 @@ app.post('/api/appraisals/:id/acquire', allow('editInventory'), wrap(async (req,
     return { appraisal: saved, car };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });
+  pricing.pullSoon(req.dealershipId, [result.car.id]);
   res.json(result);
 }));
 
@@ -3313,8 +3359,11 @@ if (require.main === module) {
       });
       // Time-based alerts (tasks coming due, leads nobody has contacted).
       setInterval(() => runAlertSweep().catch(err => console.error('Alert check failed:', err.message)), 60 * 1000);
-      // Market pricing: stores with auto-pricing on get fresh prices once a day.
-      setInterval(() => pricing.autoPriceSweep().catch(err => console.error('Auto-pricing failed:', err.message)), 60 * 60 * 1000);
+      // Market pricing: every car's market is pulled fresh once a day (and
+      // stores with auto-pricing on get fresh prices). First check a minute after start.
+      const pricingSweep = () => pricing.autoPriceSweep().catch(err => console.error('Auto-pricing failed:', err.message));
+      setTimeout(pricingSweep, 60 * 1000);
+      setInterval(pricingSweep, 60 * 60 * 1000);
     })
     .catch(err => {
       console.error('Failed to start:', err);
