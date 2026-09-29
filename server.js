@@ -1414,6 +1414,53 @@ function structureProducts(d) {
   return out;
 }
 
+// The recap: pack for this deal, holdback, incentives and adjustments as
+// lines, what the store owes (with its cost), how reserve is worked out,
+// commission overrides, and the lender's book value / max LTV.
+function structureRecap(d) {
+  const out = {};
+  if (Array.isArray(d.incentiveLines)) {
+    const lines = d.incentiveLines.slice(0, 5).map(x => ({ description: dText(x.description, 80), program: dText(x.program, 40), amount: dNum(x.amount) })).filter(x => x.description || x.amount);
+    Object.assign(out, { incentiveLines: lines, incentives: sum(lines, 'amount') });
+  }
+  if (Array.isArray(d.adjustments)) {
+    const lines = d.adjustments.slice(0, 8).map(x => ({ description: dText(x.description, 80), amount: dNum(x.amount) })).filter(x => x.description || x.amount);
+    Object.assign(out, { adjustments: lines, adjustmentsTotal: sum(lines, 'amount') });
+  }
+  if (Array.isArray(d.weOwe)) {
+    out.weOwe = d.weOwe.slice(0, 30).map(w => ({ item: dText(w.item, 200), due: dDate(w.due) || '', cost: dNum(w.cost),
+      roId: dText(w.roId, 60) || null, roNumber: w.roNumber ? Math.round(dNum(w.roNumber)) : null })).filter(w => w.item || w.cost);
+  }
+  if (d.packOverride !== undefined) out.packOverride = d.packOverride === '' || d.packOverride === null ? null : dNum(d.packOverride);
+  for (const f of ['holdback', 'flatReserve', 'reserveBonus', 'bookValue']) if (d[f] !== undefined) out[f] = dNum(d[f]);
+  if (d.buyRate !== undefined) out.buyRate = d.buyRate === '' || d.buyRate === null ? null : dNum(d.buyRate);
+  if (d.reserveSplit !== undefined) out.reserveSplit = Math.min(100, Math.max(0, dNum(d.reserveSplit)));
+  if (d.maxLtv !== undefined) out.maxLtv = d.maxLtv === '' || d.maxLtv === null ? null : dNum(d.maxLtv);
+  if (d.reserveMethod !== undefined) out.reserveMethod = ['rate', 'flat', 'manual'].includes(d.reserveMethod) ? d.reserveMethod : 'manual';
+  if (d.commissions && typeof d.commissions === 'object') {
+    out.commissions = {};
+    for (const [role] of dashboard.COMMISSION_ROLES) {
+      const c = d.commissions[role];
+      if (c && typeof c === 'object') out.commissions[role] = { rate: c.rate === '' || c.rate === undefined ? '' : dNum(c.rate), split: c.split === '' || c.split === undefined ? '' : dNum(c.split) };
+    }
+  }
+  return out;
+}
+
+// Reserve (the lender's pay to the store for the rate markup): the
+// payments at the sell rate less the payments at the buy rate, times the
+// store's share -- or a flat amount -- plus any bonus. "Manual" keeps what
+// was typed in.
+function reserveFor(d, calc) {
+  const method = d.reserveMethod || 'manual';
+  if (method === 'flat') return { reserve: round2(dNum(d.flatReserve) + dNum(d.reserveBonus)) };
+  if (method !== 'rate' || (d.dealType || 'retail') !== 'retail' || d.buyRate === null || d.buyRate === undefined || d.buyRate === '') return {};
+  const atBuy = calculateRetailDeal({ ...d, apr: dNum(d.buyRate) });
+  const split = d.reserveSplit === undefined || d.reserveSplit === null || d.reserveSplit === '' ? 75 : dNum(d.reserveSplit);
+  const markup = Math.max(0, calc.totalOfPayments - atBuy.totalOfPayments);
+  return { reserve: round2(markup * split / 100 + dNum(d.reserveBonus)), reserveMarkup: round2(markup) };
+}
+
 function structureDeal(d) {
   const out = {};
   if (Array.isArray(d.trades)) {
@@ -1478,7 +1525,7 @@ function structureDeal(d) {
   if (d.employees && typeof d.employees === 'object') {
     out.employees = Object.fromEntries(DEAL_EMPLOYEE_ROLES.map(r => [r, dText(d.employees[r], 60) || null]));
   }
-  Object.assign(out, structureProducts(d));
+  Object.assign(out, structureProducts(d), structureRecap(d));
   if (d.coLeadId !== undefined) out.coLeadId = dText(d.coLeadId, 60) || null;
   for (const f of ['lender', 'program', 'county', 'city']) if (d[f] !== undefined) out[f] = dText(d[f], 80);
   if (d.dealDate !== undefined) out.dealDate = dDate(d.dealDate);
@@ -2101,7 +2148,84 @@ async function stockInTrade(q, req, deal) {
 app.post('/api/deals/preview', wrap(async (req, res) => {
   const b = req.body || {};
   const input = { ...b, ...structureDeal(b) };
-  res.json({ ...input, ...calculateDeal(input) });
+  const calc = calculateDeal(input);
+  const out = { ...input, ...calc, ...reserveFor(input, calc) };
+  // Managers and F&I also see the gross and commissions as they work the deal.
+  if (auth.can(req.user, 'editDealAccounting')) Object.assign(out, await dealRecap(store.pool, req.dealershipId, out, b.id));
+  res.json(out);
+}));
+
+// Gross (front, back, total), commissions, and the lender advance check for a deal.
+async function dealRecap(q, dealershipId, deal, dealId) {
+  const [car, dealership, appraisals, staff] = await Promise.all([
+    deal.carId ? store.get(q, 'cars', dealershipId, deal.carId) : null,
+    store.getDealership(q, dealershipId),
+    dealId ? store.list(q, 'appraisals', dealershipId) : [],
+    q.query('SELECT id, name FROM users WHERE dealership_id = $1', [dealershipId])
+  ]);
+  const settings = { ...defaultFeeSettings(), ...((dealership && dealership.settings) || {}) };
+  const acv = (appraisals.find(a => a.dealId === dealId && a.status === 'acquired') || {}).acquiredFor;
+  const gross = dashboard.dealGross(deal, car, settings, acv);
+  gross.total = round2(gross.front + gross.finance + gross.incentives);
+  gross.carCost = car ? dNum(car.cost) : null;
+  const names = new Map(staff.rows.map(u => [String(u.id), u.name]));
+  const commissions = dashboard.commissionsFor(deal, gross, settings).map(c => ({ ...c, name: names.get(String(c.userId)) || '' }));
+  const financed = (deal.dealType || 'retail') === 'lease' ? dNum(deal.netCapCost) : dNum(deal.amountFinanced);
+  const book = dNum(deal.bookValue);
+  const ltv = book ? round2(financed / book * 100) : null;
+  const maxLtv = deal.maxLtv === null || deal.maxLtv === undefined || deal.maxLtv === '' ? null : dNum(deal.maxLtv);
+  const advance = { book, financed, ltv, maxLtv, maxAdvance: book && maxLtv ? round2(book * maxLtv / 100) : null,
+    over: book && maxLtv ? round2(Math.max(0, financed - book * maxLtv / 100)) : null };
+  return { gross, commissions, advance, commissionPlan: dashboard.commissionPlan(settings) };
+}
+
+// A "we owe" that needs shop work goes to service as an RO on the car, paid
+// internally (the store owes it).
+app.post('/api/deals/:id/we-owe/:index/service', wrap(async (req, res) => {
+  if (!auth.can(req.user, 'editDealAccounting') && !auth.can(req.user, 'writeRepairOrders')) return res.status(403).json({ error: 'Managers, F&I, or service advisors send we-owes to service.' });
+  const result = await store.tx(async q => {
+    const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
+    if (!deal) return { status: 404, error: 'Deal not found' };
+    const i = Number(req.params.index);
+    const item = (deal.weOwe || [])[i];
+    if (!item || !item.item) return { status: 404, error: 'That we-owe item is not on the deal.' };
+    if (item.roId) return { status: 409, error: `Already on RO-${item.roNumber}.` };
+    if (!deal.carId && !deal.leadId) return { status: 400, error: 'Pick the customer or vehicle first.' };
+    const made = await service.createRo(q, req, { leadId: deal.leadId, carId: deal.carId, notes: `We owe from deal D-${deal.dealNumber}${item.due ? `, due ${item.due}` : ''}`,
+      jobs: [{ concern: `We owe: ${item.item}`, payType: 'internal' }] });
+    if (made.error) return { status: 400, error: made.error };
+    const weOwe = deal.weOwe.map((w, n) => (n === i ? { ...w, roId: made.ro.id, roNumber: made.ro.roNumber } : w));
+    const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...deal, weOwe });
+    await audit.updated(q, req, 'deal', deal, saved, `We owe "${item.item}" sent to service on RO-${made.ro.roNumber}`);
+    return { deal: saved, ro: made.ro };
+  });
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+}));
+
+// The deal's recap: gross, commissions, and the advance check.
+app.get('/api/deals/:id/gross', allow('editDealAccounting'), wrap(async (req, res) => {
+  const deal = await store.get(store.pool, 'deals', req.dealershipId, req.params.id);
+  if (!deal) return res.status(404).json({ error: 'Deal not found' });
+  res.json(await dealRecap(store.pool, req.dealershipId, deal, deal.id));
+}));
+
+// The store's commission plan (rate, base, and minimum per role).
+app.put('/api/commission-plan', allow('editCommissionPlan'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const saved = await store.tx(async q => {
+    const current = await getSettings(q, req.dealershipId);
+    const plan = {};
+    for (const group of Object.keys(dashboard.DEFAULT_COMMISSION_PLAN)) {
+      const g = b[group] || {};
+      plan[group] = { base: ['front', 'back', 'total'].includes(g.base) ? g.base : dashboard.DEFAULT_COMMISSION_PLAN[group].base,
+        rate: Math.min(100, Math.max(0, dNum(g.rate))), mini: Math.max(0, dNum(g.mini)) };
+    }
+    const next = await store.saveSettings(q, req.dealershipId, { ...current, commissionPlan: plan });
+    await audit.updated(q, req, 'settings', { id: 'commission-plan', ...(current.commissionPlan || {}) }, { id: 'commission-plan', ...plan }, 'Commission plan');
+    return next.commissionPlan;
+  });
+  res.json(saved);
 }));
 
 app.put('/api/deals/:id', wrap(async (req, res) => {
@@ -2114,7 +2238,8 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     const updates = editableFields('deals', req.body);
     // Store-side money (F&I cost, reserve, incentives, chargebacks) is only
     // changed by managers and F&I.
-    const ACCOUNTING = ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate'];
+    const ACCOUNTING = ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate', 'incentiveLines', 'adjustments', 'packOverride', 'holdback',
+      'buyRate', 'reserveMethod', 'reserveSplit', 'flatReserve', 'reserveBonus', 'commissions'];
     // F&I products (with their costs) are F&I's and managers' to change.
     const PRODUCTS = ['warranties', 'gap', 'creditInsurance', 'aftermarkets', 'gapPremium', 'servicePremium', 'maintenancePremium', 'aftermarketAmount', 'creditInsPremium'];
     if (!auth.can(req.user, 'editDealAccounting')) for (const f of [...ACCOUNTING, ...PRODUCTS]) delete updates[f];
@@ -2132,6 +2257,7 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     if (merged.status === 'working') { merged.deliveredAt = null; merged.finalizedAt = null; }
     Object.assign(merged, structureDeal(merged)); // itemized lines, cleaned, with their totals
     const calculated = calculateDeal(merged);
+    Object.assign(calculated, reserveFor(merged, calculated));
 
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });
     await audit.updated(q, req, 'deal', deal, saved);

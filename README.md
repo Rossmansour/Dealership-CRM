@@ -89,7 +89,11 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
     - **Deferred payments** (down payment paid after delivery), cash down and deposit, first payment date and days to it
     - **F&I products**, each with what the customer pays and what the store pays (cost and profit shown to F&I and managers): up to 2 **service contracts** and 2 **maintenance plans** (company, plan, months/miles, deductible, policy #), **GAP**, **credit insurance** (life, A&H, IUI), and up to 20 **aftermarkets** (taxable, "we owe", vendor, itemize, pre-installed). With product lines, the deal's F&I product cost is the sum of their costs. Only F&I and managers can change products; everyone can see them
     - **Insurance** (the customer's auto policy), **Miscellaneous** (registration, temp plate, inspection, defects to disclose on F&I contracts), **Titling** (titled to, lienholder), and **Third parties**
-    - **Employees** on the deal (salespeople, managers, F&I, closers) and **Store gross** (managers and F&I)
+    - **Employees** on the deal (salespeople, managers, F&I, closers)
+    - **Recap** (F&I and managers): vehicle price vs. cost, pack (the deal's own or the store's), doc fee, trade over-allowance, holdback, incentive lines, adjustments (bank fee, transport... off front gross), and we-owes with their cost -- each can be **sent to service** as an internal RO. Finance side: buy vs. sell rate, reserve from the rate markup (store share %), flat, or typed in, plus bonus; each product's price, cost, and profit; chargebacks. Front, back, and total gross match the dashboard
+    - **Commissions** (F&I and managers): each person on the deal is paid a % of front, back, or total gross per the store's plan (with a minimum for salespeople), shared by split %; a deal can change one person's rate or split. Admins and GMs set the plan
+    - **Deal summary**: everything on one page, printable
+    - **Lender advance**: book value and the lender's max LTV on the payment block, with a warning when the deal is over
   - **Credit Application**: a full RouteOne/DealerTrack-style application —
     - **Individual or Business** application type
     - Personal info (name, suffix, SSN, DOB, address, phone/email contact disclosures, license)

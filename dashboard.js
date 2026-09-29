@@ -49,14 +49,68 @@ function openDays(key, storeHours) {
 }
 
 // ---------- Gross per deal ----------
+// Front gross: price - car cost - pack + doc fee - trade over-allowance
+// - recap adjustments (bank fee, transport...) - what the store owes
+// (we-owe costs). Back gross: F&I products less their cost, plus reserve.
+// The deal's own pack (set on its recap) wins over the store's.
 function dealGross(deal, car, settings, tradeAcv) {
   const type = car && car.stockType === 'new' ? 'new' : 'used';
-  const pack = type === 'new' ? n(settings.newCarPack) : n(settings.appraisalPack);
-  const overAllowance = tradeAcv !== null && tradeAcv !== undefined && deal.hasTrade ? n(deal.tradeInValue) - n(tradeAcv) : 0;
-  const front = n(deal.vehiclePrice) - n(car && car.cost) - pack + n(deal.docFee) - overAllowance;
+  const storePack = type === 'new' ? n(settings.newCarPack) : n(settings.appraisalPack);
+  const pack = deal.packOverride !== undefined && deal.packOverride !== null && deal.packOverride !== '' ? n(deal.packOverride) : storePack;
+  // ACV: the acquired appraisal's, or the ACVs entered on the deal's trades.
+  const acv = tradeAcv !== null && tradeAcv !== undefined ? tradeAcv : (Array.isArray(deal.trades) && n(deal.tradeAcv) ? n(deal.tradeAcv) : null);
+  const overAllowance = acv !== null && deal.hasTrade ? n(deal.tradeInValue) - n(acv) : 0;
+  const adjustments = n(deal.adjustmentsTotal);
+  const weOweCost = (deal.weOwe || []).reduce((t, w) => t + n(w && w.cost), 0);
+  const front = n(deal.vehiclePrice) - n(car && car.cost) - pack + n(deal.docFee) - overAllowance - adjustments - weOweCost;
   const products = n(deal.gapPremium) + n(deal.servicePremium) + n(deal.maintenancePremium) + n(deal.aftermarketAmount) + n(deal.creditInsPremium);
   const finance = products - n(deal.fiProductCost) + n(deal.reserve);
-  return { type, front, finance, incentives: n(deal.incentives), pack, overAllowance };
+  return { type, front, finance, incentives: n(deal.incentives), pack, overAllowance, adjustments, weOweCost, holdback: n(deal.holdback), products, productCost: n(deal.fiProductCost), reserve: n(deal.reserve) };
+}
+
+// ---------- Commissions ----------
+// Each role on the deal is paid a % of a gross (front, back, or total),
+// with a minimum for salespeople, shared by split %. The store sets the
+// plan; a deal can change one person's rate or split.
+const COMMISSION_ROLES = [
+  ['sales1', 'Salesperson 1', 'sales'], ['sales2', 'Salesperson 2', 'sales'], ['sales3', 'Salesperson 3', 'sales'], ['sales4', 'Salesperson 4', 'sales'],
+  ['fiManager', 'F&I manager', 'fiManager'], ['salesManager', 'Sales manager', 'salesManager'], ['deskManager', 'Desk manager', 'deskManager'],
+  ['internetManager', 'Internet manager', 'internetManager'], ['teamManager', 'Team manager', 'teamManager'], ['closer1', 'Closer 1', 'closer'], ['closer2', 'Closer 2', 'closer']
+];
+const DEFAULT_COMMISSION_PLAN = {
+  sales: { base: 'front', rate: 25, mini: 200 }, fiManager: { base: 'back', rate: 10, mini: 0 }, salesManager: { base: 'total', rate: 3, mini: 0 },
+  deskManager: { base: 'total', rate: 0, mini: 0 }, internetManager: { base: 'front', rate: 0, mini: 0 }, teamManager: { base: 'total', rate: 0, mini: 0 },
+  closer: { base: 'front', rate: 0, mini: 0 }
+};
+function commissionPlan(settings) {
+  const saved = (settings && settings.commissionPlan) || {};
+  const out = {};
+  for (const [group, d] of Object.entries(DEFAULT_COMMISSION_PLAN)) {
+    const s = saved[group] || {};
+    out[group] = { base: ['front', 'back', 'total'].includes(s.base) ? s.base : d.base, rate: s.rate !== undefined ? n(s.rate) : d.rate, mini: s.mini !== undefined ? n(s.mini) : d.mini };
+  }
+  return out;
+}
+function commissionsFor(deal, gross, settings) {
+  const plan = commissionPlan(settings);
+  const emp = deal.employees || {};
+  const over = deal.commissions || {};
+  // Salespeople without their own split share what the others' splits leave.
+  const salesRoles = ['sales1', 'sales2', 'sales3', 'sales4'].filter(r => emp[r]);
+  const setSplit = r => over[r] && over[r].split !== undefined && over[r].split !== '' && over[r].split !== null;
+  const takenSplit = salesRoles.filter(setSplit).reduce((t, r) => t + n(over[r].split), 0);
+  const openSales = salesRoles.filter(r => !setSplit(r)).length || 1;
+  const salesShare = Math.max(0, Math.round((100 - takenSplit) / openSales * 100) / 100);
+  const bases = { front: gross.front, back: gross.finance, total: gross.front + gross.finance + gross.incentives };
+  return COMMISSION_ROLES.filter(([role]) => emp[role]).map(([role, label, group]) => {
+    const p = plan[group];
+    const o = over[role] || {};
+    const rate = o.rate !== undefined && o.rate !== '' && o.rate !== null ? n(o.rate) : p.rate;
+    const split = o.split !== undefined && o.split !== '' && o.split !== null ? n(o.split) : (group === 'sales' ? salesShare : 100);
+    const base = bases[p.base];
+    const earned = Math.max(base * rate / 100, rate || p.mini ? p.mini : 0);
+    return { role, label, userId: emp[role], base: p.base, baseAmount: Math.round(base * 100) / 100, rate, split, mini: p.mini, amount: Math.round(earned * split) / 100 };
+  });
 }
 
 function emptyBucket() {
@@ -365,4 +419,4 @@ router.put('/dashboard/plan/:month', wrap(async (req, res) => {
   res.json(saved);
 }));
 
-module.exports = { router, dealGross, summarize, fixedSummary, openDays, monthRange, shiftMonth };
+module.exports = { router, dealGross, commissionsFor, commissionPlan, DEFAULT_COMMISSION_PLAN, COMMISSION_ROLES, summarize, fixedSummary, openDays, monthRange, shiftMonth };
