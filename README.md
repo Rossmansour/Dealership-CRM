@@ -41,6 +41,14 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Market data comes from MarketCheck (see *Setting up market pricing*). Until it's connected, demo cars use made-up demo listings so the screen can be tried
 - **Appraisals use the same market**: the Market card on an appraisal pulls the similar cars for sale nearby (adjusted to its miles), shows its rank and % of market at the asking price, and suggests a retail price. **Use as asking price** puts it in the offer calculator, which works the offer back from it
 
+**Deal Jacket -- a tab on every deal**
+- **Scan or upload** documents to the deal (PDF, JPG, PNG up to 15 MB): the Carfax, stips, insurance, signed paperwork. Files are stored encrypted in the database and only open for signed-in staff
+- **Form library** (managers and F&I): upload the store's blank forms (your contract forms from your forms provider, DMV forms) once, then add them to any deal
+- **Wet signature only**: documents whose name matches the store's list (REG 262 by default) are marked for ink signing and can't be sent for e-signing. Any document can be switched either way
+- Mark each document **signed** (who and when is kept); remove one (whoever added it, or a manager)
+- **Print from the deal**: a buyer's order, a we-owe sheet (items the store owes, with due dates), and a deal recap with front and back gross (managers and F&I). These are sample forms -- have your attorney approve them before real deals
+- **Send for signature** is ready for DocuSign once it's connected
+
 **Appraisals ("book outs") -- Vehicle Management → Appraisals**
 - Start one from **+ New Appraisal**, a customer's page (**Trade In**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)
 - VIN decode fills year, make, model, trim, body, engine, drivetrain, transmission, and fuel; then mileage, colors, condition, and equipment (clickable options by group)
