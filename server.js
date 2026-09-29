@@ -1333,8 +1333,94 @@ function extractFiProducts(input) {
     maintenancePremium: Number(input.maintenancePremium) || 0,
     aftermarketAmount: Number(input.aftermarketAmount) || 0, // accessories/other aftermarket products
     dealerFees: Number(input.dealerFees) || 0,
-    licenseFee: Number(input.licenseFee) || 0
+    licenseFee: Number(input.licenseFee) || 0,
+    otherGovFees: Number(input.otherGovFees) || 0, // state fee lines beyond license / registration / title
+    priorLeaseBalance: Number(input.priorLeaseBalance) || 0, // a lease payoff rolled into this deal
+    taxableDealerFees: Number(input.taxableDealerFees) || 0 // dealer fee lines the state taxes
   };
+}
+
+// ---------- Deal structure: itemized lines behind the deal's totals ----------
+// The deal screen keeps each piece as its own lines -- up to 3 trades,
+// rebates, dealer fees, state fees, deferred down payments, a prior lease
+// payoff -- and this rolls them up into the totals the calculators use
+// (tradeInValue, rebate, dealerFees, licenseFee...). Deals made before the
+// itemized lines existed simply don't have them, and keep their totals.
+const dNum = v => (v === '' || v === null || v === undefined ? 0 : Math.round((Number(String(v).replace(/[$,\s]/g, '')) || 0) * 100) / 100);
+const dText = (v, max = 120) => String(v ?? '').trim().slice(0, max);
+const dDate = v => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : ''; };
+const sum = (list, key) => round2(list.reduce((t, x) => t + dNum(x[key]), 0));
+const DEAL_EMPLOYEE_ROLES = ['sales1', 'sales2', 'sales3', 'sales4', 'deskManager', 'salesManager', 'internetManager', 'teamManager', 'fiManager', 'closer1', 'closer2'];
+const GOV_FEE_FIELDS = { license: 'licenseFee', registration: 'registrationFee', title: 'titleFee' };
+
+function structureDeal(d) {
+  const out = {};
+  if (Array.isArray(d.trades)) {
+    const trades = d.trades.slice(0, 3).map(t => ({
+      vin: vinDecoder.normalizeVin(dText(t.vin, 20)), year: dText(t.year, 4), make: dText(t.make, 40), model: dText(t.model, 60), trim: dText(t.trim, 60),
+      mileage: dNum(t.mileage), color: dText(t.color, 30), allowance: dNum(t.allowance), payoff: dNum(t.payoff), acv: dNum(t.acv),
+      lienholder: dText(t.lienholder, 80), lienPhone: dText(t.lienPhone, 30), lienAccount: dText(t.lienAccount, 40), goodThru: dDate(t.goodThru),
+      appraisalId: dText(t.appraisalId, 60) || null
+    })).filter(t => t.vin || t.make || t.model || t.allowance || t.payoff);
+    const first = trades[0] || {};
+    Object.assign(out, {
+      trades, hasTrade: trades.length > 0,
+      tradeInValue: sum(trades, 'allowance'), tradeInPayoff: sum(trades, 'payoff'), tradeAcv: sum(trades, 'acv'),
+      tradeVin: first.vin || '', tradeYear: first.year || '', tradeMake: first.make || '', tradeModel: first.model || '', tradeMileage: first.mileage || ''
+    });
+  }
+  if (Array.isArray(d.rebates)) {
+    const rebates = d.rebates.slice(0, 10).map(r => ({ description: dText(r.description), amount: dNum(r.amount), program: dText(r.program, 60), code: dText(r.code, 20) }))
+      .filter(r => r.description || r.amount);
+    Object.assign(out, { rebates, rebate: sum(rebates, 'amount') });
+  }
+  if (Array.isArray(d.dealerFeeLines)) {
+    const lines = d.dealerFeeLines.slice(0, 10).map(f => ({ description: dText(f.description), amount: dNum(f.amount), taxable: !!f.taxable, paidTo: dText(f.paidTo, 80) }))
+      .filter(f => f.description || f.amount);
+    Object.assign(out, { dealerFeeLines: lines, dealerFees: sum(lines, 'amount'), taxableDealerFees: sum(lines.filter(f => f.taxable), 'amount') });
+  }
+  if (Array.isArray(d.govFees)) {
+    const lines = d.govFees.slice(0, 20).map(f => ({ key: GOV_FEE_FIELDS[f.key] ? f.key : '', description: dText(f.description, 60), amount: dNum(f.amount) }))
+      .filter(f => f.key || f.description || f.amount);
+    out.govFees = lines;
+    for (const [key, field] of Object.entries(GOV_FEE_FIELDS)) out[field] = sum(lines.filter(f => f.key === key), 'amount');
+    out.otherGovFees = sum(lines.filter(f => !f.key), 'amount');
+  }
+  if (['stateTaxRate', 'countyTaxRate', 'cityTaxRate'].some(k => d[k] !== undefined && d[k] !== null && d[k] !== '')) {
+    Object.assign(out, { stateTaxRate: dNum(d.stateTaxRate), countyTaxRate: dNum(d.countyTaxRate), cityTaxRate: dNum(d.cityTaxRate) });
+    out.taxRate = round2(out.stateTaxRate + out.countyTaxRate + out.cityTaxRate);
+  }
+  if (d.priorLease && typeof d.priorLease === 'object') {
+    const p = d.priorLease;
+    const priorLease = {
+      remaining: dNum(p.remaining), earlyTermination: dNum(p.earlyTermination), excessMileage: dNum(p.excessMileage), excessWear: dNum(p.excessWear), other: dNum(p.other),
+      vin: vinDecoder.normalizeVin(dText(p.vin, 20)), year: dText(p.year, 4), make: dText(p.make, 40), model: dText(p.model, 60), mileage: dNum(p.mileage),
+      company: dText(p.company, 80), phone: dText(p.phone, 30), account: dText(p.account, 40), goodThru: dDate(p.goodThru)
+    };
+    Object.assign(out, { priorLease, priorLeaseBalance: round2(priorLease.remaining + priorLease.earlyTermination + priorLease.excessMileage + priorLease.excessWear + priorLease.other) });
+  }
+  if (Array.isArray(d.deferred)) {
+    const deferred = d.deferred.slice(0, 3).map(x => ({ amount: dNum(x.amount), date: dDate(x.date) })).filter(x => x.amount);
+    Object.assign(out, { deferred, deferredDown: sum(deferred, 'amount') });
+  }
+  // Down payment = cash down + deposit + deferred down (each kept on its own).
+  if (d.cashDown !== undefined || d.deposit !== undefined) {
+    out.cashDown = dNum(d.cashDown);
+    out.deposit = dNum(d.deposit);
+    out.downPayment = round2(out.cashDown + out.deposit + (out.deferredDown ?? dNum(d.deferredDown)));
+  }
+  if (d.firstPaymentDate !== undefined) {
+    out.firstPaymentDate = dDate(d.firstPaymentDate);
+    const start = new Date(d.dealDate || d.dateCreated || Date.now());
+    out.daysToFirstPayment = out.firstPaymentDate ? Math.round((new Date(`${out.firstPaymentDate}T12:00:00`) - new Date(start.toISOString().slice(0, 10) + 'T12:00:00')) / 86400000) : null;
+  }
+  if (d.employees && typeof d.employees === 'object') {
+    out.employees = Object.fromEntries(DEAL_EMPLOYEE_ROLES.map(r => [r, dText(d.employees[r], 60) || null]));
+  }
+  if (d.coLeadId !== undefined) out.coLeadId = dText(d.coLeadId, 60) || null;
+  for (const f of ['lender', 'program', 'county', 'city']) if (d[f] !== undefined) out[f] = dText(d[f], 80);
+  if (d.dealDate !== undefined) out.dealDate = dDate(d.dealDate);
+  return out;
 }
 
 // ---------- State-specific sales tax & DMV fee lookup (CA and AZ) ----------
@@ -1470,6 +1556,10 @@ function calculateStateFees(taxRates, state, zip, price, vehicleYear, county, ci
     const rateMatch = findBestTaxRateMatch(taxRates, 'AZ', resolvedCounty, city);
     fees.county = resolvedCounty;
     fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : AZ_STATEWIDE_BASE_RATE;
+  // The same rate split into its parts, for the deal's Taxes & Fees lines.
+  Object.assign(fees, rateMatch
+    ? { stateTaxRate: rateMatch.stateTaxRate, countyTaxRate: rateMatch.countyTaxRate, cityTaxRate: rateMatch.cityTaxRate }
+    : { stateTaxRate: AZ_STATEWIDE_BASE_RATE, countyTaxRate: 0, cityTaxRate: 0 });
     fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
     fees.stateUsed = 'AZ';
     fees.tradeInReducesTaxableAmount = true; // Arizona credits trade-in value against the taxable amount
@@ -1482,6 +1572,10 @@ function calculateStateFees(taxRates, state, zip, price, vehicleYear, county, ci
   const rateMatch = findBestTaxRateMatch(taxRates, 'CA', resolvedCounty, city);
   fees.county = resolvedCounty;
   fees.taxRate = rateMatch ? round2(rateMatch.stateTaxRate + rateMatch.countyTaxRate + rateMatch.cityTaxRate) : CA_STATEWIDE_BASE_RATE;
+  // The same rate split into its parts, for the deal's Taxes & Fees lines.
+  Object.assign(fees, rateMatch
+    ? { stateTaxRate: rateMatch.stateTaxRate, countyTaxRate: rateMatch.countyTaxRate, cityTaxRate: rateMatch.cityTaxRate }
+    : { stateTaxRate: CA_STATEWIDE_BASE_RATE, countyTaxRate: 0, cityTaxRate: 0 });
   fees.rateSource = rateMatch ? rateMatch.id : 'no match -- using statewide base';
   fees.stateUsed = (normalizedState === 'CA') ? 'CA' : `CA (fallback -- ${normalizedState || 'no state on file'} not yet built)`;
   fees.tradeInReducesTaxableAmount = false; // California taxes the full price; trade-in does not reduce it
@@ -1523,18 +1617,19 @@ function calculateRetailDeal(input) {
   // taxes the full vehicle price regardless of trade-in (Rev. & Tax. Code
   // section 6012). Anything other than AZ defaults to California's rule,
   // matching the documented CA fallback used for unbuilt states.
-  const taxableAmount = state === 'AZ'
+  const taxableAmount = (state === 'AZ'
     ? Math.max(vehiclePrice - netTradeIn, 0)
-    : vehiclePrice;
+    : vehiclePrice) + fi.taxableDealerFees;
   const salesTax = taxableAmount * (taxRate / 100);
 
-  const totalFees = docFee + titleFee + registrationFee +
+  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   // What's left to finance after trade-in, rebate, and down payment are
   // subtracted, then tax and fees (including F&I products, which are
-  // typically financed into the deal) are added back in.
-  let amountFinanced = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees;
+  // typically financed into the deal) are added back in -- plus any prior
+  // lease payoff being rolled in.
+  let amountFinanced = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees + fi.priorLeaseBalance;
   if (amountFinanced < 0) amountFinanced = 0;
 
   // Standard amortized loan payment formula.
@@ -1604,7 +1699,7 @@ function calculateLeaseDeal(input) {
 
   // Gross capitalized cost: the negotiated price plus everything being
   // rolled into the lease (fees, F&I products) instead of paid upfront.
-  const grossCapCost = vehiclePrice + docFee + acquisitionFee +
+  const grossCapCost = vehiclePrice + docFee + acquisitionFee + fi.otherGovFees + fi.priorLeaseBalance +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   const netTradeIn = tradeInValue - tradeInPayoff;
@@ -1695,14 +1790,14 @@ function calculateCashDeal(input) {
   const state = (input.state || '').trim().toUpperCase();
 
   const netTradeIn = tradeInValue - tradeInPayoff;
-  const taxableAmount = state === 'AZ'
+  const taxableAmount = (state === 'AZ'
     ? Math.max(vehiclePrice - netTradeIn, 0)
-    : vehiclePrice;
+    : vehiclePrice) + fi.taxableDealerFees;
   const salesTax = taxableAmount * (taxRate / 100);
-  const totalFees = docFee + titleFee + registrationFee +
+  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
-  let totalDue = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees;
+  let totalDue = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees + fi.priorLeaseBalance;
   if (totalDue < 0) totalDue = 0;
 
   return {
@@ -1734,7 +1829,8 @@ function calculateCashDeal(input) {
 // Single entry point the routes call -- picks the right calculator based
 // on dealType so nothing outside this function needs to know there are
 // multiple math paths.
-function calculateDeal(input) {
+function calculateDeal(rawInput) {
+  const input = { ...rawInput, ...structureDeal(rawInput) };
   const dealType = input.dealType || 'retail';
   if (dealType === 'lease') return calculateLeaseDeal(input);
   if (dealType === 'cash') return calculateCashDeal(input);
@@ -1938,6 +2034,14 @@ async function stockInTrade(q, req, deal) {
   return link(car.id);
 }
 
+// The deal screen's live numbers: what the deal works out to with what's on
+// screen, without saving anything.
+app.post('/api/deals/preview', wrap(async (req, res) => {
+  const b = req.body || {};
+  const input = { ...b, ...structureDeal(b) };
+  res.json({ ...input, ...calculateDeal(input) });
+}));
+
 app.put('/api/deals/:id', wrap(async (req, res) => {
   const updated = await store.tx(async q => {
     const deal = await store.get(q, 'deals', req.dealershipId, req.params.id, { forUpdate: true });
@@ -1962,6 +2066,7 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     if (['delivered', 'closed', 'finalized'].includes(merged.status) && !merged.deliveredAt) merged.deliveredAt = new Date().toISOString();
     if (merged.status === 'finalized' && !merged.finalizedAt) merged.finalizedAt = new Date().toISOString();
     if (merged.status === 'working') { merged.deliveredAt = null; merged.finalizedAt = null; }
+    Object.assign(merged, structureDeal(merged)); // itemized lines, cleaned, with their totals
     const calculated = calculateDeal(merged);
 
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });

@@ -81,7 +81,13 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Start Deal** screen (Sales & F&I → Deals): start a deal on the left (deal type, customer, vehicle, lender, off-site delivery -- all optional) and get its **Deal #** (e.g. D-1001) right away; find deals by deal #, stock # or VIN, customer, status, salesperson, or dates
 - Deals on the right in tabs: **Recently opened** (on this computer), **Newest**, **Not worked** (working deals untouched for 3+ days), and **All deals**. Click any row to open it
 - Clicking a deal number opens the **Deal Workspace** with two sub-tabs:
-  - **Desking**: vehicle price, rebate, an optional trade-in section (toggled on only when needed), down payment, tax, fees, APR, and loan term
+  - **Desking** (the deal screen): four blocks -- the deal (date, lender, program, vehicle, buyer), the sales price, the down payment, and the payment -- that recalculate as you type. Lines marked ▤ open their details, with the list of sections on the left and the payment on the right:
+    - **Customer**: buyer and co-buyer; **Vehicle**: stock, VIN, days in stock, cost (managers)
+    - **Trade-in**: up to 3 trades, each with allowance, payoff, ACV (over/under), lienholder and payoff good-thru date, VIN decode, and its appraisal
+    - **Prior lease balance** rolled into the deal; **Rebates** and **Dealer fees** as lines (dealer fees can be taxable, with who they're paid to)
+    - **Taxes & fees**: state / county / city tax rates and state fee lines (license, registration, title, and any others), with a lookup from the buyer's address
+    - **Deferred payments** (down payment paid after delivery), cash down and deposit, first payment date and days to it
+    - **Employees** on the deal (salespeople, managers, F&I, closers) and **Store gross** (managers and F&I)
   - **Credit Application**: a full RouteOne/DealerTrack-style application —
     - **Individual or Business** application type
     - Personal info (name, suffix, SSN, DOB, address, phone/email contact disclosures, license)

@@ -180,7 +180,8 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
         const car = carByStock[stock];
         const lead = leadByName[name];
         const calc = calculateDeal({ vehiclePrice: car.price - 500, taxRate: settings.taxRate, docFee: settings.docFee, titleFee: settings.titleFee,
-          registrationFee: settings.registrationFee, licenseFee: settings.licenseFee, dealerFees: settings.dealerFees, acquisitionFee: settings.acquisitionFee, apr: 6.9, termMonths: 72 });
+          registrationFee: settings.registrationFee, licenseFee: settings.licenseFee, dealerFees: settings.dealerFees, acquisitionFee: settings.acquisitionFee, apr: 6.9, termMonths: 72,
+          gapPremium: gap, servicePremium: svc });
         deals.push({
           hasTrade: false, id: uuid(), dealNumber: await store.takeNextDealNumber(q, d), leadId: lead.id, carId: car.id, status, ...calc,
           gapPremium: gap, servicePremium: svc, fiProductCost: fiCost, reserve, incentives,
