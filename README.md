@@ -230,6 +230,12 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - Each is for a customer, assigned to a staff member, with a due time. Completing one notes the outcome in the customer's history
 - The Sales Pipeline home lists **my tasks due today** (overdue first, in red; managers can switch to everyone's), and **My Tasks Due** is a badge on the left rail
 
+**AI task planning** (Sales Pipeline → My tasks today)
+- Each salesperson and BDC agent gets **their own calls, texts, and emails for the day**, picked from the customers assigned to them: who to contact, how, what about, and why (hover a ✨ task to see why). BDC agents work the new and not-yet-reached customers they're on; everything else goes to the salesperson (Sales 1)
+- **✨ Plan my day** (salespeople and BDC) or **✨ Plan everyone's day** (managers), or turn on **⚙ → plan every morning when the store opens** (by the store hours). Managers set the most tasks per person per day
+- Never piles on: customers who already have an open task, dead or sold customers, snoozed customers, and customers waiting in Duplicate Leads are skipped. Tasks are spread through open hours, 20 minutes apart; each person gets one alert that their day is planned
+- The AI (`GEMINI_API_KEY`) sees only first names, pipeline step, days since contact, the last few notes, and the car -- never phone numbers, emails, addresses, or credit apps. Without a key (or if the AI fails), tasks are planned by simple rules instead: first contact for new leads, try again (switching call/text) for unreached ones, follow up on visits and deals in progress, and set appointments with engaged customers going quiet
+
 **Search instead of dropdowns**
 - Everywhere you pick a car or a customer, you type: a car by stock #, any part of the VIN, year, make, model, trim, or color ("H-2020", "odyssey silver"); a customer by name, phone (any format), email, or customer #. Arrow keys and Enter work
 

@@ -24,6 +24,7 @@ const parts = require('./parts');
 const recon = require('./recon');
 const pricing = require('./pricing');
 const duplicates = require('./duplicates');
+const taskplan = require('./taskplan');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -137,6 +138,7 @@ app.use('/api', parts.router);
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
+app.use('/api', taskplan.router());
 app.use('/api', docs.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
@@ -3051,6 +3053,9 @@ async function callAI(systemInstruction, history, userMessage) {
   return text;
 }
 
+// AI task planning uses the same AI.
+taskplan.useAI(callAI, () => !!GEMINI_API_KEY);
+
 // Strip sensitive fields before anything gets sent to a third-party AI
 // provider. The AI doesn't need a real SSN to answer "how many leads are
 // in negotiation" or draft a follow-up text -- so it never sees one.
@@ -3374,6 +3379,8 @@ if (require.main === module) {
       const pricingSweep = () => pricing.autoPriceSweep().catch(err => console.error('Auto-pricing failed:', err.message));
       setTimeout(pricingSweep, 60 * 1000);
       setInterval(pricingSweep, 60 * 60 * 1000);
+      // AI task planning: each store's day is planned once, when it opens.
+      setInterval(() => taskplan.sweep().catch(err => console.error('Task planning failed:', err.message)), 5 * 60 * 1000);
     })
     .catch(err => {
       console.error('Failed to start:', err);

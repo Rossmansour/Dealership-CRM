@@ -1518,21 +1518,36 @@ function renderPipelineTasks() {
     .filter(t => new Date(t.dueAt) <= endOfToday)
     .filter(t => !mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id));
   const upcoming = openTasks.filter(t => new Date(t.dueAt) > endOfToday && (!mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id))).length;
+  const plansOwn = currentUser && ['salesperson', 'bdc'].includes(currentUser.role);
+  const plansAll = userCan('manageRotation');
+  const cfg = aiTaskCfg;
   el.innerHTML = html`
     <div class="pipeline-tasks-head">
       <h2>${mine ? 'My' : "Everyone's"} tasks today <span class="cp-count">${due.length}</span></h2>
-      <div class="view-toggle">
-        <button type="button" class="view-toggle-btn ${mine ? 'active' : ''}" onclick="setPipelineTasksScope('mine')">Mine</button>
-        <button type="button" class="view-toggle-btn ${mine ? '' : 'active'}" onclick="setPipelineTasksScope('all')">Everyone</button>
+      <div class="pipeline-tasks-tools">
+        ${plansOwn ? html`<button type="button" class="btn-secondary btn-small" onclick="planTasks(false)" title="Pick today's calls, texts, and emails from your customers">✨ Plan my day</button>` : ''}
+        ${plansAll ? html`<button type="button" class="btn-secondary btn-small" onclick="planTasks(true)" title="Plan today's tasks for every salesperson and BDC agent">✨ Plan everyone's day</button>
+          <button type="button" class="btn-secondary btn-small" onclick="toggleAiTaskSettings()" title="AI task planning settings" aria-label="AI task planning settings">⚙</button>` : ''}
+        <div class="view-toggle">
+          <button type="button" class="view-toggle-btn ${mine ? 'active' : ''}" onclick="setPipelineTasksScope('mine')">Mine</button>
+          <button type="button" class="view-toggle-btn ${mine ? '' : 'active'}" onclick="setPipelineTasksScope('all')">Everyone</button>
+        </div>
       </div>
     </div>
+    ${plansAll && aiTaskSettingsOpen && cfg ? html`<div class="ai-task-settings">
+      <label class="check-label"><input type="checkbox" id="aiTaskEnabled" ${cfg.enabled ? html`checked` : ''} /> Plan every salesperson's and BDC agent's day each morning when the store opens</label>
+      <label>Most tasks per person per day <input type="number" id="aiTaskMax" min="1" max="40" value="${cfg.maxPerPerson}" /></label>
+      <p class="audit-note">${cfg.aiConnected ? 'Planned by AI from each person\'s customers -- no phone numbers, emails, or credit apps are sent.' : 'AI isn\'t connected (GEMINI_API_KEY), so tasks are planned by simple rules for now.'}
+        Customers who already have an open task are skipped.${cfg.lastRun ? ` Last planned ${new Date(cfg.lastRun.at).toLocaleString()}: ${cfg.lastRun.created} task${cfg.lastRun.created === 1 ? '' : 's'}.` : ''}</p>
+      <button type="button" class="btn-primary btn-small" onclick="saveAiTaskSettings()">Save</button>
+    </div>` : ''}
     ${due.length ? html`<div class="pipeline-task-list">${due.map(t => {
       const when = new Date(t.dueAt);
       const overdue = when < now;
       const lead = leads.find(l => l.id === t.leadId);
-      return html`<button type="button" class="pipeline-task ${overdue ? 'overdue' : ''}" onclick="openLeadProfile(${js(t.leadId)})">
+      return html`<button type="button" class="pipeline-task ${overdue ? 'overdue' : ''}" onclick="openLeadProfile(${js(t.leadId)})" title="${t.planned && t.notes ? `Why: ${t.notes}` : ''}">
         <span class="pipeline-task-icon">${TASK_ICONS[t.type] || '☑️'}</span>
-        <span class="pipeline-task-main"><strong>${lead ? lead.name : t.leadName}</strong> · ${TASK_LABELS[t.type] || 'Task'}${t.title ? ` -- ${t.title}` : ''}</span>
+        <span class="pipeline-task-main">${t.planned ? html`<span class="ai-task-mark" title="Planned for you">✨</span> ` : ''}<strong>${lead ? lead.name : t.leadName}</strong> · ${TASK_LABELS[t.type] || 'Task'}${t.title ? ` -- ${t.title}` : ''}</span>
         <span class="pipeline-task-when">${overdue ? `Overdue · ${when.toLocaleDateString()} ` : ''}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${mine ? '' : ` · ${t.assignedTo ? t.assignedTo.name : ''}`}</span>
       </button>`;
     })}</div>` : html`<p class="audit-note">Nothing due today.${upcoming ? ` ${upcoming} coming up later.` : ''} Schedule follow-ups from a customer's page.</p>`}`;
@@ -1540,6 +1555,48 @@ function renderPipelineTasks() {
 window.setPipelineTasksScope = function(scope) {
   pipelineTasksScope = scope;
   renderPipelineTasks();
+};
+
+// ----- AI task planning -----
+var aiTaskCfg = null;          // var: the tasks list can render before this line runs
+var aiTaskSettingsOpen = false;
+async function loadAiTaskCfg() {
+  const res = await fetch(`${API}/ai-tasks`);
+  if (res.ok) aiTaskCfg = await res.json();
+}
+window.toggleAiTaskSettings = async function() {
+  aiTaskSettingsOpen = !aiTaskSettingsOpen;
+  if (aiTaskSettingsOpen) await loadAiTaskCfg();
+  renderPipelineTasks();
+};
+window.saveAiTaskSettings = async function() {
+  const res = await fetch(`${API}/ai-tasks`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: document.getElementById('aiTaskEnabled').checked, maxPerPerson: Number(document.getElementById('aiTaskMax').value) })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) return alert(body.error || 'Could not save.');
+  aiTaskSettingsOpen = false;
+  await loadAiTaskCfg();
+  renderPipelineTasks();
+};
+window.planTasks = async function(everyone) {
+  if (everyone && !confirm("Plan today's tasks for every salesperson and BDC agent now? Customers who already have an open task are skipped.")) return;
+  const btns = document.querySelectorAll('.pipeline-tasks-tools button');
+  btns.forEach(b => { b.disabled = true; });
+  try {
+    const res = await fetch(`${API}/ai-tasks/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ everyone }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || 'Could not plan tasks.');
+    openTasks = await (await fetch(`${API}/tasks?status=open`)).json();
+    pipelineTasksScope = everyone ? 'all' : 'mine';
+    renderPipeline();
+    renderRail();
+    alert(body.created
+      ? `${body.created} task${body.created === 1 ? '' : 's'} planned${everyone ? ` for ${body.people.filter(p => p.created).length} people` : ''}${body.source === 'rules' ? ' (by rules -- AI isn\'t connected)' : ''}.`
+      : 'Nothing to plan -- everyone who needs contact already has an open task.');
+  } catch (err) { alert(err.message); }
+  btns.forEach(b => { b.disabled = false; });
 };
 
 window.openPipelineList = function(stageKey, kind) {

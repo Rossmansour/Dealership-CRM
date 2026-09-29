@@ -1808,6 +1808,15 @@ body:has(#leadProfileModal.active) { overflow: hidden; }
 .pipeline-tasks { max-width: 900px; margin: 0 auto; padding: 0 0 28px; }
 .pipeline-tasks-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
 .pipeline-tasks-head h2 { font-size: 17px; margin: 0; color: var(--heading); display: flex; align-items: center; gap: 8px; }
+.pipeline-tasks-head { flex-wrap: wrap; }
+.pipeline-tasks-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pipeline-tasks-tools .view-toggle { margin: 0; }
+.ai-task-settings { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; display: grid; gap: 8px; font-size: 14px; }
+.ai-task-settings label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-task-settings input[type="checkbox"] { width: auto; margin: 0; }
+.ai-task-settings input[type="number"] { width: 80px; margin: 0; }
+.ai-task-settings button { justify-self: start; }
+.ai-task-mark { font-size: 12px; }
 .pipeline-task-list { display: flex; flex-direction: column; gap: 6px; }
 .pipeline-task { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid var(--border); border-left: 4px solid var(--blue); background: var(--surface); color: var(--text); border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 14px; cursor: pointer; }
 .pipeline-task:hover { border-color: var(--blue); }
