@@ -87,6 +87,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
     - **Prior lease balance** rolled into the deal; **Rebates** and **Dealer fees** as lines (dealer fees can be taxable, with who they're paid to)
     - **Taxes & fees**: state / county / city tax rates and state fee lines (license, registration, title, and any others), with a lookup from the buyer's address
     - **Deferred payments** (down payment paid after delivery), cash down and deposit, first payment date and days to it
+    - **F&I products**, each with what the customer pays and what the store pays (cost and profit shown to F&I and managers): up to 2 **service contracts** and 2 **maintenance plans** (company, plan, months/miles, deductible, policy #), **GAP**, **credit insurance** (life, A&H, IUI), and up to 20 **aftermarkets** (taxable, "we owe", vendor, itemize, pre-installed). With product lines, the deal's F&I product cost is the sum of their costs. Only F&I and managers can change products; everyone can see them
+    - **Insurance** (the customer's auto policy), **Miscellaneous** (registration, temp plate, inspection, defects to disclose on F&I contracts), **Titling** (titled to, lienholder), and **Third parties**
     - **Employees** on the deal (salespeople, managers, F&I, closers) and **Store gross** (managers and F&I)
   - **Credit Application**: a full RouteOne/DealerTrack-style application —
     - **Individual or Business** application type

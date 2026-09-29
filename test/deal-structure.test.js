@@ -90,3 +90,32 @@ test('a prior lease payoff rolls into a lease too', async () => {
   const without = (await as(manager, 'POST', '/deals/preview', { ...structure, dealType: 'lease', msrp: 32000, residualPercent: 55, moneyFactor: 0.002, termMonths: 36, priorLease: {} })).body;
   assert.strictEqual(Math.round((lease.grossCapCost - without.grossCapCost) * 100) / 100, 1500);
 });
+
+test('F&I product lines: premiums into the deal, costs into F&I product cost, taxed aftermarkets', async () => {
+  const car = (await as(manager, 'POST', '/cars', { year: 2023, make: 'Kia', model: 'Sorento', price: 25000, cost: 22000, mileage: 9000, stockType: 'used' })).body;
+  const d0 = (await as(manager, 'POST', '/deals', { carId: car.id })).body;
+  const d = (await as(manager, 'PUT', `/deals/${d0.id}`, {
+    vehiclePrice: 25000, docFee: 0, apr: 0, termMonths: 10, state: 'CA', stateTaxRate: 10, countyTaxRate: 0, cityTaxRate: 0, govFees: [], cashDown: 0,
+    warranties: [{ kind: 'service', premium: 2000, cost: 900, company: 'Fidelity' }, { kind: 'maintenance', premium: 600, cost: 200 }, { kind: 'service', premium: 0, cost: 0 }],
+    gap: { premium: 800, cost: 300, term: 72 },
+    creditInsurance: { company: 'Protective', life: { premium: 300, cost: 100 }, ah: { premium: 200, cost: 50 }, iui: {} },
+    aftermarkets: [{ description: 'Tint', price: 400, cost: 100, taxable: true, weOwe: true }, { description: 'Mats', price: 100, cost: 20 }],
+    insurance: { company: 'State Farm', policyNumber: 'SF1', hacker: 'x' }, misc: { tempPlate: 'T1', defect1: 'Chip' },
+    titling: { lienholderName: 'Chase' }, thirdParties: [{ role: 'Attorney', name: 'Jane' }, { role: '', name: '' }]
+  })).body;
+  assert.strictEqual(d.warranties.length, 2, 'empty warranty dropped');
+  assert.deepStrictEqual([d.servicePremium, d.maintenancePremium, d.gapPremium, d.creditInsPremium, d.aftermarketAmount, d.taxableProducts], [2000, 600, 800, 500, 500, 400]);
+  assert.strictEqual(d.fiProductCost, 900 + 200 + 300 + 150 + 120);
+  assert.strictEqual(d.salesTax, (25000 + 400) * 0.1, 'taxed aftermarket is in the taxed amount');
+  assert.strictEqual(d.amountFinanced, 25000 + 2540 + 2000 + 600 + 800 + 500 + 500);
+  assert.strictEqual(d.insurance.company, 'State Farm');
+  assert.strictEqual(d.insurance.hacker, undefined);
+  assert.deepStrictEqual([d.misc.tempPlate, d.titling.lienholderName, d.thirdParties.length], ['T1', 'Chase', 1]);
+  const noGap = (await as(manager, 'PUT', `/deals/${d0.id}`, { gap: null })).body;
+  assert.deepStrictEqual([noGap.gapPremium, noGap.fiProductCost], [0, 900 + 200 + 150 + 120]);
+
+  // Products are F&I's and managers': a salesperson's changes to them are ignored.
+  const sales = await h.createUser('salesperson');
+  const r = (await as(sales, 'PUT', `/deals/${d0.id}`, { warranties: [], gapPremium: 5, aftermarketAmount: 1, fiProductCost: 0, vehiclePrice: 24900 })).body;
+  assert.deepStrictEqual([r.warranties.length, r.servicePremium, r.aftermarketAmount, r.fiProductCost, r.vehiclePrice], [2, 2000, 500, 1370, 24900]);
+});

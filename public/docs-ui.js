@@ -174,7 +174,7 @@ function buyersOrder(deal) {
     <div class="box"><h2>Price</h2><table>
       <tr><td>Vehicle price</td><td class="r">${jkMoney(deal.vehiclePrice)}</td></tr>
       ${row('Rebate / discount', deal.rebate, '−')}${row('Doc fee', deal.docFee)}${row('Dealer fees', deal.dealerFees)}
-      ${row('GAP', deal.gapPremium)}${row('Service contract', deal.servicePremium)}${row('Maintenance plan', deal.maintenancePremium)}${row('Accessories', deal.aftermarketAmount)}
+      ${row('GAP', deal.gapPremium)}${row('Service contract', deal.servicePremium)}${row('Maintenance plan', deal.maintenancePremium)}${row('Accessories', deal.aftermarketAmount)}${row('Credit insurance', deal.creditInsPremium)}${row('Prior lease payoff', deal.priorLeaseBalance)}
       ${row('Title fee', deal.titleFee)}${row('Registration fee', deal.registrationFee)}${row('License fee', deal.licenseFee)}
       ${row(`Sales tax (${deal.taxRate || 0}%)`, deal.salesTax)}
       ${deal.hasTrade ? row('Trade allowance', deal.tradeInValue, '−') : ''}${deal.hasTrade ? row('Trade payoff', deal.tradeInPayoff, '+') : ''}
@@ -189,7 +189,9 @@ function buyersOrder(deal) {
 
 function weOweSheet(deal) {
   const { lead, car } = dealParts(deal);
-  const items = (deal.weOwe || []).filter(w => w.item);
+  // What the store owes: items typed on the jacket, plus aftermarkets marked "we owe".
+  const items = [...(deal.weOwe || []).filter(w => w.item),
+    ...(deal.aftermarkets || []).filter(a => a.weOwe && a.description).map(a => ({ item: `${a.description}${a.vendor ? ` (${a.vendor})` : ''}`, due: '' }))];
   return html`${header('We Owe', deal)}
     <div class="grid"><div class="box"><h2>Customer</h2>${lead.name || '—'}</div>
       <div class="box"><h2>Vehicle</h2>${[car.year, car.make, car.model].filter(Boolean).join(' ') || '—'} · Stock ${car.stockNumber || '—'}</div></div>
