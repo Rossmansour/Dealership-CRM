@@ -213,6 +213,8 @@ async function recapSheet(deal) {
       ${r.pack ? html`<tr><td>Pack</td><td class="r">−${jkMoney(r.pack)}</td></tr>` : ''}
       <tr><td>Doc fee</td><td class="r">${jkMoney(deal.docFee)}</td></tr>
       ${r.overAllowance ? html`<tr><td>Trade over-allowance</td><td class="r">−${jkMoney(r.overAllowance)}</td></tr>` : ''}
+      ${r.adjustments ? html`<tr><td>Adjustments</td><td class="r">−${jkMoney(r.adjustments)}</td></tr>` : ''}
+      ${r.weOweCost ? html`<tr><td>We owe</td><td class="r">−${jkMoney(r.weOweCost)}</td></tr>` : ''}
       <tr class="total"><td>Front gross</td><td class="r">${jkMoney(r.front)}</td></tr>
       <tr><td>F&amp;I products, less cost, plus reserve</td><td class="r">${jkMoney(r.finance)}</td></tr>
       ${r.incentives ? html`<tr><td>Incentives</td><td class="r">${jkMoney(r.incentives)}</td></tr>` : ''}

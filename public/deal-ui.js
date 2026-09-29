@@ -18,8 +18,10 @@ const DX_SECTIONS = [
   ['rebates', 'Rebates'], ['dealerFees', 'Dealer fees'], ['taxes', 'Taxes & fees'], ['deferred', 'Deferred payments'],
   ['warranty', 'Service & maintenance'], ['gapSec', 'GAP'], ['creditIns', 'Credit insurance'], ['aftermarkets', 'Aftermarkets'],
   ['insurance', 'Insurance'], ['misc', 'Miscellaneous'], ['titling', 'Titling'], ['thirdParties', 'Third parties'],
-  ['employees', 'Employees'], ['gross', 'Store gross']
+  ['employees', 'Employees'], ['recap', 'Recap'], ['commissions', 'Commissions'], ['summary', 'Deal summary']
 ];
+// Sections only F&I and managers see.
+const DX_MANAGER_SECTIONS = ['recap', 'commissions'];
 // Sections with F&I products (and their costs): F&I and managers change them.
 const DX_PRODUCT_SECTIONS = ['warranty', 'gapSec', 'creditIns', 'aftermarkets'];
 const DX_EMPLOYEES = [
@@ -83,19 +85,34 @@ function dxWorking(d) {
     warranties: warranties.map(x => ({ ...x })), gap: gap ? { ...gap } : null, aftermarkets: aftermarkets.map(x => ({ ...x })),
     creditInsurance: d.creditInsurance ? { company: d.creditInsurance.company || '', life: { ...(d.creditInsurance.life || {}) }, ah: { ...(d.creditInsurance.ah || {}) }, iui: { ...(d.creditInsurance.iui || {}) } } : null,
     insurance: { ...(d.insurance || {}) }, misc: { ...(d.misc || {}) }, titling: { ...(d.titling || {}) },
-    thirdParties: Array.isArray(d.thirdParties) ? d.thirdParties.map(x => ({ ...x })) : []
+    thirdParties: Array.isArray(d.thirdParties) ? d.thirdParties.map(x => ({ ...x })) : [],
+    // Recap
+    incentiveLines: Array.isArray(d.incentiveLines) ? d.incentiveLines.map(x => ({ ...x })) : dxN(d.incentives) ? [{ description: 'Incentive', amount: d.incentives }] : [],
+    adjustments: Array.isArray(d.adjustments) ? d.adjustments.map(x => ({ ...x })) : [],
+    weOwe: (d.weOwe || []).map(x => ({ ...x })), _weOweEdited: false,
+    packOverride: v(d.packOverride), holdback: v(d.holdback), buyRate: v(d.buyRate), reserveMethod: d.reserveMethod || 'manual',
+    reserveSplit: d.reserveSplit ?? 75, flatReserve: v(d.flatReserve), reserveBonus: v(d.reserveBonus),
+    bookValue: v(d.bookValue), maxLtv: v(d.maxLtv), commissions: JSON.parse(JSON.stringify(d.commissions || {}))
   };
 }
 
-function dxPayload() {
+// forSave: what Save sends. The live preview always gets everything (we-owe
+// costs count in the gross even when they were set on the Deal Jacket).
+function dxPayload(forSave = true) {
   const w = dx.w;
   const p = { ...w, leadId: w.leadId || null, coLeadId: w.coLeadId || null, carId: w.carId || null };
-  for (const k of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate', '_productLines']) delete p[k];
+  const RECAP = ['incentiveLines', 'adjustments', 'packOverride', 'holdback', 'buyRate', 'reserveMethod', 'reserveSplit', 'flatReserve', 'reserveBonus', 'commissions'];
+  for (const k of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate', '_productLines', '_weOweEdited', ...RECAP]) delete p[k];
+  // We-owes are also changed on the Deal Jacket; send them only if changed here.
+  if (forSave && !w._weOweEdited) delete p.weOwe;
+  p.id = dx.deal.id;
   // Product lines go only once they've been used (older deals keep their F&I cost until then).
   if (!w._productLines) for (const k of ['warranties', 'gap', 'creditInsurance', 'aftermarkets']) delete p[k];
   if (dxCanGross()) {
-    Object.assign(p, { ...(w._productLines ? {} : { fiProductCost: w.fiProductCost }), reserve: w.reserve, incentives: w.incentives, chargebackAmount: w.chargebackAmount,
+    Object.assign(p, { ...(w._productLines ? {} : { fiProductCost: w.fiProductCost }), chargebackAmount: w.chargebackAmount,
       chargebackDate: w.chargebackDate ? `${w.chargebackDate}T12:00:00` : null });
+    for (const k of RECAP) p[k] = w[k];
+    if (w.reserveMethod === 'manual') p.reserve = w.reserve;
   }
   return p;
 }
@@ -149,7 +166,7 @@ function dxRecalc(delay = 300) {
   dx.timer = setTimeout(async () => {
     const seq = ++dx.seq;
     try {
-      const res = await fetch(`${API}/deals/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dxPayload()) });
+      const res = await fetch(`${API}/deals/preview`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dxPayload(false)) });
       if (!res.ok || seq !== dx.seq) return;
       dx.preview = await res.json();
       dxUpdateOutputs();
@@ -181,15 +198,29 @@ function dxFigures() {
     grossCap: dxN(p.grossCapCost), residual: dxN(p.residualAmount), dueAtSigning: dxN(p.dueAtSigning), capReduction: dxN(p.totalCapReduction),
     days: p.daysToFirstPayment,
     service: dxN(p.servicePremium), maintenance: dxN(p.maintenancePremium), gap: dxN(p.gapPremium), aftermarket: dxN(p.aftermarketAmount),
-    creditIns: dxN(p.creditInsPremium), productCost: dxN(p.fiProductCost)
+    creditIns: dxN(p.creditInsPremium), productCost: dxN(p.fiProductCost),
+    reserve: dxN(p.reserve), ltv: dxN(w.bookValue) ? (lease ? dxN(p.netCapCost) : dxN(p.amountFinanced)) / dxN(w.bookValue) * 100 : null,
+    ...(p.gross ? { front: p.gross.front, back: p.gross.finance, incentivesTotal: p.gross.incentives, totalGross: p.gross.total, pack: p.gross.pack,
+      overAllowance: p.gross.overAllowance, adjustmentsTotal: p.gross.adjustments, weOweCost: p.gross.weOweCost, carCost: p.gross.carCost,
+      vehicleProfit: dxN(p.vehiclePrice) - dxN(p.gross.carCost), commissionTotal: (p.commissions || []).reduce((t, c) => t + c.amount, 0) } : {})
   };
 }
 function dxUpdateOutputs() {
   const f = dxFigures();
   document.querySelectorAll('#dx [data-out]').forEach(el => {
     const k = el.dataset.out;
-    el.textContent = k === 'taxRate' ? `${f.taxRate}%` : k === 'days' ? (f.days === null || f.days === undefined ? '' : `${f.days} days`) : dxM(f[k]);
+    el.textContent = k === 'taxRate' ? `${f.taxRate}%` : k === 'days' ? (f.days === null || f.days === undefined ? '' : `${f.days} days`)
+      : k === 'ltv' ? (f.ltv === null ? '--' : `${f.ltv.toFixed(1)}%`) : f[k] === undefined ? '--' : dxM(f[k]);
   });
+  // Lender advance: over the max LTV?
+  const warn = document.querySelector('#dx [data-ltvwarn]');
+  if (warn) {
+    const max = dxN(dx.w.maxLtv);
+    const over = f.ltv !== null && max && f.ltv > max;
+    warn.hidden = !over;
+    if (over) warn.textContent = `Over the lender's ${max}% max by ${dxM((f.ltv - max) / 100 * dxN(dx.w.bookValue))}`;
+  }
+  if (dx.section === 'commissions') dxRenderCommissionRows();
 }
 
 function dxMarkDirty() {
@@ -208,7 +239,7 @@ function renderDx() {
   const el = document.getElementById('dx');
   if (!dx.w) return;
   el.classList.toggle('dx-dirty', dx.dirty);
-  const sections = DX_SECTIONS.filter(([k]) => k !== 'gross' || dxCanGross());
+  const sections = DX_SECTIONS.filter(([k]) => !DX_MANAGER_SECTIONS.includes(k) || dxCanGross());
   el.innerHTML = dx.section === 'main' ? dxMain() : html`<div class="dx-sec">
       <nav class="dx-nav" aria-label="Deal sections">${sections.map(([k, l]) => html`<button type="button" class="dx-nav-item ${dx.section === k ? 'active' : ''}" data-go="${k}">${l}</button>`)}</nav>
       <div class="dx-page">${dxSection(dx.section)}</div>
@@ -237,7 +268,9 @@ function dxMain() {
   const cash = w.dealType === 'cash';
   const car = cars.find(c => c.id === w.carId);
   const days = car && car.dateAdded ? Math.floor((Date.now() - new Date(car.dateAdded)) / 86400000) : null;
-  return html`<div class="dx-main">
+  const sections = DX_SECTIONS.filter(([k]) => k !== 'main' && (!DX_MANAGER_SECTIONS.includes(k) || dxCanGross()));
+  return html`<nav class="dx-quick" aria-label="Deal sections">${sections.map(([k, l]) => html`<button type="button" data-go="${k}">${l}</button>`)}</nav>
+  <div class="dx-main">
     <section class="dx-block">
       <h3>Deal</h3>
       ${dxRow('Deal #', html`<strong>D-${dx.deal.dealNumber}</strong>`)}
@@ -299,6 +332,10 @@ function dxMain() {
           ${dxRow('Advance payments', dxIn('advancedPayments', { type: 'number', cls: 'dx-short' }))}`
         : dxRow('APR %', dxIn('apr', { type: 'number', step: '0.01', cls: 'dx-short' }))}
         ${dxRow('1st payment', html`${dxIn('firstPaymentDate', { type: 'date' })} <small data-out="days"></small>`)}
+        ${dxRow('Book value', dxIn('bookValue', { type: 'number', cls: 'dx-money', attrs: 'placeholder="Lender book"' }))}
+        ${dxRow('Max LTV %', dxIn('maxLtv', { type: 'number', cls: 'dx-short' }))}
+        ${dxRow('LTV', dxOut('ltv'))}
+        <p class="dx-alert" data-ltvwarn hidden></p>
         ${lease ? html`${dxRow('Gross cap cost', dxOut('grossCap'))}${dxRow('Cap reduction', dxOut('capReduction'))}${dxRow('Net cap cost', dxOut('financed'))}
           ${dxRow('Residual', dxOut('residual'))}${dxRow('Due at signing', dxOut('dueAtSigning'))}`
         : html`${dxRow('Amount financed', dxOut('financed'))}${dxRow('Finance charge', dxOut('financeCharge'))}`}
@@ -451,14 +488,9 @@ function dxSection(k) {
       ${DX_EMPLOYEES.map(([role, label]) => html`<label>${label}<select data-obj="employees" data-k="${role}">${dxStaffOptions(w.employees[role] || '')}</select></label>`)}
       </div></div>`;
   }
-  if (k === 'gross' && dxCanGross()) {
-    const L = (label, key, type = 'number') => html`<label>${label}<input type="${type}" data-f="${key}" value="${w[key] ?? ''}" /></label>`;
-    return html`<h2>Store gross</h2><p class="dx-sub">Managers and F&amp;I. Feeds the dashboard and the deal recap.</p>
-      <div class="dx-card"><div class="dx-grid">${w._productLines
-        ? html`<label>F&amp;I product cost<strong class="dx-readonly" data-out="productCost"></strong><small class="dx-sub">from the product lines</small></label>`
-        : L('F&I product cost', 'fiProductCost')}${L('Lender reserve', 'reserve')}${L('Incentives (dealer cash)', 'incentives')}
-        ${L('Chargeback amount', 'chargebackAmount')}${L('Chargeback date', 'chargebackDate', 'date')}</div></div>`;
-  }
+  if (k === 'recap' && dxCanGross()) return dxRecapPage();
+  if (k === 'commissions' && dxCanGross()) return dxCommissionsPage();
+  if (k === 'summary') return dxSummaryPage();
   return '';
 }
 const dxObjField = (obj, key, label, type = 'text') => html`<label class="dx-field">${label}<input type="${type}" data-obj="${obj}" data-k="${key}" value="${dx.w[obj][key] ?? ''}" /></label>`;
@@ -585,6 +617,7 @@ function dxSet(t) {
   else if (t.dataset.obj) t.dataset.obj.split('.').reduce((o, k) => o[k], dx.w)[t.dataset.k] = val;
   else return false;
   if (['warranties', 'aftermarkets'].includes(t.dataset.list) || /^(gap|creditInsurance)/.test(t.dataset.obj || '')) dx.w._productLines = true;
+  if (t.dataset.list === 'weOwe') dx.w._weOweEdited = true;
   return true;
 }
 const dxRoot = document.getElementById('dx');
@@ -607,6 +640,7 @@ function dxTradeNoteHtml(t) {
 }
 dxRoot.addEventListener('change', (e) => {
   if (!dxSet(e.target)) return;
+  if (e.target.dataset.rerender) { dxMarkDirty(); renderDx(); dxRecalc(0); return; }
   if (DX_PRODUCT_SECTIONS.includes(dx.section)) dxProductNotes();
   dxMarkDirty();
   dxRecalc(0);
@@ -623,7 +657,9 @@ dxRoot.addEventListener('click', async (e) => {
     const blank = { trades: { allowance: '', payoff: '', acv: '' }, rebates: { description: '', amount: '' }, dealerFeeLines: { description: '', amount: '', taxable: false, paidTo: '' },
       govFees: { key: '', description: '', amount: '' }, deferred: { amount: '', date: '' }, service: { kind: 'service', premium: '', cost: '' },
       maintenance: { kind: 'maintenance', premium: '', cost: '' }, aftermarkets: { description: '', price: '', cost: '', taxable: false, weOwe: false },
-      thirdParties: { role: '', name: '', address: '', phone: '', email: '' } }[list];
+      thirdParties: { role: '', name: '', address: '', phone: '', email: '' }, incentiveLines: { description: '', program: '', amount: '' },
+      adjustments: { description: '', amount: '' }, weOwe: { item: '', due: '', cost: '' } }[list];
+    if (list === 'weOwe') dx.w._weOweEdited = true;
     if (list === 'service' || list === 'maintenance') { dx.w.warranties.push({ ...blank }); dx.w._productLines = true; }
     else { dx.w[list].push({ ...blank }); if (list === 'aftermarkets') dx.w._productLines = true; }
     dx.dirty = true;
@@ -635,6 +671,7 @@ dxRoot.addEventListener('click', async (e) => {
     if (list === 'gap' || list === 'creditInsurance') dx.w[list] = null;
     else dx.w[list].splice(Number(i), 1);
     if (['warranties', 'aftermarkets', 'gap', 'creditInsurance'].includes(list)) dx.w._productLines = true;
+    if (list === 'weOwe') dx.w._weOweEdited = true;
     dx.dirty = true;
     renderDx();
     return dxRecalc(0);
@@ -663,6 +700,9 @@ dxRoot.addEventListener('click', async (e) => {
   if (a === 'proposal') { if (dx.dirty) await dxSave(); return viewProposal(dx.deal.id); }
   if (a === 'duplicate') return dxDuplicate();
   if (a === 'autofees') return dxLookupFees();
+  if (a === 'weowe-service') return dxWeOweToService(Number(act.dataset.i), act);
+  if (a === 'save-plan') return dxSavePlan(act);
+  if (a === 'print-summary') return dxPrintSummary();
 });
 
 async function dxDecodeTrade(i, btn) {
@@ -719,4 +759,190 @@ async function dxDuplicate() {
     await loadAll();
     openDealWorkspace(copy.id);
   } catch (err) { alert(err.message); }
+}
+
+// ---------- Recap (F&I and managers) ----------
+function dxRecapPage() {
+  const w = dx.w;
+  const car = cars.find(c => c.id === w.carId);
+  const g = (dx.preview && dx.preview.gross) || {};
+  const I = (key, attrs = '') => html`<input type="number" data-f="${key}" value="${w[key] ?? ''}" ${new SafeHtml(attrs)} />`;
+  const R = (label, value, cls = '') => html`<div class="dx-row ${cls}"><span class="dx-l">${label}</span><span class="dx-v">${value}</span></div>`;
+  const prod = (label, price, cost) => html`<tr><td>${label}</td><td>${dxM(price)}</td><td>${dxM(cost)}</td><td>${dxM(dxN(price) - dxN(cost))}</td></tr>`;
+  const wc = x => w.warranties.filter(y => y.kind === x);
+  const sumOf = (list, k) => list.reduce((t, x) => t + dxN(x[k]), 0);
+  const ci = w.creditInsurance;
+  const ciParts = ci ? [ci.life, ci.ah, ci.iui] : [];
+  return html`<h2>Recap</h2><p class="dx-sub">Where the gross comes from. Front gross is the car; back gross is F&amp;I. Feeds the dashboard and commissions.</p>
+  <div class="dx-two">
+    <div class="dx-card"><h3>Sales</h3>
+      ${R('Vehicle price', html`<strong>${dxM(w.vehiclePrice)}</strong>`)}
+      ${R('Car cost', html`<strong>${car ? dxM(car.cost) : '--'}</strong>`)}
+      ${R('Vehicle profit', html`<strong>${car ? dxM(dxN(w.vehiclePrice) - dxN(car.cost)) : '--'}</strong>`)}
+      ${R('Pack', I('packOverride', `class="dx-money" placeholder="${g.pack ?? 'store pack'}"`))}
+      ${R('Doc fee', html`<strong>${dxM(w.docFee)}</strong>`)}
+      ${R('Trade over-allowance', dxOut('overAllowance'))}
+      ${R('Holdback (not in gross)', I('holdback', 'class="dx-money"'))}
+      <h4>Incentives</h4>${dxLines('incentiveLines', [['description', 'Description', 'text'], ['program', 'Program', 'text'], ['amount', 'Amount', 'number']], 5)}
+      <h4>Adjustments <small class="dx-sub">(bank fee, transport, CPO fee... come off front gross)</small></h4>
+      ${dxLines('adjustments', [['description', 'Description', 'text'], ['amount', 'Amount', 'number']], 8)}
+      <h4>We owe</h4>${dxWeOweTable()}
+      <div class="dx-total">${R('Front gross', dxOut('front'))}</div>
+    </div>
+    <div class="dx-card"><h3>Finance</h3>
+      ${R('Sell rate (APR)', html`<strong>${w.dealType === 'retail' ? `${dxN(w.apr)}%` : '--'}</strong>`)}
+      ${R('Buy rate', I('buyRate', 'step="0.01" class="dx-short"'))}
+      ${R('Reserve', html`<select data-f="reserveMethod" data-rerender="1">
+        <option value="rate" ${w.reserveMethod === 'rate' ? html`selected` : ''}>From the rate markup</option>
+        <option value="flat" ${w.reserveMethod === 'flat' ? html`selected` : ''}>Flat</option>
+        <option value="manual" ${w.reserveMethod === 'manual' ? html`selected` : ''}>Typed in</option></select>`)}
+      ${w.reserveMethod === 'rate' ? R('Store share %', I('reserveSplit', 'class="dx-short"')) : ''}
+      ${w.reserveMethod === 'flat' ? R('Flat reserve', I('flatReserve', 'class="dx-money"')) : ''}
+      ${w.reserveMethod === 'manual' ? R('Reserve', I('reserve', 'class="dx-money"')) : ''}
+      ${R('Reserve bonus', I('reserveBonus', 'class="dx-money"'))}
+      ${R('Finance reserve', dxOut('reserve'))}
+      ${w.reserveMethod === 'rate' && w.dealType !== 'retail' ? html`<p class="dx-sub">Reserve from the rate only works out on retail deals.</p>` : ''}
+      <h4>Products</h4>
+      <table class="dx-lines dx-prod"><thead><tr><th>Product</th><th>Price</th><th>Cost</th><th>Profit</th></tr></thead><tbody>
+        ${wc('service').length ? prod('Service contracts', sumOf(wc('service'), 'premium'), sumOf(wc('service'), 'cost')) : ''}
+        ${wc('maintenance').length ? prod('Maintenance', sumOf(wc('maintenance'), 'premium'), sumOf(wc('maintenance'), 'cost')) : ''}
+        ${w.gap ? prod('GAP', w.gap.premium, w.gap.cost) : ''}
+        ${ci ? prod('Credit insurance', sumOf(ciParts, 'premium'), sumOf(ciParts, 'cost')) : ''}
+        ${w.aftermarkets.length ? prod('Aftermarkets', sumOf(w.aftermarkets, 'price'), sumOf(w.aftermarkets, 'cost')) : ''}
+      </tbody></table>
+      ${R('F&I product cost', dxOut('productCost'))}
+      ${R('Chargeback', I('chargebackAmount', 'class="dx-money"'))}
+      ${R('Chargeback date', html`<input type="date" data-f="chargebackDate" value="${w.chargebackDate}" />`)}
+      <div class="dx-total">${R('Back gross', dxOut('back'))}</div>
+    </div>
+  </div>
+  <div class="dx-card dx-gross"><div>Front gross<strong data-out="front"></strong></div><div>Back gross<strong data-out="back"></strong></div>
+    <div>Incentives<strong data-out="incentivesTotal"></strong></div><div>Total gross<strong data-out="totalGross"></strong></div>
+    <div>Commissions<strong data-out="commissionTotal"></strong></div></div>`;
+}
+
+function dxWeOweTable() {
+  const rows = dx.w.weOwe;
+  return html`<table class="dx-lines"><thead><tr><th>What we owe</th><th>By</th><th>Cost</th><th>Service</th><th></th></tr></thead><tbody>
+    ${rows.map((r, i) => html`<tr>
+      <td><input type="text" data-list="weOwe" data-i="${i}" data-k="item" value="${r.item || ''}" /></td>
+      <td><input type="date" data-list="weOwe" data-i="${i}" data-k="due" value="${r.due || ''}" /></td>
+      <td><input type="number" data-list="weOwe" data-i="${i}" data-k="cost" value="${r.cost ?? ''}" /></td>
+      <td>${r.roId ? html`<span class="dx-ro">RO-${r.roNumber}</span>` : html`<button type="button" class="btn-secondary btn-small" data-act="weowe-service" data-i="${i}">Send to service</button>`}</td>
+      <td>${r.roId ? '' : html`<button type="button" class="link-btn" data-del="weOwe|${i}">Remove</button>`}</td></tr>`)}
+  </tbody></table><button type="button" class="btn-secondary btn-small" data-add="weOwe">+ Add we owe</button>`;
+}
+
+async function dxWeOweToService(i, btn) {
+  if (dx.dirty) await dxSave();
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/deals/${dx.deal.id}/we-owe/${i}/service`, { method: 'POST' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Could not send it to service.');
+    await loadAll();
+    dx.deal = deals.find(d => d.id === dx.deal.id) || body.deal;
+    dx.w = dxWorking(dx.deal);
+    dx.dirty = false;
+    renderDx();
+    dxRecalc(0);
+    alert(`Sent to service on RO-${body.ro.roNumber}.`);
+  } catch (err) { alert(err.message); btn.disabled = false; }
+}
+
+// ---------- Commissions (F&I and managers) ----------
+const DX_COMM_GROUPS = [['sales', 'Salespeople'], ['fiManager', 'F&I manager'], ['salesManager', 'Sales manager'], ['deskManager', 'Desk manager'],
+  ['internetManager', 'Internet manager'], ['teamManager', 'Team manager'], ['closer', 'Closers']];
+const DX_BASE_LABELS = { front: 'Front gross', back: 'Back gross', total: 'Total gross' };
+function dxCommissionsPage() {
+  const w = dx.w;
+  const roles = DX_EMPLOYEES.filter(([r]) => w.employees[r]);
+  for (const [r] of roles) w.commissions[r] = w.commissions[r] || { rate: '', split: '' };
+  const plan = (dx.preview && dx.preview.commissionPlan) || null;
+  return html`<h2>Commissions</h2><p class="dx-sub">Each person on the deal (from Employees) is paid a % of the gross the store's plan says, shared by split %. Change one deal's rate or split here.</p>
+    <div class="dx-card">${roles.length ? html`<table class="dx-lines dx-comm"><thead><tr><th>Role</th><th>Employee</th><th>Paid on</th><th>Gross</th><th>Rate %</th><th>Split %</th><th>Commission</th></tr></thead><tbody>
+      ${roles.map(([r, label]) => html`<tr data-commrow="${r}"><td>${label}</td><td>${(staffList.find(u => u.id === w.employees[r]) || {}).name || ''}</td>
+        <td data-c="base"></td><td data-c="baseAmount"></td>
+        <td><input type="number" data-obj="commissions.${r}" data-k="rate" value="${w.commissions[r].rate ?? ''}" class="dx-short" /></td>
+        <td><input type="number" data-obj="commissions.${r}" data-k="split" value="${w.commissions[r].split ?? ''}" class="dx-short" /></td>
+        <td data-c="amount"></td></tr>`)}
+      </tbody></table><p class="dx-sub">Total commissions <strong data-out="commissionTotal"></strong>. Blank rate or split: the plan's. Salespeople earn at least the plan's minimum.</p>`
+      : html`<p class="dx-sub">Nobody on the deal yet. Add people on <button type="button" class="link-btn" data-go="employees">Employees</button>.</p>`}</div>
+    ${userCan('editCommissionPlan') && plan ? html`<div class="dx-card"><h3>Store commission plan</h3>
+      <table class="dx-lines"><thead><tr><th>Role</th><th>Paid on</th><th>Rate %</th><th>Minimum $</th></tr></thead><tbody>
+        ${DX_COMM_GROUPS.map(([gk, label]) => html`<tr data-plan="${gk}"><td>${label}</td>
+          <td><select data-pk="base">${Object.entries(DX_BASE_LABELS).map(([k, l]) => html`<option value="${k}" ${plan[gk].base === k ? html`selected` : ''}>${l}</option>`)}</select></td>
+          <td><input type="number" data-pk="rate" value="${plan[gk].rate}" class="dx-short" /></td><td><input type="number" data-pk="mini" value="${plan[gk].mini}" class="dx-short" /></td></tr>`)}
+      </tbody></table><button type="button" class="btn-secondary btn-small" data-act="save-plan">Save plan</button> <span class="dx-sub">Used on every deal.</span></div>` : ''}`;
+}
+function dxRenderCommissionRows() {
+  const list = (dx.preview && dx.preview.commissions) || [];
+  document.querySelectorAll('#dx [data-commrow]').forEach(row => {
+    const c = list.find(x => x.role === row.dataset.commrow);
+    const set = (k, v) => { const el = row.querySelector(`[data-c="${k}"]`); if (el) el.textContent = v; };
+    set('base', c ? DX_BASE_LABELS[c.base] : '--');
+    set('baseAmount', c ? dxM(c.baseAmount) : '--');
+    set('amount', c ? dxM(c.amount) : '--');
+    const rate = row.querySelector('[data-k="rate"]');
+    const split = row.querySelector('[data-k="split"]');
+    if (c) { rate.placeholder = c.rate; split.placeholder = c.split; }
+  });
+}
+async function dxSavePlan(btn) {
+  const plan = {};
+  document.querySelectorAll('#dx [data-plan]').forEach(row => {
+    plan[row.dataset.plan] = { base: row.querySelector('[data-pk="base"]').value, rate: row.querySelector('[data-pk="rate"]').value, mini: row.querySelector('[data-pk="mini"]').value };
+  });
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/commission-plan`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Could not save the plan.');
+    btn.textContent = 'Saved ✓';
+    dxRecalc(0);
+  } catch (err) { alert(err.message); }
+  btn.disabled = false;
+}
+
+// ---------- Deal summary (everyone; printable) ----------
+function dxSummaryHtml() {
+  const w = dx.w;
+  const f = dxFigures();
+  const lead = leads.find(l => l.id === w.leadId);
+  const co = leads.find(l => l.id === w.coLeadId);
+  const car = cars.find(c => c.id === w.carId);
+  const staffName = id => (staffList.find(u => u.id === id) || {}).name || '';
+  const L = (label, v) => html`<tr><td>${label}</td><td class="r">${v}</td></tr>`;
+  const lease = w.dealType === 'lease';
+  return html`<h1>Deal Summary</h1><div class="sub">Deal D-${dx.deal.dealNumber} · ${w.dealDate} · ${w.dealType === 'lease' ? 'Lease' : w.dealType === 'cash' ? 'Cash' : 'Retail'}${w.lender ? ` · ${w.lender}` : ''}</div>
+    <div class="grid">
+      <div class="box"><h2>Buyer</h2>${lead ? lead.name : '—'}${co ? html`<br />Co-buyer: ${co.name}` : ''}<br />Salesperson: ${staffName(w.employees.sales1) || '—'}${w.employees.fiManager ? html`<br />F&amp;I: ${staffName(w.employees.fiManager)}` : ''}</div>
+      <div class="box"><h2>Vehicle</h2>${car ? html`${car.year} ${car.make} ${car.model} ${car.trim || ''}<br />Stock ${car.stockNumber || '—'} · VIN ${car.vin || '—'}<br />${car.stockType === 'new' ? 'New' : 'Used'} · ${Number(car.mileage || 0).toLocaleString()} miles` : '—'}
+        ${w.trades.map((t, i) => html`<br />Trade ${i + 1}: ${[t.year, t.make, t.model].filter(Boolean).join(' ')}`)}</div>
+    </div>
+    <div class="grid">
+      <div class="box"><h2>Sales price</h2><table>
+        ${L('Selling price', dxM(w.vehiclePrice))}${f.service ? L('Service contract', dxM(f.service)) : ''}${f.maintenance ? L('Maintenance', dxM(f.maintenance)) : ''}
+        ${f.gap ? L('GAP', dxM(f.gap)) : ''}${f.creditIns ? L('Credit insurance', dxM(f.creditIns)) : ''}${f.aftermarket ? L('Aftermarkets', dxM(f.aftermarket)) : ''}
+        ${f.priorLease ? L('Prior lease balance', dxM(f.priorLease)) : ''}${L('Total fees', dxM(f.fees))}${L(`Taxes (${f.taxRate}%)`, dxM(f.tax))}
+        <tr class="total"><td>Total price</td><td class="r">${dxM(f.totalPrice)}</td></tr></table></div>
+      <div class="box"><h2>Down payment</h2><table>
+        ${L('Cash down', dxM(w.cashDown))}${dxN(w.deposit) ? L('Deposit', dxM(w.deposit)) : ''}${f.rebate ? L('Rebates', dxM(f.rebate)) : ''}
+        ${f.allowance ? L('Trade allowance', dxM(f.allowance)) : ''}${f.payoff ? L('Trade payoff', `−${dxM(f.payoff)}`) : ''}${f.deferred ? L('Deferred down', dxM(f.deferred)) : ''}
+        <tr class="total"><td>Total down</td><td class="r">${dxM(f.totalDown)}</td></tr></table></div>
+    </div>
+    <div class="box"><h2>Payment</h2><table>
+      ${w.dealType === 'cash' ? L('Total due', dxM(f.financed)) : html`${L('Term', `${w.termMonths} months`)}${lease ? L('Money factor', w.moneyFactor) : L('APR', `${dxN(w.apr)}%`)}
+      ${L(lease ? 'Net cap cost' : 'Amount financed', dxM(f.financed))}${lease ? L('Residual', dxM(f.residual)) : L('Finance charge', dxM(f.financeCharge))}
+      ${L('Total of payments', dxM(f.totalOfPayments))}${w.firstPaymentDate ? L('First payment', w.firstPaymentDate) : ''}
+      <tr class="total"><td>Payment</td><td class="r">${dxM(f.payment)} / month</td></tr>`}</table></div>
+    ${w.weOwe.length ? html`<div class="box"><h2>We owe</h2><table>${w.weOwe.map(x => L(x.item, x.due || ''))}</table></div>` : ''}
+    <p class="note">${dx.dirty ? 'Includes changes not saved yet.' : ''}</p>`;
+}
+function dxSummaryPage() {
+  return html`<h2>Deal summary</h2><div class="dx-card dx-summary">${dxSummaryHtml()}</div>
+    <button type="button" class="btn-primary" data-act="print-summary">🖨 Print deal summary</button>`;
+}
+function dxPrintSummary() {
+  printPage(`Deal Summary D-${dx.deal.dealNumber}`, dxSummaryHtml());
 }

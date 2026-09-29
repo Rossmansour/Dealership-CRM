@@ -40,6 +40,7 @@ const PERMISSIONS = {
   editInventory: ['admin', 'general_manager', 'sales_manager'],   // add/edit/delete cars and photos
   deleteRecords: ['admin', 'general_manager', 'sales_manager'],   // delete leads, deals, activity log entries
   editSettings: ['admin'],                     // fee defaults and tax rate tables
+  editCommissionPlan: ['admin', 'general_manager'], // commission rates and minimums
   manageUsers: ['admin'],
   viewAuditLog: ['admin', 'general_manager', 'sales_manager'],
   viewAllReports: ['admin', 'general_manager', 'sales_manager', 'finance'], // everyone else sees their own numbers
