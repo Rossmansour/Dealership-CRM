@@ -15,11 +15,16 @@ const fs = require('fs');
 const path = require('path');
 
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads', 'cars');
+// Photos and videos salespeople send customers.
+const MEDIA_DIR = path.join(__dirname, 'public', 'uploads', 'media');
 
 // Formats phones and cameras actually produce. SVG is deliberately not
 // allowed: it can contain scripts.
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif']);
 const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'image/heic': '.heic', 'image/heif': '.heif' };
+// Videos from phones (iPhone .mov, Android .mp4) and browsers.
+const VIDEO_TYPES = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/3gpp', 'video/x-m4v']);
+const VIDEO_EXTENSIONS = { 'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm', 'video/3gpp': '.3gp', 'video/x-m4v': '.m4v' };
 
 // Reads CLOUDINARY_URL and returns { config } when it's usable,
 // { problem } when it's set but can't be used, or {} when it isn't set.
@@ -72,7 +77,7 @@ function sign(params, apiSecret) {
   return crypto.createHash('sha1').update(toSign + apiSecret).digest('hex');
 }
 
-async function cloudinaryRequest(config, action, params, file) {
+async function cloudinaryRequest(config, action, params, file, resourceType = 'image') {
   const signed = { ...params, timestamp: Math.floor(Date.now() / 1000) };
   const form = new FormData();
   for (const [k, v] of Object.entries(signed)) form.append(k, String(v));
@@ -82,7 +87,7 @@ async function cloudinaryRequest(config, action, params, file) {
 
   let res;
   try {
-    res = await fetch(`${config.apiBase}/${config.cloudName}/image/${action}`, { method: 'POST', body: form });
+    res = await fetch(`${config.apiBase}/${config.cloudName}/${resourceType}/${action}`, { method: 'POST', body: form });
   } catch (err) {
     throw storageError("Couldn't connect to Cloudinary. Try again in a minute.");
   }
@@ -126,6 +131,32 @@ async function savePhoto(file, { dealershipId, carId }) {
   return `/uploads/cars/${filename}`;
 }
 
+// Saves a photo or video a salesperson is sending a customer. Returns
+// { url, kind: 'photo' | 'video' }.
+async function saveMedia(file, { dealershipId, leadId }) {
+  const kind = VIDEO_TYPES.has(file.mimetype) ? 'video' : 'photo';
+  const config = cloudinaryConfig();
+  const id = crypto.randomUUID();
+  if (config) {
+    const result = await cloudinaryRequest(config, 'upload', {
+      public_id: `dealerships/${dealershipId}/customers/${leadId}/${id}`
+    }, file, kind === 'video' ? 'video' : 'image');
+    return { url: result.secure_url, kind };
+  }
+  if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  const filename = `${id}${(kind === 'video' ? VIDEO_EXTENSIONS : EXTENSIONS)[file.mimetype] || ''}`;
+  await fs.promises.writeFile(path.join(MEDIA_DIR, filename), file.buffer);
+  return { url: `/uploads/media/${filename}`, kind };
+}
+
+// A video that plays everywhere: Cloudinary turns iPhone .mov files into
+// mp4 on the fly.
+function playableVideoUrl(url) {
+  return /res\.cloudinary\.com\/.+\/video\/upload\//.test(url)
+    ? String(url).replace('/video/upload/', '/video/upload/f_mp4,q_auto/').replace(/\.[a-z0-9]+$/i, '.mp4')
+    : url;
+}
+
 // The Cloudinary public_id inside a delivery URL, e.g.
 // https://res.cloudinary.com/demo/image/upload/v1712/dealerships/x/cars/y/z.jpg
 //   -> dealerships/x/cars/y/z
@@ -164,7 +195,11 @@ function publicPhotoUrl(url, req) {
 
 module.exports = {
   ALLOWED_TYPES,
+  VIDEO_TYPES,
   UPLOAD_DIR,
+  MEDIA_DIR,
+  saveMedia,
+  playableVideoUrl,
   usingCloudinary,
   cloudinaryConfig,
   cloudinaryProblem,
