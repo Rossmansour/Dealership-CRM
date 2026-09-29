@@ -127,7 +127,7 @@ const SERVER_MANAGED_FIELDS = {
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
-  appraisals: ['id', 'appraisalNumber', 'dateCreated', 'appraisedBy', 'status', 'recalls',
+  appraisals: ['id', 'appraisalNumber', 'dateCreated', 'appraisedBy', 'status', 'recalls', 'market',
     'carId', 'acquiredFor', 'acquiredAt', 'lostReason', 'closedAt', 'offerHistory', 'customerOffers',
     'requestedBy', 'removedFromLead']
 };
@@ -2324,6 +2324,33 @@ app.delete('/api/appraisals/:id', allow('deleteRecords'), wrap(async (req, res) 
 }));
 
 // Looks up open safety recalls (NHTSA, free) and saves them on the appraisal.
+// Market Comparables: the same cars for sale near the store (the market data
+// Market Pricing uses), adjusted for this car's miles, saved on the appraisal
+// with a suggested retail price from the store's pricing rules.
+app.post('/api/appraisals/:id/market', wrap(async (req, res) => {
+  const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
+  if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });
+  if (!pricing.marketConnected()) return res.status(400).json({ error: 'Market data is not connected yet.' });
+  if (!appraisal.year || !appraisal.make || !appraisal.model) return res.status(400).json({ error: 'Enter the year, make, and model first (or decode the VIN).' });
+  const cfg = pricing.pricingSettings((await getSettings(store.pool, req.dealershipId)));
+  const car = { year: appraisal.year, make: appraisal.make, model: appraisal.model, trim: appraisal.trim, vin: appraisal.vin, mileage: appraisal.mileage, stockType: 'used' };
+  let market;
+  try {
+    market = pricing.snapshot(car, cfg, await pricing.fetchMarket(car, cfg));
+  } catch (err) {
+    return res.status(502).json({ error: /ZIP/.test(err.message) ? "Set the store's ZIP code in Market Pricing → Pricing rules first." : `Couldn't get market data: ${err.message}` });
+  }
+  market.suggestedRetail = market.median && market.count >= cfg.minComps
+    ? Math.round(market.median * cfg.targetPct / 100 / cfg.roundTo) * cfg.roundTo : null;
+  market.comps = market.comps.slice(0, 25);
+  const saved = await store.tx(async q => {
+    const current = await store.get(q, 'appraisals', req.dealershipId, appraisal.id, { forUpdate: true });
+    return current && store.save(q, 'appraisals', req.dealershipId, current.id, { ...current, market });
+  });
+  if (!saved) return res.status(404).json({ error: 'Appraisal not found' });
+  res.json(saved);
+}));
+
 app.post('/api/appraisals/:id/recalls', wrap(async (req, res) => {
   const appraisal = await store.get(store.pool, 'appraisals', req.dealershipId, req.params.id);
   if (!appraisal) return res.status(404).json({ error: 'Appraisal not found' });

@@ -55,7 +55,8 @@ function listProviders() {
     name: p.name,
     category: p.category,
     description: p.description,
-    status: p.live ? 'live' : 'not_available',
+    // Market Comparables is live once the market data key is set.
+    status: p.live || (p.key === 'market' && process.env.MARKETCHECK_API_KEY) ? 'live' : 'not_available',
     needs: p.needs || null
   }));
 }

@@ -39,6 +39,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Apply suggested** to the cars you pick, or turn on **auto-pricing**: once a day every car that isn't locked moves to its suggested price (by at most a set amount at a time). **Lock** a car to keep its price
 - Every price change is kept on the car (who or what changed it, and why)
 - Market data comes from MarketCheck (see *Setting up market pricing*). Until it's connected, demo cars use made-up demo listings so the screen can be tried
+- **Appraisals use the same market**: the Market card on an appraisal pulls the similar cars for sale nearby (adjusted to its miles), shows its rank and % of market at the asking price, and suggests a retail price. **Use as asking price** puts it in the offer calculator, which works the offer back from it
 
 **Appraisals ("book outs") -- Vehicle Management → Appraisals**
 - Start one from **+ New Appraisal**, a customer's page (**Trade In**), or a deal's trade-in section (**Appraise this trade**, which brings the VIN, mileage, customer, and deal along)

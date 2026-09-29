@@ -80,6 +80,18 @@ test('apply the suggestion, keep the history; locked cars are left alone by auto
   assert.strictEqual((await row(other.id)).price, 24000, 'once a day');
 });
 
+test('appraisals pull the same market, with a suggested retail', async () => {
+  const a = (await as(manager, 'POST', '/appraisals', { year: 2020, make: 'Honda', model: 'Civic', mileage: 40000 })).body;
+  let r = await as(manager, 'POST', `/appraisals/${a.id}/market`);
+  assert.strictEqual(r.status, 200);
+  assert.deepStrictEqual([r.body.market.count, r.body.market.median, r.body.market.suggestedRetail], [10, 23250, 23300]);
+  // Saving the appraisal keeps the market that was pulled.
+  r = await as(manager, 'PUT', `/appraisals/${a.id}`, { notes: 'clean', market: null });
+  assert.strictEqual(r.body.market.median, 23250);
+  const bare = (await as(manager, 'POST', '/appraisals', { vin: '' })).body;
+  assert.strictEqual((await as(manager, 'POST', `/appraisals/${bare.id}/market`)).status, 400);
+});
+
 test('new cars are left out unless the store prices them too', async () => {
   const n = (await as(manager, 'POST', '/cars', { year: 2025, make: 'Honda', model: 'Civic', price: 28000, cost: 25000, mileage: 5, stockType: 'new' })).body;
   assert.strictEqual((await row(n.id)).inScope, false);
