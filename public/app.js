@@ -2051,8 +2051,7 @@ function pendingStats(labels) {
 function renderProviderSlots() {
   const byCat = cat => providerList.filter(p => p.category === cat);
   const slots = cat => byCat(cat).map(p => providerSlotHtml(p)).join('');
-  document.getElementById('apMarketPlug').innerHTML = byCat('market').map(p => providerSlotHtml(p, true)).join('') +
-    pendingStats(['Comparables', 'Rank', '% of market', 'Market days supply', 'Low', 'Average', 'High']);
+  renderAppraisalMarket();
   document.getElementById('apOptionsPlug').innerHTML = slots('options');
   document.getElementById('apBookPlugs').innerHTML = slots('book') +
     html`<button type="button" class="btn-secondary btn-small" disabled title="Not available yet -- needs the book licenses">Print Book Sheets (not available yet)</button>`;
@@ -2060,6 +2059,68 @@ function renderProviderSlots() {
     pendingStats(['Above', 'Average', 'Below', 'Last 30 days', 'Last 6 months', 'Last year']);
   document.getElementById('apHistoryPlugs').innerHTML = slots('history') + slots('sticker');
 }
+
+// ----- Market Comparables (live once market data is connected) -----
+// The same cars for sale near the store, adjusted for this car's miles. The
+// suggested retail can go straight into the offer calculator as the asking
+// price, which works the offer back from it.
+let apMarketOpen = false;
+function renderAppraisalMarket() {
+  const el = document.getElementById('apMarketPlug');
+  const p = providerList.find(x => x.key === 'market');
+  if (!p || p.status !== 'live') {
+    el.innerHTML = html`${providerSlotHtml(p || { key: 'market', name: 'Market Comparables', description: '', status: 'not_available', needs: 'market data' }, true)}
+      ${pendingStats(['Comparables', 'Rank', '% of market', 'Days listed', 'Low', 'Market', 'High'])}`;
+    return;
+  }
+  const a = currentAppraisal;
+  const m = a.market;
+  const open = a.status === 'open';
+  const asking = apNumber('apTargetRetail');
+  const rank = m && asking ? m.comps.filter(c => c.adjusted < asking).length + 1 : null;
+  const stat = (label, value) => html`<div><span>${label}</span><strong>${value}</strong></div>`;
+  el.innerHTML = html`<div class="ap-market-head">
+      <span class="plug-status live">Live</span>
+      <span class="audit-note">${m ? `Similar cars for sale nearby, adjusted to ${Number(a.mileage || 0).toLocaleString()} miles · pulled ${new Date(m.at).toLocaleString()}` : 'Similar cars for sale near your store.'}</span>
+      ${open ? html`<button type="button" class="btn-secondary btn-small" id="apMarketBtn">${m ? '↻ Refresh' : 'Pull market'}</button>` : ''}
+    </div>
+    ${m ? html`<div class="pending-stats retail-stats ap-market-stats">
+        ${stat('Comparables', m.count)}${stat('Rank at asking', rank ? `${rank} of ${m.count + 1}` : '--')}
+        ${stat('% of market', asking && m.median ? `${(asking / m.median * 100).toFixed(1)}%` : '--')}
+        ${stat('Avg days listed', m.avgDaysListed ?? '--')}${stat('Low', money(m.low))}${stat('Market', money(m.median))}${stat('High', money(m.high))}
+      </div>
+      ${m.suggestedRetail ? html`<div class="ap-market-suggest">Suggested retail <strong>${money(m.suggestedRetail)}</strong>
+        ${open ? html`<button type="button" class="btn-primary btn-small" id="apUseMarketBtn">Use as asking price</button>` : ''}
+        <span class="audit-note">The offer calculator works the appraisal back from it (asking − recon − pack − profit).</span></div>`
+      : html`<p class="audit-note">${m.count ? `Only ${m.count} similar car${m.count === 1 ? '' : 's'} nearby -- not enough to suggest a price.` : 'No similar cars found nearby.'}</p>`}
+      ${m.comps.length ? html`<button type="button" class="link-btn" id="apCompsToggle">${apMarketOpen ? 'Hide' : 'Show'} the ${m.comps.length} similar cars</button>
+        ${apMarketOpen ? html`<table class="pr-comps"><thead><tr><th>Similar car</th><th>Miles</th><th>Price</th><th>Adjusted</th><th>Days</th><th>Dealer</th></tr></thead><tbody>
+          ${m.comps.map(c => html`<tr><td>${c.url ? html`<a href="${c.url}" target="_blank" rel="noopener">${c.title}</a>` : c.title}</td><td>${Number(c.miles).toLocaleString()}</td>
+            <td>${money(c.price)}</td><td>${money(c.adjusted)}</td><td>${c.daysListed ?? '--'}</td><td>${c.dealer}${c.distance ? ` · ${c.distance} mi` : ''}</td></tr>`)}</tbody></table>` : ''}` : ''}`
+    : html`${pendingStats(['Comparables', 'Rank', '% of market', 'Days listed', 'Low', 'Market', 'High'])}`}`;
+}
+document.getElementById('apMarketPlug').addEventListener('click', async (e) => {
+  if (e.target.closest('#apCompsToggle')) { apMarketOpen = !apMarketOpen; return renderAppraisalMarket(); }
+  if (e.target.closest('#apUseMarketBtn')) {
+    const radio = document.querySelector('input[name="apSolveFor"][value="asking"]');
+    if (radio && radio.checked) document.querySelector('input[name="apSolveFor"][value="appraisal"]').checked = true;
+    document.getElementById('apTargetRetail').value = currentAppraisal.market.suggestedRetail;
+    updateOfferCalc();
+    setAppraisalDirty(true);
+    return renderAppraisalMarket();
+  }
+  const btn = e.target.closest('#apMarketBtn');
+  if (!btn) return;
+  if (appraisalDirty && !confirm('Pull the market for what was last saved? (Save first if you just changed the year, make, model, or miles.)')) return;
+  btn.disabled = true; btn.textContent = 'Pulling…';
+  try {
+    const res = await fetch(`${API}/appraisals/${currentAppraisal.id}/market`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not get market data.');
+    currentAppraisal.market = data.market;
+    renderAppraisalMarket();
+  } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = 'Pull market'; }
+});
 
 // ----- Recalls (live, NHTSA) -----
 
@@ -2201,6 +2262,7 @@ function updateOfferCalc() {
   if (!note && gross < 0) note = html`<span class="offer-over">That's a ${money(-gross)} loss.</span>`;
   document.getElementById('apOfferNote').innerHTML = note;
   renderValues();
+  if (currentAppraisal) renderAppraisalMarket(); // rank and % of market follow the asking price
 }
 
 document.getElementById('apHistoryToggle').addEventListener('click', () => {

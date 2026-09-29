@@ -2537,3 +2537,11 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .pr-aging { margin-top: 12px; }
 .pr-aging-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; font-size: 13px; flex-wrap: wrap; }
 .pr-aging-row input { width: 70px; }
+
+/* Appraisal: market comparables */
+.ap-market-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.ap-market-head .btn-small { margin-left: auto; }
+.ap-market-stats strong { color: var(--heading); }
+.ap-market-suggest { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; font-size: 14px; }
+.ap-market-suggest .audit-note { flex-basis: 100%; }
+#apMarketPlug .pr-comps { margin-top: 6px; }

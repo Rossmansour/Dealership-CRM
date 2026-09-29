@@ -360,4 +360,4 @@ router.post('/pricing/run', allow, wrap(async (req, res) => {
   res.json(await autoPrice(req.dealershipId));
 }));
 
-module.exports = { router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, autoPrice, autoPriceSweep, setMarketSource };
+module.exports = { router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, fetchMarket, marketConnected: () => !!(marketSource || marketKey()), autoPrice, autoPriceSweep, setMarketSource };
