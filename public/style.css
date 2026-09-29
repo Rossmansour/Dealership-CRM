@@ -1659,6 +1659,18 @@ body:has(#leadProfileModal.active) { overflow: hidden; }
 .cp-header-main { flex: 1; min-width: 220px; }
 .cp-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cp-name-row h2 { margin: 0; font-size: 24px; color: #fff; }
+.cp-name-edit { border: none; background: rgba(255,255,255,0.12); color: #fff; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; font-size: 14px; }
+.cp-name-edit:hover { background: rgba(255,255,255,0.25); }
+.cp-name-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cp-name-form input { width: 150px; margin: 0; padding: 6px 8px; font-size: 15px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.95); color: #1f2430; }
+.cp-name-form .link-btn { color: #fff; }
+.cp-detail-row select { max-width: 60%; margin: 0; padding: 4px 6px; font: inherit; font-size: 13px; }
+
+/* New customer window: two columns, street full width */
+.new-lead .nl-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 14px; }
+.new-lead .nl-wide { grid-column: 1 / -1; }
+.new-lead .nl-pair { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 0 10px; }
+@media (max-width: 560px) { .new-lead .nl-grid { grid-template-columns: minmax(0, 1fr); } }
 .cp-hot { border: none; background: rgba(255,255,255,0.12); border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 16px; filter: grayscale(1) opacity(0.6); }
 .cp-hot.on { filter: none; background: rgba(255,140,0,0.25); }
 .cp-chip { font-size: 11px; background: rgba(255,255,255,0.15); color: #fff; border-radius: 10px; padding: 2px 8px; }
