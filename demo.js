@@ -164,9 +164,11 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
           id: uuid(), customerNumber: await store.takeNextCustomerNumber(q, d),
           roadmap: Array(roadmapSteps).fill(null), activities: [], dateAdded: at(days, 9, 15), demo: true
         };
-        if (note) lead.activities.push({ id: uuid(), type: status === 'new' ? 'note' : 'call', text: note, date: at(days, 11), by: by(sales || bdc || 'rob') });
+        // Some customers talked back (Engaged on the pipeline), some haven't yet (Attempted).
+        const talked = status === 'negotiating' || status === 'won' || (status === 'contacted' && name.length % 2 === 0);
+        if (note) lead.activities.push({ id: uuid(), type: status === 'new' ? 'note' : 'call', text: note, date: at(days, 11), by: by(sales || bdc || 'rob'), ...(talked ? { reached: true } : {}) });
         if (['contacted', 'negotiating', 'won'].includes(status)) {
-          lead.activities.push({ id: uuid(), type: 'text', text: `Hi ${name.split(' ')[0]}, it's ${staff[sales || 'rob'].name.split(' ')[0]} from the dealership. When works for a test drive?`, date: at(days, 9, 40), by: by(sales || 'rob') });
+          lead.activities.push({ id: uuid(), type: 'text', text: `Hi ${name.split(' ')[0]}, it's ${staff[sales || 'rob'].name.split(' ')[0]} from the dealership. When works for a test drive?`, date: at(days, 9, 40), by: by(sales || 'rob'), ...(talked ? { reached: true } : {}) });
           lead.roadmap[0] = { at: at(days, 9, 40), by: by(sales || 'rob') };
           lead.roadmap[1] = { at: at(days, 12), by: by(sales || 'rob') };
         }

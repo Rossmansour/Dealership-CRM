@@ -26,7 +26,8 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - Automatic "days listed" tracking to flag cars sitting too long
 
 **Sales Pipeline (home screen)**
-- Opens on the **Sales Pipeline**: every open customer counted in one stage -- **Engaged → Visit → Proposal → Delivered**. Visit means a *Showroom Visit* was logged on their activity log; Proposal means a deal is being worked; Delivered means a delivered/closed deal, or marked Won. Lost customers aren't counted
+- Opens on the **Sales Pipeline**: every open customer counted in one of six steps -- **New → Attempted → Engaged → Visit → Proposal → Delivered**. New means nobody has reached out yet; Attempted means a call, text, or email was logged but no conversation yet; Engaged means they talked back (a call logged with **Talked with them**, an email or text with **They replied**) or an appointment is set; Visit means a *Showroom Visit* was logged; Proposal means a deal is being worked; Delivered means a delivered/closed deal, or marked Won. Lost customers aren't counted
+- Each step shows its count and a bar for **how many customers got at least that far**, so you can see where they drop off
 - Under each stage: ⚠ customers needing follow-up (no contact in 3+ days) and 🔥 hot customers (activity in the last 24 hours)
 - Filter by lead source and when the customer was added
 - Tiles for Follow-Up Due, New Today, Keys Out, and Aged Inventory (60+ days); the left rail shows the same counts (plus open proposals) as badges on every screen
