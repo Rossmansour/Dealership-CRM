@@ -860,51 +860,44 @@
   </div>
 </div>
 
-<!-- Lead Modal -->
+<!-- New customer: only for adding. Everything after that is edited on the customer page. -->
 <div class="modal" id="leadModal">
-  <div class="modal-content">
-    <h2 id="leadModalTitle">Add Lead</h2>
-    <form id="leadForm">
-      <input type="hidden" id="leadId" />
-      <label>Type
-        <select id="leadType">
-          <option value="individual">Individual</option>
-          <option value="business">Business</option>
-        </select>
-      </label>
-      <label><span id="leadNameLabelText">Name</span> <input type="text" id="leadName" required /></label>
-      <label>Phone <input type="text" id="leadPhone" /></label>
-      <label>Email <input type="email" id="leadEmail" /></label>
-      <label>Source
-        <select id="leadSource">
-          <option value="walk-in">Walk-in</option>
-          <option value="phone">Phone</option>
-          <option value="website">Website</option>
-          <option value="referral">Referral</option>
-          <option value="autotrader">Autotrader</option>
-          <option value="cargurus">CarGurus</option>
-          <option value="facebook">Facebook Marketplace</option>
-          <option value="other">Other</option>
-        </select>
-      </label>
-      <label>Interested Car
-        <select id="leadCarId">
-          <option value="">-- None --</option>
-        </select>
-      </label>
-      <label>Status
-        <select id="leadStatus">
-          <option value="new">New</option>
-          <option value="contacted">Contacted</option>
-          <option value="negotiating">Negotiating</option>
-          <option value="won">Won</option>
-          <option value="lost">Lost</option>
-        </select>
-      </label>
-      <label>Notes <textarea id="leadNotes"></textarea></label>
+  <div class="modal-content new-lead">
+    <h2 id="leadModalTitle">New Customer</h2>
+    <form id="leadForm" autocomplete="off">
+      <div class="nl-grid">
+        <label>First name <input type="text" id="leadFirstName" required autocomplete="off" /></label>
+        <label>Last name <input type="text" id="leadLastName" autocomplete="off" /></label>
+        <label>Phone <input type="tel" id="leadPhone" inputmode="tel" /></label>
+        <label>Email <input type="email" id="leadEmail" /></label>
+        <label class="nl-wide">Street address <input type="text" id="leadStreet" /></label>
+        <label>City <input type="text" id="leadCity" /></label>
+        <div class="nl-pair">
+          <label>State <input type="text" id="leadState" maxlength="2" placeholder="AZ" /></label>
+          <label>ZIP <input type="text" id="leadZip" maxlength="10" inputmode="numeric" /></label>
+        </div>
+        <label>Source
+          <select id="leadSource">
+            <option value="walk-in">Walk-in</option>
+            <option value="phone">Phone</option>
+            <option value="website">Website</option>
+            <option value="referral">Referral</option>
+            <option value="autotrader">Autotrader</option>
+            <option value="cargurus">CarGurus</option>
+            <option value="facebook">Facebook Marketplace</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>Interested car
+          <select id="leadCarId">
+            <option value="">-- None --</option>
+          </select>
+        </label>
+      </div>
+      <p class="send-text-status-error" id="leadFormMsg"></p>
       <div class="modal-actions">
         <button type="button" class="btn-secondary" id="cancelLeadBtn">Cancel</button>
-        <button type="submit" class="btn-primary">Save</button>
+        <button type="submit" class="btn-primary">Add customer</button>
       </div>
     </form>
   </div>
@@ -919,6 +912,7 @@
       <div class="cp-header-main">
         <div class="cp-name-row">
           <h2 id="profileName">Customer</h2>
+          <button type="button" class="cp-name-edit" id="cpNameEditBtn" title="Edit name" aria-label="Edit name">✎</button>
           <button type="button" class="cp-hot" id="cpHotBtn" title="Mark as a hot prospect" aria-pressed="false">🔥</button>
           <span id="profileBadges"></span>
         </div>
@@ -927,7 +921,6 @@
       <div class="cp-header-side" id="cpHeaderSide"></div>
       <div class="cp-header-buttons">
         <button type="button" class="btn-secondary btn-small" id="cpDupBtn" title="This customer is already in the CRM">Mark duplicate</button>
-        <button type="button" class="btn-secondary btn-small" id="editFromProfileBtn">Edit</button>
         <button type="button" class="cp-close" id="closeProfileBtn" aria-label="Close" title="Close">✕</button>
       </div>
     </header>

@@ -1227,7 +1227,7 @@ function renderLeads() {
         <td><span class="badge ${l.status}">${l.status}</span>${followUpFlag}</td>
         <td>${l.notes || ''}</td>
         <td class="row-actions">
-          <button onclick="editLead(${js(l.id)})">Edit</button>
+          <button onclick="openLeadProfile(${js(l.id)})">Open</button>
           <button class="delete" onclick="deleteLead(${js(l.id)})">Delete</button>
         </td>
       </tr>
@@ -1327,15 +1327,6 @@ function wireKanbanDragAndDrop() {
       await loadAll();
     });
   });
-}
-
-// Relabel "Name" -> "Business Name" when Business is selected, since a
-// business lead doesn't have a first/last name the way a person does.
-document.getElementById('leadType').addEventListener('change', updateLeadNameLabel);
-function updateLeadNameLabel() {
-  const type = document.getElementById('leadType').value;
-  const label = document.querySelector('label[for="leadNameLabel"]') || document.getElementById('leadNameLabelText');
-  if (label) label.textContent = type === 'business' ? 'Business Name' : 'Name';
 }
 
 function populateLeadCarOptions() {
@@ -3191,38 +3182,26 @@ function attachSearchPicker(select, kind) {
 attachSearchPicker(document.getElementById('leadCarId'), 'car');
 attachSearchPicker(document.getElementById('apLeadId'), 'lead');
 
-// ---------- Lead modal ----------
+// ---------- New customer ----------
+// This window is only for adding someone. After that, everything about
+// them is edited on their customer page.
 
 const leadModal = document.getElementById('leadModal');
 
 document.getElementById('addLeadBtn').addEventListener('click', () => {
-  document.getElementById('leadModalTitle').textContent = 'Add Lead';
   document.getElementById('leadForm').reset();
-  document.getElementById('leadId').value = '';
-  document.getElementById('leadType').value = 'individual';
-  updateLeadNameLabel();
+  document.getElementById('leadCarId').value = '';
+  document.getElementById('leadFormMsg').textContent = '';
   leadModal.classList.add('active');
+  setTimeout(() => document.getElementById('leadFirstName').focus(), 50);
 });
 
 document.getElementById('cancelLeadBtn').addEventListener('click', () => {
   leadModal.classList.remove('active');
 });
 
-window.editLead = function(id) {
-  const lead = leads.find(l => l.id === id);
-  document.getElementById('leadModalTitle').textContent = 'Edit Lead';
-  document.getElementById('leadId').value = lead.id;
-  document.getElementById('leadType').value = lead.type || 'individual';
-  updateLeadNameLabel();
-  document.getElementById('leadName').value = lead.name;
-  document.getElementById('leadPhone').value = lead.phone;
-  document.getElementById('leadEmail').value = lead.email;
-  document.getElementById('leadSource').value = lead.source || 'other';
-  document.getElementById('leadCarId').value = lead.carId || '';
-  document.getElementById('leadStatus').value = lead.status;
-  document.getElementById('leadNotes').value = lead.notes;
-  leadModal.classList.add('active');
-};
+// Editing happens on the customer page.
+window.editLead = id => openLeadProfile(id);
 
 window.deleteLead = async function(id) {
   if (!confirm('Delete this lead?')) return;
@@ -3232,47 +3211,23 @@ window.deleteLead = async function(id) {
 
 document.getElementById('leadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const id = document.getElementById('leadId').value;
+  const v = id => document.getElementById(id).value.trim();
   const payload = {
-    name: document.getElementById('leadName').value,
-    type: document.getElementById('leadType').value,
-    phone: document.getElementById('leadPhone').value,
-    email: document.getElementById('leadEmail').value,
-    source: document.getElementById('leadSource').value,
-    carId: document.getElementById('leadCarId').value || null,
-    status: document.getElementById('leadStatus').value,
-    notes: document.getElementById('leadNotes').value,
+    name: [v('leadFirstName'), v('leadLastName')].filter(Boolean).join(' '),
+    phone: v('leadPhone'),
+    email: v('leadEmail'),
+    address: { street: v('leadStreet'), city: v('leadCity'), state: v('leadState').toUpperCase(), zip: v('leadZip') },
+    source: v('leadSource'),
+    carId: document.getElementById('leadCarId').value || null
   };
-
-  if (id) {
-    await fetch(`${API}/leads/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-  } else {
-    const res = await fetch(`${API}/leads`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const created = await res.json().catch(() => ({}));
-    if (!res.ok) { if (res.status !== 403) alert(created.error || 'Could not add the customer.'); return; }
-    leadModal.classList.remove('active');
-    await loadAll();
-    openLeadProfile(created.id); // straight to their page to start working them
-    return;
-  }
-
+  const res = await fetch(`${API}/leads`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  });
+  const created = await res.json().catch(() => ({}));
+  if (!res.ok) { document.getElementById('leadFormMsg').textContent = created.error || 'Could not add the customer.'; return; }
   leadModal.classList.remove('active');
   await loadAll();
-
-  // If this edit was launched from the lead profile, hop back to it
-  // afterward instead of just closing, so the flow feels continuous.
-  if (returnToProfileAfterEdit) {
-    returnToProfileAfterEdit = false;
-    openLeadProfile(id);
-  }
+  openLeadProfile(created.id); // straight to their page to start working them
 });
 
 // ---------- Customer page (everything about one customer) ----------
@@ -3280,7 +3235,6 @@ document.getElementById('leadForm').addEventListener('submit', async (e) => {
 // they are on the left; activity, conversation, deals, and value in the
 // middle; things to do on the right.
 
-let returnToProfileAfterEdit = false;
 let currentProfileLeadId = null;
 let cpTasks = []; // this customer's tasks (open and closed)
 let cpComposerKind = 'note';
@@ -3388,6 +3342,8 @@ function renderCustomerPage() {
 function renderCpHeader(lead) {
   document.getElementById('cpAvatar').textContent = initials(lead.name);
   document.getElementById('profileName').textContent = lead.name;
+  document.getElementById('profileName').onkeydown = null;
+  document.getElementById('cpNameEditBtn').hidden = false;
   const hot = document.getElementById('cpHotBtn');
   hot.classList.toggle('on', !!lead.hot);
   hot.setAttribute('aria-pressed', lead.hot ? 'true' : 'false');
@@ -3666,7 +3622,8 @@ function renderCpDetails(lead) {
       <label class="cp-detail-row"><span>${label}</span>
         <select data-assign="${field}">${staffOptions(lead[field])}</select></label>`)}
     <div class="cp-detail-row"><span>Customer #</span><strong>${lead.customerNumber ? `C-${lead.customerNumber}` : '--'}</strong></div>
-    <div class="cp-detail-row"><span>Source</span><strong>${formatSource(lead.source)}</strong></div>
+    <label class="cp-detail-row"><span>Source</span>
+      <select id="cpSource">${['walk-in', 'phone', 'website', 'referral', 'autotrader', 'cargurus', 'facebook', 'other'].map(s => html`<option value="${s}" ${s === (lead.source || 'other') ? html`selected` : ''}>${formatSource(s)}</option>`)}</select></label>
     <div class="cp-detail-row"><span>Added</span><strong>${new Date(lead.dateAdded).toLocaleDateString()}</strong></div>
     <div class="cp-detail-row"><span>Last contact</span><strong>${lastContact ? new Date(lastContact.date).toLocaleDateString() : 'Never'}</strong></div>
     ${lead.status === 'lost' && lead.lostReason ? html`<div class="cp-detail-row"><span>Dead reason</span><strong>${lead.lostReason}</strong></div>` : ''}
@@ -3676,6 +3633,32 @@ function renderCpDetails(lead) {
 document.getElementById('cpDetails').addEventListener('change', (e) => {
   const select = e.target.closest('select[data-assign]');
   if (select) cpSaveLead({ [select.dataset.assign]: select.value || null });
+  if (e.target.id === 'cpSource') cpSaveLead({ source: e.target.value });
+});
+
+// The name is edited right in the header: first and last.
+document.getElementById('cpNameEditBtn').addEventListener('click', () => {
+  const lead = cpLead();
+  if (!lead) return;
+  const parts = String(lead.name || '').trim().split(/\s+/);
+  const first = parts.shift() || '';
+  const h = document.getElementById('profileName');
+  h.innerHTML = html`<span class="cp-name-form">
+    <input type="text" id="cpFirstName" value="${first}" placeholder="First name" aria-label="First name" />
+    <input type="text" id="cpLastName" value="${parts.join(' ')}" placeholder="Last name" aria-label="Last name" />
+    <button type="button" class="btn-primary btn-small" id="cpNameSave">Save</button>
+    <button type="button" class="link-btn" id="cpNameCancel">Cancel</button></span>`;
+  document.getElementById('cpNameEditBtn').hidden = true;
+  const save = async () => {
+    const name = [document.getElementById('cpFirstName').value.trim(), document.getElementById('cpLastName').value.trim()].filter(Boolean).join(' ');
+    if (!name) return document.getElementById('cpFirstName').focus();
+    document.getElementById('cpNameEditBtn').hidden = false;
+    await cpSaveLead({ name });
+  };
+  document.getElementById('cpNameSave').onclick = save;
+  document.getElementById('cpNameCancel').onclick = () => { document.getElementById('cpNameEditBtn').hidden = false; renderCpHeader(cpLead()); };
+  h.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } if (ev.key === 'Escape') { ev.stopPropagation(); document.getElementById('cpNameCancel').click(); } };
+  document.getElementById('cpFirstName').focus();
 });
 
 // ----- Middle tabs -----
@@ -4488,12 +4471,6 @@ window.cpPushCreditFromDeals = async function(dealId) {
 };
 
 // ----- Opening, editing, closing -----
-
-document.getElementById('editFromProfileBtn').addEventListener('click', () => {
-  closeCustomerPage();
-  returnToProfileAfterEdit = true;
-  editLead(currentProfileLeadId);
-});
 
 document.getElementById('closeProfileBtn').addEventListener('click', closeCustomerPage);
 document.addEventListener('keydown', (e) => {
