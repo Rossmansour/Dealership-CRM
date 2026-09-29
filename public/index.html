@@ -1132,6 +1132,7 @@
   <div class="sub-tabs">
     <button class="sub-tab-btn active" data-subtab="desking">Desking</button>
     <button class="sub-tab-btn" data-subtab="creditapp">Credit Application</button>
+    <button class="sub-tab-btn" data-subtab="jacket">Deal Jacket</button>
   </div>
 
   <!-- Desking sub-tab -->
@@ -1314,6 +1315,40 @@
         <button type="submit" class="btn-primary">Save Credit Application</button>
       </div>
     </form>
+  </div>
+
+<!-- Deal jacket: documents on the deal -->
+  <div id="jacket" class="sub-tab-panel">
+    <div class="jk-grid">
+      <div class="deal-panel">
+        <div class="ca-section-title">Print from this deal</div>
+        <div class="jk-actions">
+          <button type="button" class="btn-secondary" data-jk-print="buyers-order">🖨 Buyer's Order</button>
+          <button type="button" class="btn-secondary" data-jk-print="we-owe">🖨 We-Owe</button>
+          <button type="button" class="btn-secondary" data-jk-print="recap" id="jkRecapBtn">🖨 Deal Recap</button>
+        </div>
+        <p class="send-text-hint">Filled in from the saved deal. Sample forms: have your attorney approve them before real deals.</p>
+        <div class="ca-section-title">We owe</div>
+        <div id="jkWeOwe"></div>
+        <button type="button" class="btn-secondary btn-small" id="jkAddWeOwe">+ Add item</button>
+      </div>
+      <div class="deal-panel">
+        <div class="ca-section-title">Scan or upload</div>
+        <form id="jkUpload" class="jk-upload">
+          <input type="text" name="name" placeholder="Document name (e.g. Carfax, Proof of insurance)" maxlength="120" />
+          <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" required />
+          <button type="submit" class="btn-primary">Upload</button>
+        </form>
+        <p class="send-text-hint">PDF, JPG, or PNG up to 15 MB -- from the scanner, or a photo from a phone.</p>
+        <div class="ca-section-title">Add a form <button type="button" class="link-btn" id="jkManageForms">Manage forms</button></div>
+        <div class="jk-actions"><select id="jkFormPick"><option value="">Pick a form from your library…</option></select>
+          <button type="button" class="btn-secondary" id="jkAddForm">Add to deal</button></div>
+      </div>
+    </div>
+    <div class="deal-panel">
+      <div class="ca-section-title">In the jacket <span class="rc-count" id="jkCount">0</span></div>
+      <div id="jkDocs"></div>
+    </div>
   </div>
 </div>
 
@@ -1736,6 +1771,29 @@
 </div>
 
 <script src="app.js"></script>
+<!-- Form library -->
+<div class="modal" id="jkFormsModal">
+  <div class="modal-content modal-wide">
+    <h2>Form library</h2>
+    <p class="send-text-hint">Your store's blank forms (your contract forms from your forms provider, DMV forms, and so on). Add them to any deal from the Deal Jacket.</p>
+    <div id="jkFormList"></div>
+    <form id="jkFormUpload" class="jk-upload" style="display:none">
+      <input type="text" name="name" placeholder="Form name (e.g. REG 262)" maxlength="120" required />
+      <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" required />
+      <label class="pr-toggle"><input type="checkbox" name="wetSignature" value="true" /><span>Wet signature only</span></label>
+      <button type="submit" class="btn-primary">Add form</button>
+    </form>
+    <div id="jkWetBox" style="display:none">
+      <div class="ca-section-title">Always wet signature</div>
+      <p class="send-text-hint">Any document whose name contains one of these is marked "wet signature only": printed and signed in ink, never sent for e-signing. One per line.</p>
+      <textarea id="jkWetList" rows="3"></textarea>
+      <button type="button" class="btn-secondary btn-small" id="jkWetSave">Save list</button>
+    </div>
+    <p class="send-text-status-error" id="jkFormsMsg"></p>
+    <div class="modal-actions"><button type="button" class="btn-secondary" id="jkFormsClose">Close</button></div>
+  </div>
+</div>
+
 <!-- Market pricing rules -->
 <div class="modal" id="prRulesModal">
   <div class="modal-content">
@@ -1770,5 +1828,6 @@
 <script src="service-ui.js"></script>
 <script src="parts-ui.js"></script>
 <script src="pricing-ui.js"></script>
+<script src="docs-ui.js"></script>
 </body>
 </html>

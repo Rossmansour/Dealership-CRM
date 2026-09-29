@@ -23,6 +23,7 @@ const service = require('./service');
 const parts = require('./parts');
 const recon = require('./recon');
 const pricing = require('./pricing');
+const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
 const providers = require('./providers');
@@ -101,6 +102,7 @@ app.use('/api', service.router);
 app.use('/api', parts.router);
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
+app.use('/api', docs.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
 const allow = auth.requirePermission;
@@ -2102,7 +2104,10 @@ app.put('/api/deals/:id/credit-app', wrap(async (req, res) => {
 app.delete('/api/deals/:id', allow('deleteRecords'), wrap(async (req, res) => {
   const deleted = await store.tx(async q => {
     const removed = await store.remove(q, 'deals', req.dealershipId, req.params.id);
-    if (removed) await audit.deleted(q, req, 'deal', removed);
+    if (removed) {
+      await audit.deleted(q, req, 'deal', removed);
+      await q.query('DELETE FROM deal_documents WHERE dealership_id = $1 AND deal_id = $2', [req.dealershipId, req.params.id]); // its jacket goes with it
+    }
     return removed;
   });
   if (!deleted) return res.status(404).json({ error: 'Deal not found' });

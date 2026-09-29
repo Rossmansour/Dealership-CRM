@@ -306,6 +306,25 @@ const MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (dealership_id, id)
   );
+  `,
+  `
+  -- Deal jackets: every document on a deal (scanned, uploaded, or added from
+  -- the store's form library). The file itself is kept here, not on a public
+  -- photo host, since these carry customers' personal information.
+  CREATE TABLE deal_documents (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, deal_id text NOT NULL, data jsonb NOT NULL, content bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE INDEX deal_documents_deal ON deal_documents (dealership_id, deal_id);
+  -- The store's blank forms (its contract forms, DMV forms...), added to deals from here.
+  CREATE TABLE form_library (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL, content bytea NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
   `
 ];
 

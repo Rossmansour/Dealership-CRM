@@ -415,6 +415,8 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
     const d = req.dealershipId;
     const removed = await store.tx(async q => {
       const counts = {};
+      // Documents in demo deals' jackets go too.
+      await q.query(`DELETE FROM deal_documents WHERE dealership_id = $1 AND deal_id IN (SELECT id FROM deals WHERE dealership_id = $1 AND data->>'demo' = 'true')`, [d]);
       // Demo cars that went into recon on their own (not marked demo) go too.
       await q.query(`DELETE FROM recon_units WHERE dealership_id = $1 AND data->>'carId' IN (SELECT id FROM cars WHERE dealership_id = $1 AND data->>'demo' = 'true')`, [d]);
       for (const table of DEMO_TABLES) {
