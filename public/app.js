@@ -1842,12 +1842,20 @@ document.getElementById('newAppraisalBtn').addEventListener('click', () => start
 
 // ----- Detail -----
 
+// Opened from a deal (e.g. "Appraise this trade"): the back button goes
+// back to that deal's trade-in page instead of the appraisal list.
+let appraisalReturn = null; // { dealId, dealNumber, tradeIndex }
 window.openAppraisal = async function(id) {
   const a = appraisals.find(x => x.id === id);
   if (!a) return;
+  const fromDeal = document.getElementById('dealFullPage').classList.contains('active');
+  const deal = fromDeal && deals.find(d => d.id === currentWorkspaceDealId);
+  appraisalReturn = deal ? { dealId: deal.id, dealNumber: deal.dealNumber, tradeIndex: window.dxPendingTradeIndex ?? null } : null;
+  window.dxPendingTradeIndex = null;
+  document.getElementById('appraisalBackBtn').textContent = appraisalReturn ? `← Back to deal D-${appraisalReturn.dealNumber}` : '← Appraisals';
   if (currentView !== 'appraisals') showView('appraisals');
   document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
-  if (document.getElementById('dealFullPage').classList.contains('active')) closeDealFullPage();
+  if (fromDeal) closeDealFullPage();
   currentAppraisal = JSON.parse(JSON.stringify(a));
   document.getElementById('appraisalListView').style.display = 'none';
   document.getElementById('appraisalDetailView').style.display = 'block';
@@ -1958,7 +1966,18 @@ function replaceAppraisal(updated) {
 }
 
 document.getElementById('appraisalSaveBtn').addEventListener('click', saveAppraisal);
-document.getElementById('appraisalBackBtn').addEventListener('click', showAppraisalList);
+document.getElementById('appraisalBackBtn').addEventListener('click', async () => {
+  if (!appraisalReturn) return showAppraisalList();
+  const back = appraisalReturn;
+  const appraisalId = currentAppraisal && currentAppraisal.id;
+  if (!showAppraisalList()) return; // they chose to stay and save
+  appraisalReturn = null;
+  document.getElementById('appraisalBackBtn').textContent = '← Appraisals';
+  await loadAll();
+  if (!deals.some(d => d.id === back.dealId)) return;
+  openDealWorkspace(back.dealId);
+  dxShowTrade(back.tradeIndex, appraisalId);
+});
 // The outcome and customer-offer boxes act on their own (their buttons
 // save), so typing there doesn't count as an unsaved appraisal change.
 const apSeparateForm = el => el.closest('#apOutcome, #apCustomerOffer');
