@@ -78,7 +78,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Notes field for context from calls/visits
 
 **Deal Desking & Credit Applications**
-- Click "+ Create Deal" on a lead + vehicle to generate a unique **Deal #** (e.g. D-1001), like a real dealership DMS
+- **Start Deal** screen (Sales & F&I → Deals): start a deal on the left (deal type, customer, vehicle, lender, off-site delivery -- all optional) and get its **Deal #** (e.g. D-1001) right away; find deals by deal #, stock # or VIN, customer, status, salesperson, or dates
+- Deals on the right in tabs: **Recently opened** (on this computer), **Newest**, **Not worked** (working deals untouched for 3+ days), and **All deals**. Click any row to open it
 - Clicking a deal number opens the **Deal Workspace** with two sub-tabs:
   - **Desking**: vehicle price, rebate, an optional trade-in section (toggled on only when needed), down payment, tax, fees, APR, and loan term
   - **Credit Application**: a full RouteOne/DealerTrack-style application —
@@ -212,7 +213,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - Status filter and date range filter (native browser calendar pickers, From / To) work alongside the search box
 - Deal status is now a 4-stage pipeline matching real dealership terminology: **Stored/Working \u2192 Delivered \u2192 Closed \u2192 Finalized**
 - Vehicles now carry a **stock number** in addition to VIN, searchable from both Inventory and Deals
-- **"+ Create Deal" opens a deal instantly** -- no picker, no required customer or vehicle up front. A deal number is generated right away, and the customer and vehicle can be assigned (or changed) anytime from the Desking tab, matching how a desk sometimes opens a deal before the paperwork is fully in hand
+- **"Start deal" opens a deal instantly** -- no required fields, no required customer or vehicle up front. A deal number is generated right away, and the customer and vehicle can be assigned (or changed) anytime from the Desking tab, matching how a desk sometimes opens a deal before the paperwork is fully in hand
 
 **Full-Page Deal View**
 - Clicking any deal number now takes over the entire screen instead of opening a cramped modal -- there's a lot of ground to cover (pricing, lease math, F&I products, credit application) and it needed the room

@@ -51,7 +51,7 @@ const sameNumber = (a, b) => isNumberLike(a) && isNumberLike(b) && Number(a) ===
 // applicant) are compared field by field; arrays are compared as a whole.
 // Bookkeeping kept on the record itself, not worth a line in the log
 // (a car's price history and its market snapshot).
-const NOT_LOGGED = new Set(['priceHistory', 'market']);
+const NOT_LOGGED = new Set(['priceHistory', 'market', 'dateUpdated']);
 
 function diff(before, after, prefix = '') {
   const changes = {};

@@ -544,29 +544,66 @@
 
   <!-- DEALS -->
   <section id="deals" class="tab-panel">
-    <div class="panel-header deals-filter-header">
-      <input type="text" id="dealSearchInput" placeholder="Search name, VIN, stock #, deal #, phone, email, company..." class="deal-search-input" />
-      <select id="dealStatusFilter">
-        <option value="">All statuses</option>
-        <option value="working">Stored / Working</option>
-        <option value="delivered">Delivered</option>
-        <option value="closed">Closed</option>
-        <option value="finalized">Finalized</option>
-      </select>
-      <label class="deal-date-label">From <input type="date" id="dealDateFrom" /></label>
-      <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
-      <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
-      <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
+    <!-- Start Deal: start a new deal or find one on the left; recent deals on the right. -->
+    <div class="sd">
+      <div class="sd-left">
+        <form class="sd-card" id="sdNewForm">
+          <h2 class="sd-title">Start a deal</h2>
+          <label>Deal type
+            <select id="sdType"><option value="retail">Retail</option><option value="lease">Lease</option><option value="cash">Cash</option></select>
+          </label>
+          <label>Customer <span id="sdCustomer"></span></label>
+          <label>Vehicle <span id="sdVehicle"></span></label>
+          <label>Lender <input type="text" id="sdLender" maxlength="80" placeholder="Bank or credit union (optional)" /></label>
+          <label class="sd-check"><input type="checkbox" id="sdOffsite" /><span>Off-site delivery</span></label>
+          <button type="submit" class="btn-primary sd-go" id="addDealBtn">Start deal</button>
+          <p class="sd-hint">Customer and vehicle can be picked now or later.</p>
+        </form>
+
+        <div class="sd-card">
+          <h2 class="sd-title">Find a deal</h2>
+          <div class="sd-two">
+            <label>Deal # <input type="text" id="sdDealNo" inputmode="numeric" placeholder="1042" /></label>
+            <label>Status
+              <select id="dealStatusFilter">
+                <option value="">Any</option>
+                <option value="working">Stored / Working</option>
+                <option value="delivered">Delivered</option>
+                <option value="closed">Closed</option>
+                <option value="finalized">Finalized</option>
+              </select>
+            </label>
+          </div>
+          <label>Stock # or VIN <input type="text" id="sdCar" autocomplete="off" spellcheck="false" /></label>
+          <label>Customer <input type="text" id="dealSearchInput" placeholder="Name, phone, email, company" /></label>
+          <label>Salesperson <select id="sdSales"><option value="">Anyone</option></select></label>
+          <div class="sd-two">
+            <label>From <input type="date" id="dealDateFrom" /></label>
+            <label>To <input type="date" id="dealDateTo" /></label>
+          </div>
+          <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
+        </div>
+      </div>
+
+      <div class="sd-right sd-card">
+        <div class="sd-tabs" id="sdTabs" role="tablist">
+          <button type="button" class="sd-tab active" data-sd="recent">Recently opened</button>
+          <button type="button" class="sd-tab" data-sd="new">Newest</button>
+          <button type="button" class="sd-tab" data-sd="stale">Not worked <span class="rc-count" id="sdStaleCount">0</span></button>
+          <button type="button" class="sd-tab" data-sd="all">All deals</button>
+          <button type="button" class="sd-tab" data-sd="search" id="sdSearchTab" hidden>Search results</button>
+        </div>
+        <p class="sd-caption" id="sdCaption"></p>
+        <div class="table-scroll">
+          <table class="data-table sd-table">
+            <thead>
+              <tr><th>Deal #</th><th>Stock #</th><th>Customer</th><th>Vehicle</th><th>Type</th><th>Status</th><th>Payment</th><th>Credit</th><th>Date</th><th></th></tr>
+            </thead>
+            <tbody id="dealTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Deal #</th><th>Customer</th><th>Vehicle</th><th>Status</th>
-          <th>Monthly Payment</th><th>Credit App</th><th>Date</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="dealTableBody"></tbody>
-    </table>
   </section>
 
   <!-- AI ASSISTANT -->
@@ -1140,63 +1177,44 @@
     <form id="deskingForm">
       <input type="hidden" id="workingDealId" />
 
-      <!-- Desking: tabs on the left (each shows its total), the chosen tab's
-           fields next to them, and the deal's main structure in the middle. -->
-      <div class="dk">
-        <nav class="dk-tabs" id="dkTabs" aria-label="Deal sections">
-          <button type="button" class="dk-tab active" data-dk="customer"><span>Customer</span><small id="dkSumCustomer"></small></button>
-          <button type="button" class="dk-tab" data-dk="taxes"><span>Taxes</span><small id="dkSumTaxes"></small></button>
-          <button type="button" class="dk-tab" data-dk="fees"><span>Fees</span><small id="dkSumFees"></small></button>
-          <button type="button" class="dk-tab" data-dk="rebates"><span>Rebates</span><small id="dkSumRebates"></small></button>
-          <button type="button" class="dk-tab" data-dk="trade"><span>Trade</span><small id="dkSumTrade"></small></button>
-          <button type="button" class="dk-tab" data-dk="products"><span>F&amp;I Products</span><small id="dkSumProducts"></small></button>
-          <button type="button" class="dk-tab" data-dk="lease" id="dkLeaseTab" style="display:none;"><span>Lease</span><small id="dkSumLease"></small></button>
-        </nav>
+      <div class="deal-layout">
+        <div class="deal-main">
 
-        <div class="dk-side">
-          <div class="deal-panel dk-panel active" data-dk-panel="customer">
+          <!-- Customer & Vehicle -->
+          <div class="deal-panel">
             <div class="ca-section-title">Customer &amp; Vehicle</div>
-            <label>Customer
-              <select id="dealAssignedLeadId">
-                <option value="">-- No customer assigned yet --</option>
-              </select>
-            </label>
-            <label>Vehicle
-              <select id="dealAssignedCarId">
-                <option value="">-- No vehicle assigned yet --</option>
-              </select>
-            </label>
+            <div class="form-grid">
+              <label>Customer
+                <select id="dealAssignedLeadId">
+                  <option value="">-- No customer assigned yet --</option>
+                </select>
+              </label>
+              <label>Vehicle
+                <select id="dealAssignedCarId">
+                  <option value="">-- No vehicle assigned yet --</option>
+                </select>
+              </label>
+            </div>
             <div class="service-tie-in" id="serviceTieIn" style="display:none;">
               <span class="ca-inline-checkbox">🔧 Service History: <span id="serviceTieInText">No open ROs</span></span>
             </div>
           </div>
 
-          <div class="deal-panel dk-panel" data-dk-panel="taxes">
-            <div class="ca-section-title">Taxes</div>
-            <label>State <input type="text" maxlength="2" id="dealState" placeholder="CA" /></label>
-            <label>Sales Tax Rate (%) <input type="number" step="0.01" id="dealTaxRate" value="7" /></label>
-            <button type="button" class="btn-secondary" id="autoCalcFeesBtn">🧮 Auto-Calculate Tax &amp; DMV Fees</button>
-            <div id="autoCalcFeesStatus"></div>
-          </div>
-
-          <div class="deal-panel dk-panel" data-dk-panel="fees">
-            <div class="ca-section-title">Fees</div>
-            <label>Doc Fee <input type="number" id="dealDocFee" value="150" /></label>
-            <label>Dealer Fees <input type="number" id="dealDealerFees" value="0" /></label>
-            <label>License Fee <input type="number" id="dealLicenseFee" value="0" /></label>
-            <div id="retailFees">
-              <label>Title Fee <input type="number" id="dealTitleFee" value="75" /></label>
-              <label>Registration Fee <input type="number" id="dealRegistrationFee" value="50" /></label>
+          <!-- Deal Terms (shared by retail, lease, and cash) -->
+          <div class="deal-panel">
+            <div class="ca-section-title">Deal Terms</div>
+            <div class="form-grid">
+              <label id="vehiclePriceLabel">Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
+              <label id="msrpLabel" style="display:none;">MSRP <input type="number" id="dealMsrp" value="0" /></label>
+              <label>Rebate <input type="number" id="dealRebate" value="0" /></label>
+              <label id="downPaymentLabel">Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
+              <label>State <input type="text" maxlength="2" id="dealState" placeholder="CA" /></label>
+              <label>Sales Tax Rate (%) <input type="number" step="0.01" id="dealTaxRate" value="7" /></label>
+              <label id="termLabel">Term (months) <input type="number" id="dealTermMonths" value="60" /></label>
             </div>
-          </div>
+            <button type="button" class="btn-secondary" id="autoCalcFeesBtn" style="margin-bottom:12px;">🧮 Auto-Calculate Tax &amp; DMV Fees</button>
+            <div id="autoCalcFeesStatus"></div>
 
-          <div class="deal-panel dk-panel" data-dk-panel="rebates">
-            <div class="ca-section-title">Rebates</div>
-            <label>Rebate / Discount <input type="number" id="dealRebate" value="0" /></label>
-          </div>
-
-          <div class="deal-panel dk-panel" data-dk-panel="trade">
-            <div class="ca-section-title">Trade</div>
             <div class="ca-toggle-row">
               <label class="ca-inline-checkbox">
                 <input type="checkbox" id="hasTradeCheckbox" /> Customer has a trade-in
@@ -1222,26 +1240,23 @@
             </div>
           </div>
 
-          <div class="deal-panel dk-panel" data-dk-panel="products" id="fiProductsPanel">
-            <div class="ca-section-title">F&amp;I Products</div>
-            <label>GAP Premium <input type="number" id="dealGapPremium" value="0" /></label>
-            <label>Service Contract (ESC) <input type="number" id="dealServicePremium" value="0" /></label>
-            <label>Maintenance Plan <input type="number" id="dealMaintenancePremium" value="0" /></label>
-            <label>Aftermarket / Accessories <input type="number" id="dealAftermarketAmount" value="0" /></label>
-            <div class="deal-accounting" id="dealAccounting">
-              <div class="ca-section-title">Store Gross <span class="summary-hint">(managers &amp; F&amp;I; feeds the dashboard)</span></div>
-              <div class="form-grid">
-                <label>F&amp;I product cost <input type="number" id="dealFiProductCost" value="0" /></label>
-                <label>Lender reserve <input type="number" id="dealReserve" value="0" /></label>
-                <label>Incentives (dealer cash) <input type="number" id="dealIncentives" value="0" /></label>
-                <label>Chargeback amount <input type="number" id="dealChargebackAmount" value="0" /></label>
-                <label>Chargeback date <input type="date" id="dealChargebackDate" /></label>
-              </div>
+          <!-- Retail-only financing -->
+          <div class="deal-panel" id="retailPanel">
+            <div class="ca-section-title">Financing</div>
+            <div class="form-grid">
+              <label>Title Fee <input type="number" id="dealTitleFee" value="75" /></label>
+              <label>Registration Fee <input type="number" id="dealRegistrationFee" value="50" /></label>
+              <label id="aprLabel">APR (%) <input type="number" step="0.01" id="dealApr" value="6.5" /></label>
             </div>
           </div>
 
-          <!-- Lease-only: capitalization, cap reduction, residual, and payment. -->
-          <div class="deal-panel dk-panel" data-dk-panel="lease" id="leasePanel">
+          <!-- Lease-only: all four lease sections live in ONE panel, divided
+               by section headers, instead of four separate boxes -- the
+               numbers flow into each other (Capitalization feeds Cap
+               Reduction feeds Residual feeds Payment), so reading them as
+               one continuous worksheet makes more sense than scattering
+               them across disconnected cards. -->
+          <div class="deal-panel" id="leasePanel" style="display:none;">
             <div class="ca-section-title">Capitalization</div>
             <div class="form-grid">
               <label>Acquisition Fee <input type="number" id="dealAcquisitionFee" value="595" /></label>
@@ -1276,31 +1291,47 @@
             </div>
             <div class="readout-row"><span>Due at Signing</span><strong id="readoutDueAtSigning">$0.00</strong></div>
           </div>
+
+          <!-- F&I Products (shared by all deal types) -->
+          <div class="deal-panel" id="fiProductsPanel">
+            <div class="ca-section-title">F&amp;I Products &amp; Fees</div>
+            <div class="form-grid">
+              <label>Doc Fee <input type="number" id="dealDocFee" value="150" /></label>
+              <label>License Fee <input type="number" id="dealLicenseFee" value="0" /></label>
+              <label>Dealer Fees <input type="number" id="dealDealerFees" value="0" /></label>
+              <label>GAP Premium <input type="number" id="dealGapPremium" value="0" /></label>
+              <label>Service Contract (ESC) <input type="number" id="dealServicePremium" value="0" /></label>
+              <label>Maintenance Plan <input type="number" id="dealMaintenancePremium" value="0" /></label>
+              <label>Aftermarket / Accessories <input type="number" id="dealAftermarketAmount" value="0" /></label>
+            </div>
+            <div class="deal-accounting" id="dealAccounting">
+              <div class="ca-section-title">Store Gross <span class="summary-hint">(managers &amp; F&amp;I; feeds the dashboard)</span></div>
+              <div class="form-grid">
+                <label>F&amp;I product cost <input type="number" id="dealFiProductCost" value="0" /></label>
+                <label>Lender reserve <input type="number" id="dealReserve" value="0" /></label>
+                <label>Incentives (dealer cash) <input type="number" id="dealIncentives" value="0" /></label>
+                <label>Chargeback amount <input type="number" id="dealChargebackAmount" value="0" /></label>
+                <label>Chargeback date <input type="date" id="dealChargebackDate" /></label>
+              </div>
+            </div>
+          </div>
+
         </div>
 
-        <!-- The main structure -->
-        <div class="dk-center">
-          <div class="deal-panel dk-structure">
-            <div class="dk-headline" id="dkHeadline"></div>
-            <div class="dk-main-fields">
-              <label id="vehiclePriceLabel" class="dk-price">Vehicle Price <input type="number" id="dealVehiclePrice" required /></label>
-              <label id="msrpLabel" style="display:none;">MSRP <input type="number" id="dealMsrp" value="0" /></label>
-              <label id="downPaymentLabel">Down Payment <input type="number" id="dealDownPayment" value="0" /></label>
-              <label id="termLabel">Term (months) <input type="number" id="dealTermMonths" value="60" /></label>
-              <div id="retailPanel"><label id="aprLabel">APR (%) <input type="number" step="0.01" id="dealApr" value="6.5" /></label></div>
-            </div>
-            <div class="dk-breakdown" id="dkBreakdown"></div>
+        <!-- Sticky summary sidebar -->
+        <div class="deal-sidebar">
+          <div class="deal-panel deal-summary-panel">
+            <div class="ca-section-title">Summary <span class="summary-hint">(updates after Save)</span></div>
             <div class="readout-row" id="readoutAmountFinancedRow"><span>Amount Financed</span><strong id="readoutAmountFinanced">$0.00</strong></div>
             <div class="payment-highlight" id="paymentHighlightBox">
               <div class="amount" id="readoutMonthlyPayment">$0.00/mo</div>
               <div id="readoutTermLine">for 60 months</div>
             </div>
             <div class="readout-row"><span>Total Deal Cost</span><strong id="readoutTotalDealCost">$0.00</strong></div>
-            <p class="summary-hint dk-hint">The breakdown and payment update when you save.</p>
             <div class="summary-actions">
-              <button type="submit" class="btn-primary">Save &amp; Recalculate</button>
-              <button type="button" class="btn-secondary" id="viewProposalFromWorkspaceBtn">View Proposal</button>
               <button type="button" class="btn-secondary" id="duplicateScenarioBtn">📑 Duplicate as New Scenario</button>
+              <button type="button" class="btn-secondary" id="viewProposalFromWorkspaceBtn">View Proposal</button>
+              <button type="submit" class="btn-primary">Save &amp; Recalculate</button>
             </div>
           </div>
         </div>

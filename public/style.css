@@ -2582,51 +2582,29 @@ body.rc-body { margin: 0; min-height: 100vh; }
 @media (max-width: 800px) { .jk-grid { grid-template-columns: minmax(0, 1fr); } }
 [data-theme="dark"] .jk-wet { background: #3b2a12; color: #fbbf24; }
 
-/* ---------- Desking: tabs left, fields, structure in the middle ---------- */
-.dk { display: grid; grid-template-columns: 190px minmax(280px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 20px; }
-.dk-tabs { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 20px; }
-.dk-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; border: 1px solid transparent; background: none; border-radius: 8px; padding: 9px 12px; cursor: pointer; font: inherit; color: var(--text); }
-.dk-tab span { font-weight: 600; font-size: 14px; }
-.dk-tab small { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.dk-tab:hover { background: var(--surface-alt); }
-.dk-tab.active { background: var(--surface); border-color: var(--border); box-shadow: inset 3px 0 0 var(--blue); }
-.dk-tab.active span { color: var(--blue); }
-.dk-side { position: sticky; top: 20px; min-width: 0; }
-.dk-panel { display: none; }
-.dk-panel.active { display: block; }
-.dk-panel #autoCalcFeesBtn { width: 100%; margin-bottom: 8px; }
-.dk-center { min-width: 0; }
-.dk-structure { padding: 20px 22px; }
-.dk-headline { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.dk-headline strong { font-size: 18px; color: var(--heading); }
-.dk-headline span { color: var(--text-secondary); font-size: 14px; }
-.dk-main-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
-.dk-main-fields .dk-price { grid-column: 1 / -1; }
-.dk-main-fields .dk-price input { font-size: 22px; font-weight: 700; padding: 10px 12px; }
-.dk-main-fields #retailPanel label { margin-bottom: 12px; }
-.dk-breakdown { margin: 6px 0 2px; border-top: 1px solid var(--border); padding-top: 8px; }
-.dk-line { display: flex; justify-content: space-between; padding: 5px 0; font-size: 14px; color: var(--text-secondary); }
-.dk-line strong { color: var(--text); font-weight: 600; }
-.dk-line.dk-sub { border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 8px; }
-.dk-line.dk-sub strong { color: var(--heading); }
-.dk-hint { margin: 8px 0 0; }
-.dk-structure .summary-actions { flex-direction: row; flex-wrap: wrap; }
-.dk-structure .summary-actions button { width: auto; flex: 1 1 160px; }
-@media (max-width: 1100px) {
-  .dk { grid-template-columns: 170px minmax(0, 1fr); }
-  .dk-center { grid-column: 1 / -1; grid-row: 1; }
-}
-@media (max-width: 700px) {
-  .dk { grid-template-columns: minmax(0, 1fr); }
-  .dk-center { grid-row: auto; }
-  .dk-tabs { flex-direction: row; overflow-x: auto; position: static; }
-  .dk-tab { width: auto; flex: none; }
-  .dk-side { position: static; }
-  .dk-main-fields { grid-template-columns: minmax(0, 1fr); }
-}
-.dk-structure .payment-highlight { background: var(--highlight-bg); border-radius: 10px; padding: 14px 16px; margin: 10px 0 4px; text-align: center; color: var(--text-secondary); font-size: 13px; }
-.dk-structure .payment-highlight .amount { font-size: 30px; font-weight: 800; color: var(--blue); line-height: 1.15; }
-.dk-side .form-grid, .dk-side .form-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.dk-side .vin-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
-.dk-side .vin-row label { flex: 1 1 100%; margin-bottom: 0; }
-.dk-side #dealTradeVin::placeholder { text-transform: none; }
+/* ---------- Start Deal (Deals home) ---------- */
+.sd { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.sd-left { display: flex; flex-direction: column; gap: 16px; }
+.sd-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.sd-title { font-size: 15px; margin: 0 0 12px; color: var(--heading); }
+.sd-card label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+.sd-card label input:not([type=checkbox]), .sd-card label select, .sd-card .search-picker { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+.sd-card label input:not([type=checkbox]), .sd-card label select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; }
+.sd-check { display: flex !important; gap: 8px; align-items: center; font-size: 13px !important; color: var(--text) !important; }
+.sd-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.sd-go { width: 100%; padding: 10px; font-size: 15px; }
+.sd-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+#clearDealFiltersBtn { width: 100%; }
+.sd-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: -4px 0 10px; overflow-x: auto; }
+.sd-tab { border: none; background: none; padding: 9px 12px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.sd-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.sd-tab[hidden] { display: none; }
+.sd-caption { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
+.sd-row { cursor: pointer; }
+.sd-row:hover td { background: var(--highlight-bg); }
+@media (max-width: 900px) { .sd { grid-template-columns: minmax(0, 1fr); } }
+.sd-two > label { min-width: 0; }
+.sd-two input[type=date] { min-width: 0; padding-left: 6px !important; padding-right: 4px !important; font-size: 13px !important; }
+.sd-table th, .sd-table td { white-space: nowrap; }
+.sd-table td:nth-child(4) { white-space: normal; min-width: 150px; }
+.sd-table .sd-del { padding: 2px 6px; font-size: 14px; }
