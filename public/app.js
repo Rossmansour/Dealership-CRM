@@ -1495,8 +1495,8 @@ function renderPipeline() {
         <div class="pipeline-reach-text">${i === 0 ? 'all customers' : `${reach}% got this far`}</div>
         <div class="pipeline-stage-sub">
           ${open ? html`
-            <button type="button" class="pipeline-sub attention" onclick="openPipelineList(${js(st.key)}, 'attention')" title="Need follow-up: no contact in 3+ days">⚠ ${attention}</button>
-            <button type="button" class="pipeline-sub hot" onclick="openPipelineList(${js(st.key)}, 'hot')" title="Hot: activity in the last 24 hours">🔥 ${hot}</button>`
+            <button type="button" class="pipeline-sub attention" onclick="openPipelineList(${js(st.key)}, 'attention')" title="Needs follow-up: no contact in 3+ days">⚠ ${attention}</button>
+            <button type="button" class="pipeline-sub hot" onclick="openPipelineList(${js(st.key)}, 'hot')" title="Hot: flagged hot, or activity in the last 24 hours">🔥 ${hot}</button>`
           : html`<span class="pipeline-sub muted">bought</span>`}
         </div>
       </div>`;
