@@ -2581,3 +2581,30 @@ body.rc-body { margin: 0; min-height: 100vh; }
 #jkWetList { width: 100%; box-sizing: border-box; }
 @media (max-width: 800px) { .jk-grid { grid-template-columns: minmax(0, 1fr); } }
 [data-theme="dark"] .jk-wet { background: #3b2a12; color: #fbbf24; }
+
+/* ---------- Start Deal (Deals home) ---------- */
+.sd { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.sd-left { display: flex; flex-direction: column; gap: 16px; }
+.sd-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 0; }
+.sd-title { font-size: 15px; margin: 0 0 12px; color: var(--heading); }
+.sd-card label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+.sd-card label input:not([type=checkbox]), .sd-card label select, .sd-card .search-picker { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+.sd-card label input:not([type=checkbox]), .sd-card label select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; }
+.sd-check { display: flex !important; gap: 8px; align-items: center; font-size: 13px !important; color: var(--text) !important; }
+.sd-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.sd-go { width: 100%; padding: 10px; font-size: 15px; }
+.sd-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); }
+#clearDealFiltersBtn { width: 100%; }
+.sd-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: -4px 0 10px; overflow-x: auto; }
+.sd-tab { border: none; background: none; padding: 9px 12px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+.sd-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.sd-tab[hidden] { display: none; }
+.sd-caption { margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
+.sd-row { cursor: pointer; }
+.sd-row:hover td { background: var(--highlight-bg); }
+@media (max-width: 900px) { .sd { grid-template-columns: minmax(0, 1fr); } }
+.sd-two > label { min-width: 0; }
+.sd-two input[type=date] { min-width: 0; padding-left: 6px !important; padding-right: 4px !important; font-size: 13px !important; }
+.sd-table th, .sd-table td { white-space: nowrap; }
+.sd-table td:nth-child(4) { white-space: normal; min-width: 150px; }
+.sd-table .sd-del { padding: 2px 6px; font-size: 14px; }

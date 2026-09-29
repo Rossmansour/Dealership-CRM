@@ -257,6 +257,7 @@ function showView(view) {
   if (currentView === 'appraisals' && view !== 'appraisals' && appraisalDirty &&
       !confirm('Leave this appraisal without saving your changes?')) return;
   if (view !== 'appraisals') { document.body.classList.remove('wide-page'); setAppraisalDirty(false); }
+  if (view === 'deals') document.body.classList.add('wide-page'); // Start Deal: two columns and a wide list
   currentView = view;
   const module = moduleOfView(view);
   document.querySelectorAll('.rail-module').forEach(b => b.classList.toggle('active', b.dataset.module === module.key));
@@ -4376,71 +4377,158 @@ function dealMatchesDateRange(deal, dateFrom, dateTo) {
   return true;
 }
 
-function renderDeals() {
-  const searchTerm = document.getElementById('dealSearchInput').value;
-  const dateFrom = document.getElementById('dealDateFrom').value;
-  const dateTo = document.getElementById('dealDateTo').value;
-  const statusFilter = document.getElementById('dealStatusFilter').value;
+// ---------- Start Deal: start one, find one, recent deals ----------
+let sdTab = 'recent';
+const SD_RECENT_KEY = 'dd.recentDeals';
+function sdRecentIds() { try { return JSON.parse(localStorage.getItem(SD_RECENT_KEY) || '[]'); } catch { return []; } }
+function sdRemember(id) {
+  try { localStorage.setItem(SD_RECENT_KEY, JSON.stringify([id, ...sdRecentIds().filter(x => x !== id)].slice(0, 20))); } catch { /* private window */ }
+}
+// Working deals nobody has touched in 3 days.
+const SD_STALE_DAYS = 3;
+const sdIsStale = d => d.status === 'working' && Date.now() - new Date(d.dateUpdated || d.dateCreated).getTime() > SD_STALE_DAYS * 86400000;
+const DEAL_TYPE_LABELS = { retail: 'Retail', lease: 'Lease', cash: 'Cash' };
 
-  const filtered = deals.filter(d => {
-    const lead = leads.find(l => l.id === d.leadId);
-    const car = cars.find(c => c.id === d.carId);
-    if (statusFilter && d.status !== statusFilter) return false;
-    return dealMatchesSearch(d, lead, car, searchTerm) && dealMatchesDateRange(d, dateFrom, dateTo);
-  });
-
-  document.getElementById('dealTableBody').innerHTML = filtered.map(d => {
-    const lead = leads.find(l => l.id === d.leadId);
-    const car = cars.find(c => c.id === d.carId);
-    const customerName = lead ? lead.name : '-- No customer --';
-    const vehicleLabel = car ? `${car.year} ${car.make} ${car.model}` : '-- No vehicle --';
-    const date = new Date(d.dateCreated).toLocaleDateString();
-    const creditStatus = d.creditApp ? d.creditApp.status : 'not_submitted';
-    return html`
-      <tr>
-        <td><button class="deal-number-link" onclick="openDealWorkspace(${js(d.id)})">D-${d.dealNumber}</button></td>
-        <td>${customerName}</td>
-        <td>${vehicleLabel}</td>
-        <td><span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span></td>
-        <td>$${d.monthlyPayment.toLocaleString()}/mo</td>
-        <td><span class="badge ${creditStatus}">${CREDIT_STATUS_LABELS[creditStatus]}</span></td>
-        <td>${date}</td>
-        <td class="row-actions">
-          <button class="delete" onclick="deleteDeal(${js(d.id)})">Delete</button>
-        </td>
-      </tr>
-    `;
-  }).join('');
+function sdSearching() {
+  return ['sdDealNo', 'sdCar', 'dealSearchInput', 'dealStatusFilter', 'sdSales', 'dealDateFrom', 'dealDateTo']
+    .some(id => document.getElementById(id).value.trim());
 }
 
-document.getElementById('dealSearchInput').addEventListener('input', renderDeals);
-document.getElementById('dealDateFrom').addEventListener('change', renderDeals);
-document.getElementById('dealDateTo').addEventListener('change', renderDeals);
-document.getElementById('dealStatusFilter').addEventListener('change', renderDeals);
+function renderDeals() {
+  const searching = sdSearching();
+  document.getElementById('sdSearchTab').hidden = !searching;
+  if (searching) sdTab = 'search';
+  else if (sdTab === 'search') sdTab = 'recent';
+  document.querySelectorAll('.sd-tab').forEach(t => t.classList.toggle('active', t.dataset.sd === sdTab));
+  document.getElementById('sdStaleCount').textContent = deals.filter(sdIsStale).length;
+
+  const byNewest = (a, b) => new Date(b.dateCreated) - new Date(a.dateCreated);
+  let list;
+  let caption;
+  if (sdTab === 'recent') {
+    const ids = sdRecentIds();
+    list = ids.map(id => deals.find(d => d.id === id)).filter(Boolean);
+    caption = list.length ? `The last ${list.length} deal${list.length === 1 ? '' : 's'} you opened on this computer.` : 'Deals you open show up here.';
+  } else if (sdTab === 'new') {
+    list = deals.slice().sort(byNewest).slice(0, 25);
+    caption = 'The newest deals.';
+  } else if (sdTab === 'stale') {
+    list = deals.filter(sdIsStale).sort(byNewest);
+    caption = `Working deals nobody has touched in ${SD_STALE_DAYS}+ days.`;
+  } else if (sdTab === 'all') {
+    list = deals.slice().sort(byNewest);
+    caption = `${list.length} deal${list.length === 1 ? '' : 's'}.`;
+  } else {
+    const dealNo = document.getElementById('sdDealNo').value.replace(/\D/g, '');
+    const carTerm = document.getElementById('sdCar').value.trim().toLowerCase();
+    const searchTerm = document.getElementById('dealSearchInput').value;
+    const statusFilter = document.getElementById('dealStatusFilter').value;
+    const sales = document.getElementById('sdSales').value;
+    const dateFrom = document.getElementById('dealDateFrom').value;
+    const dateTo = document.getElementById('dealDateTo').value;
+    list = deals.filter(d => {
+      const lead = leads.find(l => l.id === d.leadId);
+      const car = cars.find(c => c.id === d.carId);
+      if (dealNo && !String(d.dealNumber).includes(dealNo)) return false;
+      if (carTerm && !(car && [car.stockNumber, car.vin].some(v => String(v || '').toLowerCase().includes(carTerm)))) return false;
+      if (statusFilter && d.status !== statusFilter) return false;
+      if (sales && !(lead && (lead.sales1Id === sales || lead.sales2Id === sales))) return false;
+      return dealMatchesSearch(d, lead, null, searchTerm) && dealMatchesDateRange(d, dateFrom, dateTo);
+    }).sort(byNewest);
+    caption = `${list.length} deal${list.length === 1 ? '' : 's'} found.`;
+  }
+  document.getElementById('sdCaption').textContent = caption;
+
+  document.getElementById('dealTableBody').innerHTML = list.length ? list.map(d => {
+    const lead = leads.find(l => l.id === d.leadId);
+    const car = cars.find(c => c.id === d.carId);
+    const creditStatus = d.creditApp ? d.creditApp.status : 'not_submitted';
+    const type = d.dealType || 'retail';
+    return html`
+      <tr class="sd-row" data-deal="${d.id}">
+        <td><button class="deal-number-link" onclick="openDealWorkspace(${js(d.id)})">D-${d.dealNumber}</button></td>
+        <td>${car && car.stockNumber ? car.stockNumber : '--'}</td>
+        <td>${lead ? lead.name : html`<span class="audit-note">No customer yet</span>`}</td>
+        <td>${car ? `${car.year} ${car.make} ${car.model}` : html`<span class="audit-note">No vehicle yet</span>`}</td>
+        <td>${DEAL_TYPE_LABELS[type] || type}</td>
+        <td><span class="badge ${d.status}">${DEAL_STATUS_LABELS[d.status] || d.status}</span></td>
+        <td>${type === 'cash' ? '--' : `$${(d.monthlyPayment || 0).toLocaleString()}/mo`}</td>
+        <td><span class="badge ${creditStatus}">${CREDIT_STATUS_LABELS[creditStatus]}</span></td>
+        <td>${new Date(d.dateCreated).toLocaleDateString()}</td>
+        <td class="row-actions">${userCan('deleteRecords') ? html`<button class="delete sd-del" onclick="deleteDeal(${js(d.id)})" title="Delete deal" aria-label="Delete deal D-${d.dealNumber}">🗑</button>` : ''}</td>
+      </tr>`;
+  }).join('') : html`<tr><td colspan="10" class="audit-note">${sdTab === 'search' ? 'No deals match.' : 'Nothing here yet.'}</td></tr>`;
+
+  // Salesperson list for the search
+  const salesSel = document.getElementById('sdSales');
+  if (salesSel.options.length <= 1 && staffList.length) {
+    salesSel.insertAdjacentHTML('beforeend', staffList.map(u => html`<option value="${u.id}">${u.name}</option>`).join(''));
+  }
+}
+
+// Clicking anywhere on a row opens the deal.
+document.getElementById('dealTableBody').addEventListener('click', (e) => {
+  if (e.target.closest('button, a')) return;
+  const row = e.target.closest('[data-deal]');
+  if (row) openDealWorkspace(row.dataset.deal);
+});
+document.getElementById('sdTabs').addEventListener('click', (e) => {
+  const t = e.target.closest('.sd-tab');
+  if (!t) return;
+  sdTab = t.dataset.sd;
+  if (sdTab !== 'search') {
+    ['sdDealNo', 'sdCar', 'dealSearchInput', 'dealStatusFilter', 'sdSales', 'dealDateFrom', 'dealDateTo'].forEach(id => { document.getElementById(id).value = ''; });
+  }
+  renderDeals();
+});
+['sdDealNo', 'sdCar', 'dealSearchInput'].forEach(id => document.getElementById(id).addEventListener('input', renderDeals));
+['dealStatusFilter', 'sdSales', 'dealDateFrom', 'dealDateTo'].forEach(id => document.getElementById(id).addEventListener('change', renderDeals));
 document.getElementById('clearDealFiltersBtn').addEventListener('click', () => {
-  document.getElementById('dealSearchInput').value = '';
-  document.getElementById('dealDateFrom').value = '';
-  document.getElementById('dealDateTo').value = '';
-  document.getElementById('dealStatusFilter').value = '';
+  ['sdDealNo', 'sdCar', 'dealSearchInput', 'dealStatusFilter', 'sdSales', 'dealDateFrom', 'dealDateTo'].forEach(id => { document.getElementById(id).value = ''; });
+  sdTab = 'recent';
   renderDeals();
 });
 
-// ---------- New Deal (instant create -> generates Deal #, fill in details later) ----------
+// ---------- Start a deal (gets its Deal # right away; the rest can come later) ----------
+let sdLeadId = '';
+let sdCarId = '';
+const sdLeadPicker = createSearchPicker({
+  kind: 'lead', getIds: () => leads.map(l => l.id),
+  onPick: (id) => { sdLeadId = id; const l = leads.find(x => x.id === id); sdLeadPicker.setLabel(l ? leadPickLabel(l) : ''); }
+});
+const sdCarPicker = createSearchPicker({
+  kind: 'car', getIds: () => cars.filter(c => c.status !== 'sold').map(c => c.id),
+  onPick: (id) => { sdCarId = id; const c = cars.find(x => x.id === id); sdCarPicker.setLabel(c ? carPickLabel(c) : ''); }
+});
+document.getElementById('sdCustomer').replaceWith(sdLeadPicker.element);
+document.getElementById('sdVehicle').replaceWith(sdCarPicker.element);
 
-document.getElementById('addDealBtn').addEventListener('click', async () => {
-  // No picker -- create a bare deal immediately and open straight into the
-  // workspace. Customer and vehicle can be assigned from the Desking tab
-  // whenever they're actually known, which matches how a desk sometimes
-  // starts a deal number before all the paperwork is in hand.
-  const res = await fetch(`${API}/deals`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  const newDeal = await res.json();
-
-  await loadAll();
-  openDealWorkspace(newDeal.id);
+document.getElementById('sdNewForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('addDealBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/deals`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId: sdLeadId || null, carId: sdCarId || null })
+    });
+    const newDeal = await res.json();
+    if (!res.ok) throw new Error(newDeal.error || 'Could not start the deal.');
+    const extra = {};
+    const type = document.getElementById('sdType').value;
+    if (type !== 'retail') extra.dealType = type;
+    const lender = document.getElementById('sdLender').value.trim();
+    if (lender) extra.lender = lender;
+    if (document.getElementById('sdOffsite').checked) extra.offsiteDelivery = true;
+    if (Object.keys(extra).length) {
+      await fetch(`${API}/deals/${newDeal.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(extra) });
+    }
+    e.target.reset();
+    sdLeadId = ''; sdCarId = ''; sdLeadPicker.setLabel(''); sdCarPicker.setLabel('');
+    await loadAll();
+    openDealWorkspace(newDeal.id);
+  } catch (err) { alert(err.message); }
+  btn.disabled = false;
 });
 
 window.deleteDeal = async function(id) {
@@ -4458,6 +4546,7 @@ window.openDealWorkspace = function(dealId) {
   const deal = deals.find(d => d.id === dealId);
   if (!deal) return;
   currentWorkspaceDealId = dealId;
+  sdRemember(dealId);
 
   document.getElementById('workspaceTitle').textContent = `Deal #D-${deal.dealNumber}`;
   document.getElementById('dealStatusSelect').value = deal.status;

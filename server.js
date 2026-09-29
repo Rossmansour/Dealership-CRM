@@ -125,7 +125,7 @@ const SERVER_MANAGED_FIELDS = {
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync'],
-  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
+  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
@@ -1957,7 +1957,7 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
       const d = updates.chargebackDate ? new Date(updates.chargebackDate) : null;
       updates.chargebackDate = d && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
     }
-    const merged = { ...deal, ...updates };
+    const merged = { ...deal, ...updates, dateUpdated: new Date().toISOString() }; // "Not worked" on Start Deal goes by this
     // When the deal was delivered and finalized (the dashboard counts by these).
     if (['delivered', 'closed', 'finalized'].includes(merged.status) && !merged.deliveredAt) merged.deliveredAt = new Date().toISOString();
     if (merged.status === 'finalized' && !merged.finalizedAt) merged.finalizedAt = new Date().toISOString();

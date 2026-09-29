@@ -544,29 +544,66 @@
 
   <!-- DEALS -->
   <section id="deals" class="tab-panel">
-    <div class="panel-header deals-filter-header">
-      <input type="text" id="dealSearchInput" placeholder="Search name, VIN, stock #, deal #, phone, email, company..." class="deal-search-input" />
-      <select id="dealStatusFilter">
-        <option value="">All statuses</option>
-        <option value="working">Stored / Working</option>
-        <option value="delivered">Delivered</option>
-        <option value="closed">Closed</option>
-        <option value="finalized">Finalized</option>
-      </select>
-      <label class="deal-date-label">From <input type="date" id="dealDateFrom" /></label>
-      <label class="deal-date-label">To <input type="date" id="dealDateTo" /></label>
-      <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
-      <button class="btn-primary" id="addDealBtn">+ Create Deal</button>
+    <!-- Start Deal: start a new deal or find one on the left; recent deals on the right. -->
+    <div class="sd">
+      <div class="sd-left">
+        <form class="sd-card" id="sdNewForm">
+          <h2 class="sd-title">Start a deal</h2>
+          <label>Deal type
+            <select id="sdType"><option value="retail">Retail</option><option value="lease">Lease</option><option value="cash">Cash</option></select>
+          </label>
+          <label>Customer <span id="sdCustomer"></span></label>
+          <label>Vehicle <span id="sdVehicle"></span></label>
+          <label>Lender <input type="text" id="sdLender" maxlength="80" placeholder="Bank or credit union (optional)" /></label>
+          <label class="sd-check"><input type="checkbox" id="sdOffsite" /><span>Off-site delivery</span></label>
+          <button type="submit" class="btn-primary sd-go" id="addDealBtn">Start deal</button>
+          <p class="sd-hint">Customer and vehicle can be picked now or later.</p>
+        </form>
+
+        <div class="sd-card">
+          <h2 class="sd-title">Find a deal</h2>
+          <div class="sd-two">
+            <label>Deal # <input type="text" id="sdDealNo" inputmode="numeric" placeholder="1042" /></label>
+            <label>Status
+              <select id="dealStatusFilter">
+                <option value="">Any</option>
+                <option value="working">Stored / Working</option>
+                <option value="delivered">Delivered</option>
+                <option value="closed">Closed</option>
+                <option value="finalized">Finalized</option>
+              </select>
+            </label>
+          </div>
+          <label>Stock # or VIN <input type="text" id="sdCar" autocomplete="off" spellcheck="false" /></label>
+          <label>Customer <input type="text" id="dealSearchInput" placeholder="Name, phone, email, company" /></label>
+          <label>Salesperson <select id="sdSales"><option value="">Anyone</option></select></label>
+          <div class="sd-two">
+            <label>From <input type="date" id="dealDateFrom" /></label>
+            <label>To <input type="date" id="dealDateTo" /></label>
+          </div>
+          <button type="button" class="btn-secondary" id="clearDealFiltersBtn">Clear</button>
+        </div>
+      </div>
+
+      <div class="sd-right sd-card">
+        <div class="sd-tabs" id="sdTabs" role="tablist">
+          <button type="button" class="sd-tab active" data-sd="recent">Recently opened</button>
+          <button type="button" class="sd-tab" data-sd="new">Newest</button>
+          <button type="button" class="sd-tab" data-sd="stale">Not worked <span class="rc-count" id="sdStaleCount">0</span></button>
+          <button type="button" class="sd-tab" data-sd="all">All deals</button>
+          <button type="button" class="sd-tab" data-sd="search" id="sdSearchTab" hidden>Search results</button>
+        </div>
+        <p class="sd-caption" id="sdCaption"></p>
+        <div class="table-scroll">
+          <table class="data-table sd-table">
+            <thead>
+              <tr><th>Deal #</th><th>Stock #</th><th>Customer</th><th>Vehicle</th><th>Type</th><th>Status</th><th>Payment</th><th>Credit</th><th>Date</th><th></th></tr>
+            </thead>
+            <tbody id="dealTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Deal #</th><th>Customer</th><th>Vehicle</th><th>Status</th>
-          <th>Monthly Payment</th><th>Credit App</th><th>Date</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="dealTableBody"></tbody>
-    </table>
   </section>
 
   <!-- AI ASSISTANT -->
