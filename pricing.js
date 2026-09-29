@@ -58,7 +58,8 @@ function pricingSettings(settings) {
     roundTo: Math.round(num(p.roundTo, d.roundTo, 1, 1000)),
     includeNew: !!p.includeNew,
     minComps: Math.round(num(p.minComps, d.minComps, 1, 20)),
-    lastRun: p.lastRun || null
+    lastRun: p.lastRun || null,
+    lastPull: p.lastPull || null
   };
 }
 
@@ -257,15 +258,52 @@ async function autoPrice(dealershipId) {
   return { changed, ...refreshed };
 }
 
-// Every store with auto-pricing on, once a day.
+// Once a day for every store: stores with auto-pricing on get fresh prices;
+// the rest still get a fresh market on every car (no one has to ask for it).
 async function autoPriceSweep() {
-  const { rows } = await store.pool.query(`SELECT id, settings FROM dealerships WHERE (settings->'pricing'->>'auto')::boolean IS TRUE`);
+  const { rows } = await store.pool.query('SELECT id, settings FROM dealerships');
   for (const row of rows) {
-    const last = row.settings.pricing.lastRun && row.settings.pricing.lastRun.at;
+    const cfg = pricingSettings(row.settings);
+    const last = cfg.auto ? cfg.lastRun && cfg.lastRun.at : cfg.lastPull && cfg.lastPull.at;
     if (last && Date.now() - new Date(last).getTime() < 23 * 3600000) continue;
-    await autoPrice(row.id).catch(err => console.error('Auto-pricing failed:', err.message));
+    if (cfg.auto) {
+      await autoPrice(row.id).catch(err => console.error('Auto-pricing failed:', err.message));
+    } else if (marketConnected()) {
+      const r = await refreshMarket(row.id, cfg, null, { olderThanHours: 20 }).catch(err => ({ refreshed: 0, errors: [err.message] }));
+      await store.pool.query(`UPDATE dealerships SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{pricing}', COALESCE(settings->'pricing', '{}'::jsonb) || $2::jsonb) WHERE id = $1`,
+        [row.id, JSON.stringify({ lastPull: { at: new Date().toISOString(), refreshed: r.refreshed, errors: r.errors } })]);
+    }
   }
 }
+
+// A car's market is pulled on its own, in the background, when the car is
+// added, when its year/make/model/trim/miles change, and when the pricing
+// screen finds one without it. One queue per store so cars are pulled once.
+const marketConnected = () => !!(marketSource || marketKey());
+const queued = new Map();   // dealershipId -> Set of car ids waiting
+const running = new Map();  // dealershipId -> the running pull
+const pullErrors = new Map(); // dealershipId -> last problem, shown on the pricing screen
+function pullSoon(dealershipId, carIds) {
+  if (!carIds.length) return false;
+  const waiting = queued.get(dealershipId) || new Set();
+  carIds.forEach(id => waiting.add(id));
+  queued.set(dealershipId, waiting);
+  if (!running.has(dealershipId)) {
+    running.set(dealershipId, (async () => {
+      try {
+        while ((queued.get(dealershipId) || new Set()).size) {
+          const ids = [...queued.get(dealershipId)];
+          queued.delete(dealershipId);
+          const r = await loadCfg(dealershipId).then(cfg => refreshMarket(dealershipId, cfg, ids)).catch(err => ({ errors: [err.message] }));
+          if (r.errors.length) pullErrors.set(dealershipId, r.errors[0]); else pullErrors.delete(dealershipId);
+        }
+      } finally { running.delete(dealershipId); }
+    })());
+  }
+  return true;
+}
+// Tests wait for background pulls to finish.
+const pullsDone = () => Promise.all([...running.values()]);
 
 // ---------- Routes ----------
 
@@ -281,9 +319,14 @@ async function loadCfg(dealershipId) {
 router.get('/pricing', allow, wrap(async (req, res) => {
   const cfg = await loadCfg(req.dealershipId);
   const [cars, pending] = await Promise.all([store.list(store.pool, 'cars', req.dealershipId), reconPendingByCar(store.pool, req.dealershipId)]);
+  const missing = cars.filter(c => inScope(c, cfg) && !c.market && canPrice(c)).map(c => c.id);
+  const needsZip = !!marketKey() && !cfg.zip;
+  if (!needsZip) pullSoon(req.dealershipId, missing);
   res.json({
     settings: cfg,
     connected: !!marketKey(),
+    pulling: running.has(req.dealershipId),
+    pullError: needsZip ? "Set the store's ZIP code in Pricing rules so the market can be pulled." : pullErrors.get(req.dealershipId) || null,
     cars: cars.filter(c => !SOLD.includes(c.status)).map(c => {
       const s = suggest(c, cfg, pending.get(c.id));
       return {
@@ -343,8 +386,8 @@ router.put('/pricing/settings', allow, wrap(async (req, res) => {
     const { rows } = await q.query('SELECT settings FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
     const settings = rows[0].settings || {};
     const before = pricingSettings(settings);
-    const { lastRun, ...rest } = pricingSettings({ pricing: { ...before, ...(req.body || {}) } });
-    const next = { ...rest, lastRun: before.lastRun };
+    const { lastRun, lastPull, ...rest } = pricingSettings({ pricing: { ...before, ...(req.body || {}) } });
+    const next = { ...rest, lastRun: before.lastRun, lastPull: before.lastPull };
     await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, pricing: next }]);
     await audit.updated(q, req, 'settings', { ...before, id: 'pricing-settings' }, { ...next, id: 'pricing-settings' }, 'Market pricing rules');
     return next;
@@ -360,4 +403,4 @@ router.post('/pricing/run', allow, wrap(async (req, res) => {
   res.json(await autoPrice(req.dealershipId));
 }));
 
-module.exports = { router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, fetchMarket, marketConnected: () => !!(marketSource || marketKey()), autoPrice, autoPriceSweep, setMarketSource };
+module.exports = { router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, fetchMarket, marketConnected, autoPrice, autoPriceSweep, setMarketSource, pullSoon, pullsDone };

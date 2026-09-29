@@ -18,6 +18,19 @@ async function prApi(path, method = 'GET', body) {
 async function openPricingView() {
   document.getElementById('prBody').innerHTML = html`<tr><td colspan="11" class="rc-muted">Loading…</td></tr>`;
   try { pricing = await prApi('/pricing'); renderPricing(); } catch (err) { document.getElementById('prBody').innerHTML = html`<tr><td colspan="11">${err.message}</td></tr>`; }
+  prWatchPulls();
+}
+// Cars without a market get it pulled on their own; while that runs, check
+// back every few seconds so their numbers fill in without a refresh.
+let prPullTimer = null;
+function prWatchPulls() {
+  clearTimeout(prPullTimer);
+  if (!pricing || !pricing.pulling) return;
+  prPullTimer = setTimeout(async () => {
+    if (currentView !== 'pricing') return;
+    try { pricing = await prApi('/pricing'); renderPricing(); } catch (err) { return; }
+    prWatchPulls();
+  }, 4000);
 }
 
 const prDiffers = c => c.suggested !== null && c.suggested !== c.price;
@@ -40,7 +53,9 @@ function renderPricing() {
   const last = s.lastRun;
   document.getElementById('prBanner').innerHTML = html`<div class="pr-banner ${pricing.connected ? '' : 'pr-banner-warn'}">
     ${pricing.connected
-      ? html`<strong>Market data connected.</strong> ${s.zip ? `Cars within ${s.radius} miles of ${s.zip}.` : html`<span class="ro-late">Set your store ZIP in Pricing rules.</span>`}`
+      ? html`<strong>Market data connected.</strong> ${s.zip ? `Cars within ${s.radius} miles of ${s.zip}. Pulled on its own when a car is added and fresh every day.` : html`<span class="ro-late">Set your store ZIP in Pricing rules.</span>`}
+        ${pricing.pulling ? html` <span class="rc-muted">Pulling the market for new cars…</span>` : ''}
+        ${pricing.pullError && s.zip ? html` <span class="ro-late">${pricing.pullError}</span>` : ''}`
       : html`<strong>Market data not connected yet.</strong> Add a MarketCheck API key (MARKETCHECK_API_KEY) to price your real cars. ${demo || pricing.cars.some(c => c.canPrice) ? 'Demo cars use made-up demo listings so you can try it.' : ''}`}
     <span class="pr-auto ${s.auto ? 'pr-auto-on' : ''}">Auto-pricing ${s.auto ? 'ON' : 'off'}${s.auto && last ? html` · last run ${new Date(last.at).toLocaleString()} (${last.changed} changed)` : ''}
       ${s.auto ? html` <button type="button" class="link-btn" id="prRunBtn">Run now</button>` : ''}</span>
@@ -68,7 +83,7 @@ function renderPricing() {
       <td>${c.days}</td>
       <td>${money0(c.allIn)}${c.reconPending ? html`<div class="rc-muted">incl. ${money0(c.reconPending)} recon</div>` : ''}</td>
       <td><strong>${c.price ? money0(c.price) : '--'}</strong>${c.lastChange ? html`<div class="rc-muted" title="${c.lastChange.reason || ''}">was ${money0(c.lastChange.previous)}</div>` : ''}</td>
-      <td>${m && m.median ? html`${money0(m.median)}<div class="rc-muted">${m.count} cars${m.source === 'demo' ? ' · demo' : ''}</div>` : html`<span class="rc-muted">${!c.inScope ? 'Not priced' : c.canPrice ? 'Not pulled yet' : 'Needs market data'}</span>`}</td>
+      <td>${m && m.median ? html`${money0(m.median)}<div class="rc-muted">${m.count} cars${m.source === 'demo' ? ' · demo' : ''}</div>` : html`<span class="rc-muted">${!c.inScope ? 'Not priced' : c.canPrice ? (pricing.pulling ? 'Pulling…' : 'Not pulled yet') : 'Needs market data'}</span>`}</td>
       <td class="${prPctClass(c.pctOfMarket)}">${c.pctOfMarket === null ? '--' : `${c.pctOfMarket}%`}</td>
       <td>${c.rank ? `${c.rank} of ${m.count + 1}` : '--'}</td>
       <td>${c.suggested === null ? html`<span class="rc-muted">${c.inScope ? c.reason : ''}</span>` : html`<strong>${money0(c.suggested)}</strong>

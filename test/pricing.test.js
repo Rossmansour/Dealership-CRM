@@ -35,7 +35,9 @@ test('managers only', async () => {
 });
 
 test('the market, adjusted for miles, and the suggested price', async () => {
-  assert.strictEqual((await row(car.id)).reason, 'No market data yet');
+  // Nobody asked: adding the car pulled its market in the background.
+  await pricing.pullsDone();
+  assert.strictEqual((await row(car.id)).market.median, 23250);
   const r = (await as(manager, 'POST', '/pricing/refresh', {})).body;
   assert.ok(r.refreshed >= 1);
   const c = await row(car.id);
@@ -88,6 +90,11 @@ test('appraisals pull the same market, with a suggested retail', async () => {
   // Saving the appraisal keeps the market that was pulled.
   r = await as(manager, 'PUT', `/appraisals/${a.id}`, { notes: 'clean', market: null });
   assert.strictEqual(r.body.market.median, 23250);
+  // What's typed on screen (not saved yet) is what gets pulled.
+  r = await as(manager, 'POST', `/appraisals/${a.id}/market`, { year: 2020, make: 'Honda', model: 'Civic', trim: '', mileage: 30000 });
+  assert.strictEqual(r.body.market.median, 24250, '20,000 fewer miles than the similar cars');
+  assert.strictEqual(r.body.market.for, '2020|Honda|Civic||30000');
+  assert.strictEqual(r.body.mileage, 40000, 'the appraisal itself is not changed');
   const bare = (await as(manager, 'POST', '/appraisals', { vin: '' })).body;
   assert.strictEqual((await as(manager, 'POST', `/appraisals/${bare.id}/market`)).status, 400);
 });
@@ -95,4 +102,23 @@ test('appraisals pull the same market, with a suggested retail', async () => {
 test('new cars are left out unless the store prices them too', async () => {
   const n = (await as(manager, 'POST', '/cars', { year: 2025, make: 'Honda', model: 'Civic', price: 28000, cost: 25000, mileage: 5, stockType: 'new' })).body;
   assert.strictEqual((await row(n.id)).inScope, false);
+});
+
+test('cars get their market on their own: added, changed miles, and once a day', async () => {
+  const c = (await as(manager, 'POST', '/cars', { year: 2020, make: 'Honda', model: 'Civic', price: 22000, cost: 16000, mileage: 50000, stockType: 'used' })).body;
+  await pricing.pullsDone();
+  assert.strictEqual((await row(c.id)).market.median, 22250);
+  await as(manager, 'PUT', `/cars/${c.id}`, { mileage: 60000 });
+  await pricing.pullsDone();
+  assert.strictEqual((await row(c.id)).market.median, 21250, 'pulled again for the new miles');
+  // A price change alone doesn't pull it again.
+  const at = (await row(c.id)).market.at;
+  await as(manager, 'PUT', `/cars/${c.id}`, { price: 21900 });
+  await pricing.pullsDone();
+  assert.strictEqual((await row(c.id)).market.at, at);
+  // The daily sweep refreshes the market even with auto-pricing off.
+  await as(manager, 'PUT', '/pricing/settings', { auto: false });
+  await pricing.autoPriceSweep();
+  const settings = (await as(manager, 'GET', '/pricing')).body.settings;
+  assert.ok(settings.lastPull && settings.lastPull.at, 'the sweep ran for a store without auto-pricing');
 });

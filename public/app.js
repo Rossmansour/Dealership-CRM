@@ -1865,6 +1865,7 @@ window.openAppraisal = async function(id) {
   renderAppraisalDetail();
   setAppraisalDirty(false);
   window.scrollTo(0, 0);
+  apAutoMarket(0);
 };
 
 function setAppraisalDirty(dirty) {
@@ -2014,6 +2015,7 @@ async function decodeAppraisalVin({ overwrite = false } = {}) {
   });
   if (document.getElementById('apMake').value) {
     setAppraisalDirty(true);
+    apAutoMarket(0);
     if (await saveAppraisal()) await checkRecalls();
   }
 }
@@ -2103,7 +2105,7 @@ function renderAppraisalMarket() {
   const stat = (label, value) => html`<div><span>${label}</span><strong>${value}</strong></div>`;
   el.innerHTML = html`<div class="ap-market-head">
       <span class="plug-status live">Live</span>
-      <span class="audit-note">${m ? `Similar cars for sale nearby, adjusted to ${Number(a.mileage || 0).toLocaleString()} miles · pulled ${new Date(m.at).toLocaleString()}` : 'Similar cars for sale near your store.'}</span>
+      <span class="audit-note">${m ? `Similar cars for sale nearby, adjusted to ${Number(apVehicleNow().mileage).toLocaleString()} miles · pulled ${new Date(m.at).toLocaleString()} · updates on its own` : 'Pulled on its own once the year, make, and model are in.'}</span>
       ${open ? html`<button type="button" class="btn-secondary btn-small" id="apMarketBtn">${m ? '↻ Refresh' : 'Pull market'}</button>` : ''}
     </div>
     ${m ? html`<div class="pending-stats retail-stats ap-market-stats">
@@ -2131,18 +2133,56 @@ document.getElementById('apMarketPlug').addEventListener('click', async (e) => {
     setAppraisalDirty(true);
     return renderAppraisalMarket();
   }
-  const btn = e.target.closest('#apMarketBtn');
-  if (!btn) return;
-  if (appraisalDirty && !confirm('Pull the market for what was last saved? (Save first if you just changed the year, make, model, or miles.)')) return;
-  btn.disabled = true; btn.textContent = 'Pulling…';
+  if (e.target.closest('#apMarketBtn')) pullAppraisalMarket({ force: true });
+});
+
+// The market is pulled on its own -- when the appraisal opens and a moment
+// after the year, make, model, trim, or miles change -- from what's typed
+// right now, so nobody has to save or click anything first.
+const apVehicleNow = () => {
+  const v = id => document.getElementById(id).value.trim();
+  return { year: Number(v('apYear')) || null, make: v('apMake'), model: v('apModel'), trim: v('apTrim'), vin: v('apVin'), mileage: Number(v('apMileage')) || 0 };
+};
+const apMarketKey = v => [v.year, v.make, v.model, v.trim, v.mileage].join('|');
+let apMarketTimer = null;
+let apMarketPulling = null; // the key being pulled right now
+function apAutoMarket(delay = 900) {
+  clearTimeout(apMarketTimer);
+  apMarketTimer = setTimeout(() => pullAppraisalMarket(), delay);
+}
+async function pullAppraisalMarket({ force = false } = {}) {
+  const a = currentAppraisal;
+  const p = providerList.find(x => x.key === 'market');
+  if (!a || a.status !== 'open' || !p || p.status !== 'live') return;
+  const v = apVehicleNow();
+  if (!v.year || !v.make || !v.model) return;
+  const key = apMarketKey(v);
+  const m = a.market;
+  // Already have it for this car (a day old at most): nothing to do.
+  if (!force && m && m.for === key && Date.now() - new Date(m.at).getTime() < 24 * 3600000) return;
+  if (apMarketPulling === key) return;
+  apMarketPulling = key;
+  const btn = document.getElementById('apMarketBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Pulling…'; }
   try {
-    const res = await fetch(`${API}/appraisals/${currentAppraisal.id}/market`, { method: 'POST' });
+    const res = await fetch(`${API}/appraisals/${a.id}/market`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not get market data.');
-    currentAppraisal.market = data.market;
+    if (currentAppraisal !== a) return; // moved on to another appraisal
+    a.market = data.market;
+    const listed = appraisals.find(x => x.id === a.id);
+    if (listed) listed.market = data.market;
     renderAppraisalMarket();
-  } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = 'Pull market'; }
-});
+  } catch (err) {
+    if (currentAppraisal === a) {
+      renderAppraisalMarket();
+      const note = document.querySelector('#apMarketPlug .audit-note');
+      if (note) note.textContent = err.message;
+    }
+  } finally { if (apMarketPulling === key) apMarketPulling = null; }
+}
+['apYear', 'apMake', 'apModel', 'apTrim', 'apMileage'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => apAutoMarket()));
 
 // ----- Recalls (live, NHTSA) -----
 
