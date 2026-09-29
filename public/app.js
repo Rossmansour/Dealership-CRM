@@ -1423,7 +1423,7 @@ const PIPELINE_STAGES = [
   { key: 'proposal', label: 'Proposal', hint: 'A deal is being worked' },
   { key: 'delivered', label: 'Delivered', hint: 'Bought' }
 ];
-const OUTREACH = ['call', 'text', 'email'];
+const OUTREACH = ['call', 'text', 'email', 'video'];
 const AGED_INVENTORY_DAYS = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -1549,10 +1549,10 @@ function renderPipelineTasks() {
     </div>
     ${plansAll && aiTaskSettingsOpen && cfg ? html`<div class="ai-task-settings">
       <label class="check-label"><input type="checkbox" id="aiTaskEnabled" ${cfg.enabled ? html`checked` : ''} /> Plan every salesperson's and BDC agent's day each morning when the store opens</label>
-      <label>Most tasks per person per day <input type="number" id="aiTaskMax" min="1" max="40" value="${cfg.maxPerPerson}" /></label>
+      <label>Most customers per person per day <input type="number" id="aiTaskMax" min="1" max="40" value="${cfg.maxPerPerson}" /></label>
       <label>Confirm appointments <input type="number" id="aiTaskConfirm" min="0" max="7" value="${cfg.confirmDaysBefore}" /> days before, and again the day of</label>
       <p class="audit-note">${cfg.aiConnected ? 'Planned by AI from each person\'s customers -- no phone numbers, emails, or credit apps are sent.' : 'AI isn\'t connected (GEMINI_API_KEY), so tasks are planned by simple rules for now.'}
-        One task per customer per day; customers already touched today, with an open task, or with an upcoming appointment are skipped. Yesterday's unfinished planned tasks are replaced, and logging a call, text, or email finishes that customer's task.${cfg.lastRun ? ` Last planned ${new Date(cfg.lastRun.at).toLocaleString()}: ${cfg.lastRun.created} task${cfg.lastRun.created === 1 ? '' : 's'}.` : ''}</p>
+        New and Attempted customers get a call, a text, and an email each day; Engaged and later get a plan from their notes (a text and an email when there are none). Every customer gets one video, carried over until it's sent. Channels already done today are skipped, yesterday's unfinished tasks are replaced, and logging a call, text, email, or video finishes the matching task.${cfg.lastRun ? ` Last planned ${new Date(cfg.lastRun.at).toLocaleString()}: ${cfg.lastRun.created} task${cfg.lastRun.created === 1 ? '' : 's'}.` : ''}</p>
       <button type="button" class="btn-primary btn-small" onclick="saveAiTaskSettings()">Save</button>
     </div>` : ''}
     ${due.length ? html`<div class="pipeline-task-list">${due.map(t => {
@@ -1561,7 +1561,7 @@ function renderPipelineTasks() {
       const lead = leads.find(l => l.id === t.leadId);
       return html`<button type="button" class="pipeline-task ${overdue ? 'overdue' : ''}" onclick="openLeadProfile(${js(t.leadId)})" title="${t.planned && t.notes ? `Why: ${t.notes}` : ''}">
         <span class="pipeline-task-icon">${TASK_ICONS[t.type] || '☑️'}</span>
-        <span class="pipeline-task-main">${t.planned ? html`<span class="ai-task-mark" title="Planned for you">✨</span> ` : ''}<strong>${lead ? lead.name : t.leadName}</strong> · ${TASK_LABELS[t.type] || 'Task'}${t.title ? ` -- ${t.title}` : ''}</span>
+        <span class="pipeline-task-main">${t.planned ? html`<span class="ai-task-mark" title="Planned for you">✨</span> ` : ''}<strong>${lead ? lead.name : t.leadName}</strong> · ${TASK_LABELS[t.type] || 'Task'}${t.title ? ` -- ${t.title}` : ''}${t.type === 'video' && t.renewedCount ? html` <span class="audit-note">· carried over ${t.renewedCount} day${t.renewedCount === 1 ? '' : 's'}</span>` : ''}</span>
         <span class="pipeline-task-when">${overdue ? `Overdue · ${when.toLocaleDateString()} ` : ''}${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}${mine ? '' : ` · ${t.assignedTo ? t.assignedTo.name : ''}`}</span>
       </button>`;
     })}</div>` : html`<p class="audit-note">Nothing due today.${upcoming ? ` ${upcoming} coming up later.` : ''} Schedule follow-ups from a customer's page.</p>`}`;
@@ -3288,13 +3288,13 @@ let cpHistoryFilter = 'all';
 let selectedSendTextPhoto = null;
 const leadProfileModal = document.getElementById('leadProfileModal');
 
-const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', note: '📝', visit: '📍', task: '✅', appointment: '📅', status: '🏷', dms: '⇄' };
-const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', note: 'Note', visit: 'Showroom Visit', task: 'Task', appointment: 'Appointment', status: 'Status', dms: 'DMS' };
-const TASK_ICONS = { call: '📞', text: '💬', email: '✉️', appointment: '📅', todo: '☑️' };
-const TASK_LABELS = { call: 'Call', text: 'Text', email: 'Email', appointment: 'Appointment', todo: 'To-do' };
+const ACTIVITY_ICONS = { call: '📞', text: '💬', email: '✉️', video: '🎥', note: '📝', visit: '📍', task: '✅', appointment: '📅', status: '🏷', dms: '⇄' };
+const ACTIVITY_LABELS = { call: 'Call', text: 'Text', email: 'Email', video: 'Video', note: 'Note', visit: 'Showroom Visit', task: 'Task', appointment: 'Appointment', status: 'Status', dms: 'DMS' };
+const TASK_ICONS = { call: '📞', text: '💬', email: '✉️', video: '🎥', appointment: '📅', todo: '☑️' };
+const TASK_LABELS = { call: 'Call', text: 'Text', email: 'Email', video: 'Video', appointment: 'Appointment', todo: 'To-do' };
 const HISTORY_FILTERS = [
   ['all', 'All', () => true], ['note', 'Notes', a => a.type === 'note'], ['call', 'Calls', a => a.type === 'call'],
-  ['text', 'Texts', a => a.type === 'text'], ['email', 'Emails', a => a.type === 'email'], ['visit', 'Visits', a => a.type === 'visit'],
+  ['text', 'Texts', a => a.type === 'text'], ['email', 'Emails', a => a.type === 'email'], ['video', 'Videos', a => a.type === 'video'], ['visit', 'Visits', a => a.type === 'visit'],
   ['task', 'Tasks', a => a.type === 'task'], ['appointment', 'Appts', a => a.type === 'appointment'], ['status', 'Status', a => a.type === 'status'],
   ['dms', 'DMS', a => a.type === 'dms']
 ];
@@ -3747,21 +3747,19 @@ function renderComposer() {
         <button type="button" class="btn-primary btn-small" id="cpTaskSave">${appt ? 'Set Appointment' : 'Schedule Task'}</button>
       </div>`;
     document.getElementById('cpTaskSave').onclick = () => scheduleTask(appt ? 'appointment' : document.getElementById('cpTaskType').value);
-  } else if (kind === 'video') {
-    el.innerHTML = html`<div class="cp-placeholder"><strong>Video messages -- not available yet</strong>
-      <p>Record a quick walkaround video and text it to the customer. This needs a video messaging service connected first.</p></div>`;
   } else {
     const prompts = {
       note: 'Type a note about this customer...',
       call: 'How did the call go? e.g. Left voicemail about financing',
-      email: 'What did you email them? (logged here -- sending email from the CRM comes later)'
+      email: 'What did you email them? (logged here -- sending email from the CRM comes later)',
+      video: 'What was the video? e.g. Walkaround of the Tacoma, sent by text (recording in the CRM comes later)'
     };
     el.innerHTML = html`
       <textarea id="cpNoteText" rows="3" placeholder="${prompts[kind]}"></textarea>
       <div class="cp-composer-actions">
-        ${kind === 'note' ? '' : html`<label class="cp-reached"><input type="checkbox" id="cpReached" /> ${kind === 'call' ? 'Talked with them' : 'They replied'}</label>`}
+        ${kind === 'note' || kind === 'video' ? '' : html`<label class="cp-reached"><input type="checkbox" id="cpReached" /> ${kind === 'call' ? 'Talked with them' : 'They replied'}</label>`}
         <span class="cp-composer-status" id="cpNoteStatus"></span>
-        <button type="button" class="btn-primary btn-small" id="cpNoteSave">${kind === 'note' ? 'Save Note' : kind === 'call' ? 'Log Call' : 'Log Email'}</button>
+        <button type="button" class="btn-primary btn-small" id="cpNoteSave">${{ note: 'Save Note', call: 'Log Call', email: 'Log Email', video: 'Log Video Sent' }[kind]}</button>
       </div>`;
     document.getElementById('cpNoteSave').onclick = async () => {
       const text = document.getElementById('cpNoteText').value.trim();

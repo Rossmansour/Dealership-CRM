@@ -1,20 +1,23 @@
 // taskplan.js -- AI task planning.
 //
 // Every morning when the store opens (and whenever someone asks), each
-// salesperson and BDC agent gets their own list of calls, texts, and emails
-// for the day, picked from the customers assigned to them: who to reach,
-// how, what about, and why. BDC agents work new and not-yet-reached
+// salesperson and BDC agent gets their own tasks for the day from the
+// customers assigned to them. BDC agents work new and not-yet-reached
 // customers they're on; everything else goes to the salesperson (Sales 1).
 //
-// The AI (the same one the rest of the CRM uses) reads a short summary of
-// each person's customers -- first name, where they are in the pipeline,
-// how long since anyone touched them, the last few notes, the car -- and
-// chooses and words the tasks. Phone numbers, emails, and credit apps are
-// never sent. Without an AI key (or if it fails), the same lists are planned
-// by simple rules instead, so the feature still works.
+//  - New / Attempted: a call, a text, and an email every day.
+//  - Engaged / Visit / Proposal: a plan from their notes and what they've
+//    asked for (the AI reads them); a text and an email when there are none.
+//  - Every customer: one video, carried day to day until it's sent.
+//  - Appointments: confirmed a few days before and the day of.
 //
-// It never piles on: customers who already have an open task are skipped,
-// and each person gets at most the store's daily limit.
+// The AI (the same one the rest of the CRM uses) only sees first names,
+// pipeline facts, and notes -- never phone numbers, emails, or credit apps.
+// Without an AI key (or if it fails), rules plan the same day.
+//
+// It never piles on: channels already done today are skipped, yesterday's
+// unfinished tasks are replaced, logging a contact finishes its task, and
+// each person gets at most the store's number of customers a day.
 
 const crypto = require('crypto');
 const express = require('express');
@@ -26,7 +29,6 @@ const hours = require('./hours');
 const { inBucket } = require('./duplicates');
 
 const DAY = 86400000;
-const TYPES = ['call', 'text', 'email', 'todo'];
 const PLANNER = { id: null, name: 'AI planner' };
 
 function defaultSettings() {
@@ -47,7 +49,7 @@ function settingsFrom(s) {
 
 // ---------- Who's where ----------
 
-const OUTREACH = ['call', 'text', 'email'];
+const OUTREACH = ['call', 'text', 'email', 'video'];
 // Same steps as the Sales Pipeline screen.
 function stageOf(lead, deals, openAppointments) {
   const mine = deals.filter(d => d.leadId === lead.id);
@@ -83,38 +85,66 @@ function ownerOf(lead, stage, people) {
   return null;
 }
 
-// ---------- Planning by rules (no AI, or AI failed) ----------
+// ---------- What each customer gets today ----------
+//
+// Before they're engaged (New, Attempted): a call, a text, and an email every
+// day, skipping any channel already done today or that we have no phone /
+// email for. Once engaged (Engaged, Visit, Proposal): the plan comes from
+// their notes and what they've asked for (the AI reads them); with no notes,
+// a text and an email. Every customer also gets one video, carried day to day
+// until it's sent.
 
-// One touch for a customer nobody has touched today. Their best contact
-// method wins; customers who aren't answering alternate call and text.
-function ruleTask(c) {
-  const lastOut = (c.lead.activities || []).find(a => OUTREACH.includes(a.type));
+const PRE_ENGAGED = ['new', 'attempted'];
+const hasPhone = lead => String(lead.phone || '').replace(/\D/g, '').length >= 7;
+const hasEmail = lead => /\S+@\S+\.\S+/.test(String(lead.email || ''));
+
+function channelsFor(lead, doneToday) {
+  return ['call', 'text', 'email'].filter(t => !doneToday.has(t) && (t === 'email' ? hasEmail(lead) : hasPhone(lead)));
+}
+
+// What staff wrote about this customer: the notes box and the log (calls,
+// texts, emails, notes, visits), newest first.
+function notesOf(lead) {
+  const log = (lead.activities || []).filter(a => ['note', 'call', 'text', 'email', 'visit'].includes(a.type) && String(a.text || '').trim().length > 3);
+  return { notes: String(lead.notes || '').trim(), log };
+}
+const hasNotes = lead => { const n = notesOf(lead); return !!(n.notes || n.log.length); };
+
+// Who goes first when there isn't room for everyone.
+function priority(c) {
+  const base = { proposal: 90, visit: 85, new: 100, engaged: 65, attempted: 60 }[c.stage] || 50;
+  return base + (c.lead.hot ? 15 : 0) + c.idle * 2;
+}
+
+function outreachTasks(c, channels) {
+  const car = c.car ? ` the ${c.car}` : '';
   const attempts = (c.lead.activities || []).filter(a => OUTREACH.includes(a.type)).length;
-  const preferred = ['call', 'text', 'email'].includes(c.lead.bestContact) ? c.lead.bestContact : null;
+  const first = c.stage === 'new';
+  const why = first ? `New ${c.lead.source && c.lead.source !== 'other' ? `${c.lead.source} ` : ''}lead -- nobody has reached them yet.`
+    : `${attempts} attempt${attempts === 1 ? '' : 's'} so far with no conversation.`;
+  const titles = first
+    ? { call: `First call${car ? ` about${car}` : ''}`, text: 'Intro text', email: `Intro email${car ? ` with${car} details` : ''}` }
+    : { call: `Call again (attempt ${attempts + 1})`, text: 'Follow-up text', email: `Follow-up email${car ? ` about${car}` : ''}` };
+  return channels.map(type => ({ type, title: titles[type], why }));
+}
+
+function basicTasks(c, channels) {
   const car = c.car ? ` about the ${c.car}` : '';
-  const ago = c.idle === 0 ? 'yesterday or earlier today' : `${c.idle} day${c.idle === 1 ? '' : 's'} ago`;
-  switch (c.stage) {
-    case 'new': return { type: preferred || 'call', title: `First contact${car}`, why: `New ${c.lead.source || ''} lead, nobody has reached out yet.`.replace('  ', ' '), score: 100 };
-    case 'attempted':
-      return { type: preferred || (lastOut && lastOut.type === 'call' ? 'text' : 'call'), title: `Try again${car}`, why: `${attempts} attempt${attempts === 1 ? '' : 's'} so far with no conversation; last touch ${ago}.`, score: 60 - Math.min(attempts, 10) * 3 + c.idle * 2 };
-    case 'engaged': return { type: preferred || 'call', title: `Set an appointment${car}`, why: `Talked before; last contact ${ago}.`, score: 65 + c.idle * 3 };
-    case 'visit': return { type: preferred || 'call', title: 'Follow up on the visit', why: `Came in; last contact ${ago}.`, score: 85 + c.idle * 3 };
-    case 'proposal': return { type: preferred || 'call', title: 'Follow up on the deal', why: `A deal is being worked; last contact ${ago}.`, score: 90 + c.idle * 3 };
-    default: return null;
-  }
+  return channels.filter(t => t !== 'call').map(type => ({ type, title: type === 'text' ? `Check-in text${car}` : `Follow-up email${car}`, why: 'Engaged, no notes to go on yet -- keep in touch.' }));
 }
 
-function planByRules(candidates, max) {
-  return candidates
-    .map(c => ({ c, t: ruleTask(c) }))
-    .filter(x => x.t)
-    .map(x => ({ ...x, score: x.t.score + (x.c.lead.hot ? 15 : 0) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, max)
-    .map(({ c, t }) => ({ leadId: c.lead.id, type: t.type, title: t.title, why: t.why }));
+// Without the AI: keep in touch by text and email, pointing at the latest note.
+function notedTasks(c, channels) {
+  const n = notesOf(c.lead);
+  const latest = String((n.log[0] && n.log[0].text) || n.notes).replace(/\s+/g, ' ').slice(0, 50);
+  return channels.filter(t => t !== 'call').map(type => ({ type, title: `Follow up${type === 'text' ? ' by text' : ' by email'}: ${latest}`, why: 'Based on the latest note.' }));
 }
 
-// ---------- Planning by AI ----------
+function videoTask(c) {
+  return { type: 'video', title: c.car ? `Send a walkaround video of the ${c.car}` : 'Send a personal intro video', why: 'Every customer gets one video; this stays on the list until it is sent.' };
+}
+
+// ---------- Planning by AI (engaged customers with notes) ----------
 
 let aiCall = null;        // (systemInstruction, history, message) => text; set by server.js
 let aiConnected = () => false;
@@ -122,19 +152,17 @@ function useAI(fn, connected) { aiCall = fn; aiConnected = connected; }
 
 // What the AI sees about one customer. No phone, email, address, or credit app.
 function summaryFor(c, i) {
+  const n = notesOf(c.lead);
   return {
     ref: i + 1,
     name: firstName(c.lead.name),
     stage: c.stage,
-    source: c.lead.source || 'other',
     hot: !!c.lead.hot,
-    daysSinceAdded: daysSince(new Date(c.lead.dateAdded).getTime()),
     daysSinceLastTouch: c.idle,
-    bestContact: c.lead.bestContact || '',
     vehicle: c.car || '',
-    notes: String(c.lead.notes || '').slice(0, 300),
-    recent: (c.lead.activities || []).filter(a => a.type !== 'status').slice(0, 4)
-      .map(a => ({ type: a.type, daysAgo: daysSince(new Date(a.date).getTime()), talked: !!a.reached, text: String(a.text || '').slice(0, 160) }))
+    canUse: c.channels,
+    notes: n.notes.slice(0, 500),
+    log: n.log.slice(0, 8).map(a => ({ type: a.type, daysAgo: daysSince(new Date(a.date).getTime()), talked: !!a.reached, text: String(a.text || '').slice(0, 240) }))
   };
 }
 
@@ -146,39 +174,32 @@ function parseJson(text) {
   return JSON.parse(t.slice(start, end + 1));
 }
 
-async function planByAI(person, candidates, max) {
-  const list = candidates.slice(0, 40);
-  const system = `You plan the day for a car dealership ${person.role === 'bdc' ? 'BDC agent' : 'salesperson'} named ${firstName(person.name)}.
-Nobody has touched any of the customers below yet today, and the store wants every customer touched once a day.
-Pick at most ${max} of them (a realistic day), most important first, and write exactly one task for each.
-Priorities: new leads nobody has reached; customers with a deal in progress or who visited; hot customers;
-engaged customers going cold; then the rest, oldest contact first. Anyone left out rolls to the top tomorrow.
-For each task choose "call", "text", or "email" (respect bestContact when it's set; a quick text is fine for
-customers who haven't answered several calls). Appointment confirmations are handled separately -- don't add them.
-Write a short task title (under 60 characters, what to do) and a one-sentence reason a manager would agree with.
+// Returns Map(leadId -> [{ type, title, why }]) built from each customer's notes.
+async function planByAI(person, list) {
+  const system = `You plan today's follow-up for a car dealership ${person.role === 'bdc' ? 'BDC agent' : 'salesperson'} named ${firstName(person.name)}.
+Each customer below has already talked with us. Read their notes and log, find what they asked for or what was promised
+(photos, a trade value, numbers, a test drive, a co-signer, a callback time...), and write today's work plan for each:
+1 to 3 tasks, each using one of the channels listed in that customer's "canUse", never the same channel twice for a customer.
+If nothing specific is pending, a text and an email to keep in touch. Appointment confirmations and videos are handled separately.
+Titles: under 60 characters, the concrete thing to do. "why": one sentence pointing at the note it came from.
 Only use facts from the data. Return ONLY a JSON array like:
-[{"ref": 3, "type": "call", "title": "Set a test drive for the Tacoma", "why": "Engaged last week, no contact in 4 days."}]`;
+[{"ref": 2, "type": "text", "title": "Send payment options on the Tacoma", "why": "Asked for numbers under $450/mo on Monday's call."}]`;
   const text = await aiCall(system, [], `Customers:\n${JSON.stringify(list.map(summaryFor))}`);
-  const out = [];
-  const seen = new Set();
+  const out = new Map();
   for (const t of parseJson(text)) {
     const c = list[Number(t && t.ref) - 1];
-    if (!c || seen.has(c.lead.id)) continue;
-    seen.add(c.lead.id);
-    out.push({
-      leadId: c.lead.id,
-      type: TYPES.includes(t.type) ? t.type : 'call',
-      title: String(t.title || 'Follow up').trim().slice(0, 120),
-      why: String(t.why || '').trim().slice(0, 300)
-    });
-    if (out.length >= max) break;
+    if (!c || !c.channels.includes(t.type)) continue;
+    const mine = out.get(c.lead.id) || [];
+    if (mine.length >= 3 || mine.some(x => x.type === t.type)) continue;
+    mine.push({ type: t.type, title: String(t.title || 'Follow up').trim().slice(0, 120), why: String(t.why || '').trim().slice(0, 300) });
+    out.set(c.lead.id, mine);
   }
   return out;
 }
 
 // ---------- When tasks are due ----------
 
-// Spread through the day: from now (or opening) every 20 minutes, before close.
+// Spread through the day: from now (or opening) every 10 minutes, before close.
 // After closing, they start at tomorrow's opening instead.
 function dueTimes(count, storeHours, now = Date.now()) {
   const h = storeHours && storeHours.days ? storeHours : hours.defaultStoreHours();
@@ -193,9 +214,9 @@ function dueTimes(count, storeHours, now = Date.now()) {
     const close = hours.zonedToUtc(noon.y, noon.m, noon.d, ch, cm, tz);
     if (now >= close - 30 * 60000) continue;
     const start = Math.max(open, Math.ceil(now / (15 * 60000)) * 15 * 60000);
-    return Array.from({ length: count }, (_, k) => new Date(Math.min(start + k * 20 * 60000, close - 15 * 60000)).toISOString());
+    return Array.from({ length: count }, (_, k) => new Date(Math.min(start + k * 10 * 60000, close - 15 * 60000)).toISOString());
   }
-  return Array.from({ length: count }, (_, k) => new Date(now + (k + 1) * 20 * 60000).toISOString());
+  return Array.from({ length: count }, (_, k) => new Date(now + (k + 1) * 10 * 60000).toISOString());
 }
 
 // ---------- The plan ----------
@@ -212,29 +233,48 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
     const { rows: users } = await q.query(
       `SELECT id::text AS id, name, role FROM users WHERE dealership_id = $1 AND active AND role IN ('salesperson', 'bdc')`, [dealershipId]);
     const people = new Map(users.filter(u => !userIds || userIds.includes(u.id)).map(u => [u.id, u]));
-    const [leads, deals, tasks, cars] = await Promise.all([
-      store.list(q, 'leads', dealershipId), store.list(q, 'deals', dealershipId),
-      store.list(q, 'tasks', dealershipId), store.list(q, 'cars', dealershipId)
-    ]);
+    // One at a time: they share this transaction's connection.
+    const leads = await store.list(q, 'leads', dealershipId);
+    const deals = await store.list(q, 'deals', dealershipId);
+    const tasks = await store.list(q, 'tasks', dealershipId);
+    const cars = await store.list(q, 'cars', dealershipId);
     const now = Date.now();
     const sh = settings.storeHours && settings.storeHours.days ? settings.storeHours : hours.defaultStoreHours();
     const tz = sh.timezone;
     const today = dayNumber(now, tz);
     const byId = new Map(leads.map(l => [l.id, l]));
 
-    // Yesterday's planned tasks nobody finished are replaced by today's plan
-    // instead of piling up.
+    const dueDay = t => dayNumber(new Date(t.dueAt).getTime(), tz);
+    const mineToPlan = t => !userIds || (t.assignedTo && userIds.includes(String(t.assignedTo.id)));
+
+    // Yesterday's planned calls, texts, and emails nobody finished are replaced
+    // by today's plan instead of piling up. A video carries over until it's sent.
+    let renewed = 0;
+    const firstSlot = dueTimes(1, settings.storeHours)[0];
     for (const t of tasks) {
-      if (t.status !== 'open' || !t.planned || t.type === 'appointment') continue;
-      if (userIds && !(t.assignedTo && userIds.includes(String(t.assignedTo.id)))) continue;
-      if (dayNumber(new Date(t.dueAt).getTime(), tz) >= today) continue;
+      if (t.status !== 'open' || !t.planned || t.type === 'appointment' || !mineToPlan(t) || dueDay(t) >= today) continue;
+      if (t.type === 'video') {
+        t.dueAt = firstSlot;
+        t.renewedCount = (t.renewedCount || 0) + 1;
+        await store.save(q, 'tasks', dealershipId, t.id, t);
+        renewed++;
+        continue;
+      }
       t.status = 'cancelled';
       await store.save(q, 'tasks', dealershipId, t.id, { ...t, completedAt: new Date().toISOString(), completedBy: by, outcome: "Replaced by today's plan" });
     }
     const open = tasks.filter(t => t.status === 'open');
     const appointments = open.filter(t => t.type === 'appointment');
-    // An appointment doesn't stop a customer's confirmation call; anything else open does.
-    const busy = new Set(open.filter(t => t.type !== 'appointment').map(t => t.leadId));
+    // A task someone set by hand means that customer is being handled.
+    const busy = new Set(open.filter(t => t.type !== 'appointment' && !t.planned).map(t => t.leadId));
+    // Planned already today (running it twice doesn't double up).
+    const plannedToday = new Map();
+    for (const t of open) if (t.planned && t.type !== 'video') plannedToday.set(t.leadId, new Set([...(plannedToday.get(t.leadId) || []), t.type]));
+    const videoSent = new Set([
+      ...tasks.filter(t => t.type === 'video' && t.status === 'done').map(t => t.leadId),
+      ...leads.filter(l => (l.activities || []).some(a => a.type === 'video')).map(l => l.id)
+    ]);
+    const videoOpen = new Set(open.filter(t => t.type === 'video').map(t => t.leadId));
     const openAppointments = new Set(appointments.map(t => t.leadId));
     const carLabel = new Map(cars.map(c => [c.id, [c.year, c.make, c.model].filter(Boolean).join(' ')]));
 
@@ -260,26 +300,30 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
         // Booked today for a day or two out: confirming right away is pointless (booked < today).
         task = { kind: 'early', title: `Confirm ${weekday}'s ${time} appointment`, why: `${what}appointment ${weekday} at ${time}, ${daysUntil} day${daysUntil === 1 ? '' : 's'} away.` };
       }
-      confirmedLeads.add(lead.id); // an upcoming appointment: no other task needed
+      confirmedLeads.add(lead.id); // an upcoming appointment: no daily outreach needed
       if (!task) continue;
       const preferred = ['call', 'text'].includes(lead.bestContact) ? lead.bestContact : 'call';
       if (!confirmations.has(personId)) confirmations.set(personId, []);
       confirmations.get(personId).push({ lead, type: preferred, title: task.title, why: task.why, appt, kind: task.kind });
     }
 
-    // ----- Everyone else: one touch each, for customers not touched today -----
+    // ----- Everyone's customers, with what's still to do today -----
     const byPerson = new Map();
-    const touchedToday = lead => (lead.activities || []).some(a => a.type !== 'status' && dayNumber(new Date(a.date).getTime(), tz) === today);
     for (const lead of leads) {
-      if (inBucket(lead) || busy.has(lead.id) || confirmedLeads.has(lead.id) || touchedToday(lead)) continue;
+      if (inBucket(lead)) continue;
       if (lead.snoozedUntil && new Date(lead.snoozedUntil).getTime() > now) continue;
       const stage = stageOf(lead, deals, openAppointments);
       if (!stage || stage === 'delivered') continue;
       const owner = ownerOf(lead, stage, people);
       if (!owner) continue;
+      const doneToday = new Set((lead.activities || []).filter(a => dayNumber(new Date(a.date).getTime(), tz) === today).map(a => a.type));
+      for (const t of plannedToday.get(lead.id) || []) doneToday.add(t);
+      const outreach = busy.has(lead.id) || confirmedLeads.has(lead.id) || doneToday.has('visit') ? [] : channelsFor(lead, doneToday);
+      const needsVideo = !videoSent.has(lead.id) && !videoOpen.has(lead.id);
+      if (!outreach.length && !needsVideo) continue;
       const carId = lead.carId || (lead.wishList || [])[0];
       if (!byPerson.has(owner)) byPerson.set(owner, []);
-      byPerson.get(owner).push({ lead, stage, idle: daysSince(lastTouch(lead)), car: carId ? carLabel.get(carId) || '' : '' });
+      byPerson.get(owner).push({ lead, stage, idle: daysSince(lastTouch(lead)), car: carId ? carLabel.get(carId) || '' : '', channels: outreach, needsVideo });
     }
 
     let source = aiCall && aiConnected() ? 'ai' : 'rules';
@@ -287,21 +331,31 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
     let created = 0;
     for (const id of new Set([...confirmations.keys(), ...byPerson.keys()])) {
       const person = people.get(id);
-      const list = byPerson.get(id) || [];
       const confirms = confirmations.get(id) || [];
-      // Oldest untouched first, so the AI sees the ones that matter if the list is long.
-      list.sort((a, b) => (b.lead.hot - a.lead.hot) || (b.idle - a.idle));
-      const room = Math.max(0, cfg.maxPerPerson - confirms.length);
-      let picks = null;
-      if (!room || !list.length) picks = [];
-      else if (source === 'ai') {
-        try { picks = await planByAI(person, list, room); } catch (err) {
+      // A realistic day: at most this many customers get today's outreach;
+      // the rest are first in line tomorrow.
+      const list = (byPerson.get(id) || []).sort((a, b) => priority(b) - priority(a)).slice(0, cfg.maxPerPerson);
+      const left = (byPerson.get(id) || []).length - list.length;
+      // Engaged customers with notes: the AI reads them and writes the plan.
+      const noted = list.filter(c => !PRE_ENGAGED.includes(c.stage) && c.channels.length && hasNotes(c.lead));
+      let fromNotes = new Map();
+      let usedAI = false;
+      if (noted.length && source === 'ai') {
+        try { fromNotes = await planByAI(person, noted); usedAI = true; } catch (err) {
           console.error('AI task planning failed, using rules:', err.message);
           source = 'rules';
         }
       }
-      if (!picks) picks = planByRules(list, room);
-      const all = [...confirms.map(c => ({ leadId: c.lead.id, type: c.type, title: c.title, why: c.why, confirm: c })), ...picks];
+      const all = confirms.map(c => ({ leadId: c.lead.id, type: c.type, title: c.title, why: c.why, confirm: c, planned: 'confirm' }));
+      for (const c of list) {
+        let todo;
+        if (PRE_ENGAGED.includes(c.stage)) todo = outreachTasks(c, c.channels).map(t => ({ ...t, planned: 'rules' }));
+        else if (!hasNotes(c.lead)) todo = basicTasks(c, c.channels).map(t => ({ ...t, planned: 'rules' }));
+        else if (usedAI && (fromNotes.get(c.lead.id) || []).length) todo = fromNotes.get(c.lead.id).map(t => ({ ...t, planned: 'ai' }));
+        else todo = notedTasks(c, c.channels).map(t => ({ ...t, planned: 'rules' }));
+        if (c.needsVideo) todo.push({ ...videoTask(c), planned: 'video' });
+        for (const t of todo) all.push({ leadId: c.lead.id, ...t });
+      }
       const due = dueTimes(all.length, settings.storeHours);
       for (const [k, p] of all.entries()) {
         const lead = byId.get(p.leadId);
@@ -310,7 +364,7 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
           assignedTo: { id: person.id, name: person.name },
           id: crypto.randomUUID(), leadId: lead.id, leadName: lead.name, status: 'open',
           createdBy: by, createdAt: new Date().toISOString(), completedAt: null, completedBy: null, outcome: '',
-          planned: p.confirm ? 'confirm' : source // 'confirm', 'ai', or 'rules'
+          planned: p.planned // 'confirm', 'video', 'ai', or 'rules'
         };
         if (p.confirm) {
           task.appointmentId = p.confirm.appt.id;
@@ -324,7 +378,7 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
         await store.insert(q, 'tasks', dealershipId, task);
       }
       created += all.length;
-      results.push({ id, name: person.name, created: all.length, confirmations: confirms.length, left: list.length - picks.length });
+      results.push({ id, name: person.name, created: all.length, confirmations: confirms.length, customers: list.length, left });
       if (all.length) {
         await alerts.notify(q, {
           dealershipId, type: 'task_assigned', userIds: [id], actorId: by.id,
@@ -342,17 +396,19 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
       action: 'plan_tasks', entityType: 'settings', entityId: 'ai-tasks', label: 'AI task planning',
       details: `${created} task${created === 1 ? '' : 's'} for ${results.filter(r => r.created).length} people (${source === 'ai' ? 'AI' : 'rules'})`
     });
-    return { source, created, people: results };
+    return { source, created, renewed, people: results };
   });
 }
 
-// Someone logged a call, text, email, or visit on a customer: their planned
-// task for it is done (nobody should have to tick it off separately).
+// Someone logged a call, text, email, or video on a customer: their planned
+// task for that is done (nobody should have to tick it off separately). A
+// showroom visit covers the day's calls, texts, and emails.
 async function completeByTouch(q, req, leadId, activity) {
-  if (!['call', 'text', 'email', 'visit'].includes(activity.type)) return 0;
+  const types = activity.type === 'visit' ? ['call', 'text', 'email'] : ['call', 'text', 'email', 'video'].includes(activity.type) ? [activity.type] : [];
+  if (!types.length) return 0;
   const { rows } = await q.query(
-    `SELECT id FROM tasks WHERE dealership_id = $1 AND data->>'leadId' = $2 AND data->>'status' = 'open' AND data ? 'planned' AND data->>'type' <> 'appointment'`,
-    [req.dealershipId, leadId]);
+    `SELECT id FROM tasks WHERE dealership_id = $1 AND data->>'leadId' = $2 AND data->>'status' = 'open' AND data ? 'planned' AND data->>'type' = ANY($3)`,
+    [req.dealershipId, leadId, types]);
   for (const { id } of rows) {
     const t = await store.get(q, 'tasks', req.dealershipId, id, { forUpdate: true });
     if (!t || t.status !== 'open') continue;
@@ -430,4 +486,4 @@ function router() {
   return r;
 }
 
-module.exports = { router, plan, sweep, useAI, planByRules, stageOf, dueTimes, settingsFrom, completeByTouch };
+module.exports = { router, plan, sweep, useAI, stageOf, dueTimes, settingsFrom, completeByTouch };

@@ -926,7 +926,7 @@ async function addLeadActivity(req, leadId, activity, action = 'add_activity') {
 
 // visit = showroom check-in; task / appointment = a completed task.
 // dms = something pushed to or back from the Sales & F&I side.
-const ACTIVITY_TYPES = ['call', 'text', 'email', 'note', 'visit', 'task', 'appointment', 'status', 'dms'];
+const ACTIVITY_TYPES = ['call', 'text', 'email', 'video', 'note', 'visit', 'task', 'appointment', 'status', 'dms'];
 
 // Road to the Sale: mark a step done (or not done), with who and when.
 app.post('/api/leads/:id/roadmap', wrap(async (req, res) => {
@@ -1236,8 +1236,8 @@ app.delete('/api/leads/:id/trades/:appraisalId', wrap(async (req, res) => {
 // Each task is for one customer and assigned to one staff member, with a
 // due time. Completing it notes the outcome in the customer's log.
 
-const TASK_TYPES = ['call', 'text', 'email', 'appointment', 'todo'];
-const TASK_TYPE_LABELS = { call: 'Call', text: 'Text', email: 'Email', appointment: 'Appointment', todo: 'To-do' };
+const TASK_TYPES = ['call', 'text', 'email', 'video', 'appointment', 'todo'];
+const TASK_TYPE_LABELS = { call: 'Call', text: 'Text', email: 'Email', video: 'Video', appointment: 'Appointment', todo: 'To-do' };
 
 async function taskFields(q, req, body, current = {}) {
   const b = body || {};
