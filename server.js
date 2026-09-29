@@ -80,6 +80,8 @@ app.get(['/', '/index.html', '/recon.html'], auth.requireLoginForPage);
 // Recon runs in its own browser tab.
 app.get('/recon', auth.requireLoginForPage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'recon.html')));
 app.use(express.static(path.join(__dirname, 'public')));
+// The public marketing site (no sign-in).
+app.use('/site', express.static(path.join(__dirname, 'site')));
 
 // ---------- Request plumbing ----------
 
@@ -93,6 +95,37 @@ const TAX_RATES_SEED_VERSION = 2;
 
 // Every /api route except signing in requires a signed-in user, and acts
 // for that user's dealership (req.dealershipId).
+// "Book a demo" on the marketing site: the request becomes a new customer
+// (source: Website) in DealerDomus's own store -- the dealership set in
+// SITE_LEADS_DEALERSHIP_ID, or the first one. No sign-in; a hidden field
+// catches bots and each address can only send a few an hour.
+const demoRequestsByIp = new Map();
+app.post('/api/public/demo-request', (req, res, next) => demoRequest(req, res).catch(next));
+async function demoRequest(req, res) {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ ok: true }); // a bot filled the hidden field
+  const now = Date.now();
+  const recent = (demoRequestsByIp.get(req.ip) || []).filter(t => now - t < 3600000);
+  if (recent.length >= 5) return res.status(429).json({ error: 'Too many requests -- please try again later.' });
+  const t = (v, max = 200) => String(v ?? '').trim().slice(0, max);
+  const name = t(b.name, 120);
+  const dealership = t(b.dealership, 160);
+  const email = t(b.email, 160);
+  if (!name || !dealership || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: 'Please add your name, dealership, and a valid email.' });
+  recent.push(now);
+  demoRequestsByIp.set(req.ip, recent);
+  const dealershipId = process.env.SITE_LEADS_DEALERSHIP_ID ||
+    (await store.pool.query('SELECT id FROM dealerships ORDER BY created_at LIMIT 1')).rows[0].id;
+  const who = { dealershipId, user: { id: null, name: 'Website', role: 'system' }, ip: req.ip };
+  const notes = [`Demo request from the website`, `Dealership: ${dealership}`, b.role && `Role: ${t(b.role, 60)}`,
+    b.stores && `Rooftops: ${t(b.stores, 20)}`, b.message && `Interested in: ${t(b.message, 1000)}`].filter(Boolean).join('\n');
+  await store.tx(async q => {
+    const lead = await createLead(q, who, { name, email, phone: t(b.phone, 40), source: 'website', notes, hot: true });
+    await audit.created(q, who, 'lead', lead, 'Demo request from the website');
+  });
+  res.status(201).json({ ok: true });
+}
+
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);

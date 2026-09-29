@@ -268,6 +268,12 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 
 **Configurable Fee Defaults** (⚙️ Fee Defaults on the Deals tab): Doc Fee, Title Fee, Registration Fee, License Fee, Dealer Fees, Acquisition Fee, and default tax rate auto-fill on every new deal instead of being re-typed -- admin-only editing is planned but not enforced yet
 
+## Marketing site
+
+A public site for DealerDomus lives in `site/` and is served at **/site** (no sign-in): the products with real screenshots from the app, what's coming next, the founding-store pilot, FAQ, and a **Book a demo** form. Demo requests come into DealerDomus itself as a new, hot customer with source *Website* (in the dealership set by `SITE_LEADS_DEALERSHIP_ID`, or the first one), with a hidden anti-bot field and a limit of a few requests per address per hour.
+
+To host it on its own domain later (e.g. dealerdomus.com), deploy the `site/` folder as a static site and point its form at the app with `<meta name="app-url" content="https://app.your-domain">` (the app will then need to allow that site in CORS). Screenshots are in `site/img/`; retake them when screens change.
+
 ## Module structure
 
 This app is organized as a DMS (Dealer Management System) with a left sidebar, similar in spirit to platforms like Tekion or DriveCentric. Hover over the sidebar to see full labels; click a module to switch into it:
