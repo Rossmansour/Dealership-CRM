@@ -30,14 +30,17 @@ const TYPES = ['call', 'text', 'email', 'todo'];
 const PLANNER = { id: null, name: 'AI planner' };
 
 function defaultSettings() {
-  return { enabled: false, maxPerPerson: 10 };
+  return { enabled: false, maxPerPerson: 15, confirmDaysBefore: 2 };
 }
 function settingsFrom(s) {
   const p = (s && s.aiTasks) || {};
   const d = defaultSettings();
+  const days = Number(p.confirmDaysBefore);
   return {
     enabled: !!p.enabled,
     maxPerPerson: Math.max(1, Math.min(40, Math.round(Number(p.maxPerPerson) || d.maxPerPerson))),
+    // Confirm appointments this many days ahead (and always the day of). 0 = only the day of.
+    confirmDaysBefore: p.confirmDaysBefore === undefined || p.confirmDaysBefore === '' || Number.isNaN(days) ? d.confirmDaysBefore : Math.max(0, Math.min(7, Math.round(days))),
     lastRun: p.lastRun || null
   };
 }
@@ -63,6 +66,11 @@ const lastTouch = lead => {
   return new Date(touches.length ? touches[0].date : lead.dateAdded).getTime();
 };
 const daysSince = ms => Math.floor((Date.now() - ms) / DAY);
+// A calendar day in the store's time zone, as a number (for "today", "Saturday is 4 days away").
+function dayNumber(ms, tz) {
+  const t = hours.localDate(ms, tz);
+  return Math.round(Date.UTC(t.y, t.m, t.d) / DAY);
+}
 const firstName = name => String(name || '').trim().split(/\s+/)[0] || 'Customer';
 
 // Who works this customer today: BDC on new / not-reached customers when
@@ -77,24 +85,21 @@ function ownerOf(lead, stage, people) {
 
 // ---------- Planning by rules (no AI, or AI failed) ----------
 
+// One touch for a customer nobody has touched today. Their best contact
+// method wins; customers who aren't answering alternate call and text.
 function ruleTask(c) {
   const lastOut = (c.lead.activities || []).find(a => OUTREACH.includes(a.type));
   const attempts = (c.lead.activities || []).filter(a => OUTREACH.includes(a.type)).length;
+  const preferred = ['call', 'text', 'email'].includes(c.lead.bestContact) ? c.lead.bestContact : null;
   const car = c.car ? ` about the ${c.car}` : '';
+  const ago = c.idle === 0 ? 'yesterday or earlier today' : `${c.idle} day${c.idle === 1 ? '' : 's'} ago`;
   switch (c.stage) {
-    case 'new': return { type: 'call', title: `First contact${car}`, why: `New ${c.lead.source || ''} lead, nobody has reached out yet.`.replace('  ', ' '), score: 100 };
+    case 'new': return { type: preferred || 'call', title: `First contact${car}`, why: `New ${c.lead.source || ''} lead, nobody has reached out yet.`.replace('  ', ' '), score: 100 };
     case 'attempted':
-      if (c.idle < 1) return null;
-      return { type: lastOut && lastOut.type === 'call' ? 'text' : 'call', title: `Try again${car}`, why: `${attempts} attempt${attempts === 1 ? '' : 's'} so far with no conversation; last touch ${c.idle} day${c.idle === 1 ? '' : 's'} ago.`, score: 80 - Math.min(attempts, 10) * 3 + c.idle };
-    case 'engaged':
-      if (c.idle < 2) return null;
-      return { type: 'call', title: 'Set an appointment', why: `Talked before but no contact in ${c.idle} days.`, score: 70 + c.idle };
-    case 'visit':
-      if (c.idle < 1) return null;
-      return { type: 'call', title: 'Follow up on the visit', why: `Came in and hasn't heard from us in ${c.idle} day${c.idle === 1 ? '' : 's'}.`, score: 85 + c.idle };
-    case 'proposal':
-      if (c.idle < 1) return null;
-      return { type: 'call', title: 'Follow up on the deal', why: `A deal is being worked and there's been no contact in ${c.idle} day${c.idle === 1 ? '' : 's'}.`, score: 90 + c.idle };
+      return { type: preferred || (lastOut && lastOut.type === 'call' ? 'text' : 'call'), title: `Try again${car}`, why: `${attempts} attempt${attempts === 1 ? '' : 's'} so far with no conversation; last touch ${ago}.`, score: 60 - Math.min(attempts, 10) * 3 + c.idle * 2 };
+    case 'engaged': return { type: preferred || 'call', title: `Set an appointment${car}`, why: `Talked before; last contact ${ago}.`, score: 65 + c.idle * 3 };
+    case 'visit': return { type: preferred || 'call', title: 'Follow up on the visit', why: `Came in; last contact ${ago}.`, score: 85 + c.idle * 3 };
+    case 'proposal': return { type: preferred || 'call', title: 'Follow up on the deal', why: `A deal is being worked; last contact ${ago}.`, score: 90 + c.idle * 3 };
     default: return null;
   }
 }
@@ -144,11 +149,12 @@ function parseJson(text) {
 async function planByAI(person, candidates, max) {
   const list = candidates.slice(0, 40);
   const system = `You plan the day for a car dealership ${person.role === 'bdc' ? 'BDC agent' : 'salesperson'} named ${firstName(person.name)}.
-From their customers below, pick at most ${max} to contact today, most important first, and write one task for each.
-Priorities: new leads nobody has reached; customers with a deal in progress or who visited and went quiet; hot customers;
-then engaged customers going cold; don't re-try the same unreached customer every day if they were tried yesterday.
-Skip anyone who doesn't need contact today.
-For each task choose "call", "text", or "email" (respect bestContact when it's set; mix channels for customers who haven't answered calls).
+Nobody has touched any of the customers below yet today, and the store wants every customer touched once a day.
+Pick at most ${max} of them (a realistic day), most important first, and write exactly one task for each.
+Priorities: new leads nobody has reached; customers with a deal in progress or who visited; hot customers;
+engaged customers going cold; then the rest, oldest contact first. Anyone left out rolls to the top tomorrow.
+For each task choose "call", "text", or "email" (respect bestContact when it's set; a quick text is fine for
+customers who haven't answered several calls). Appointment confirmations are handled separately -- don't add them.
 Write a short task title (under 60 characters, what to do) and a one-sentence reason a manager would agree with.
 Only use facts from the data. Return ONLY a JSON array like:
 [{"ref": 3, "type": "call", "title": "Set a test drive for the Tacoma", "why": "Engaged last week, no contact in 4 days."}]`;
@@ -210,15 +216,62 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
       store.list(q, 'leads', dealershipId), store.list(q, 'deals', dealershipId),
       store.list(q, 'tasks', dealershipId), store.list(q, 'cars', dealershipId)
     ]);
-    const open = tasks.filter(t => t.status === 'open');
-    const busy = new Set(open.map(t => t.leadId));
-    const openAppointments = new Set(open.filter(t => t.type === 'appointment').map(t => t.leadId));
-    const carLabel = new Map(cars.map(c => [c.id, [c.year, c.make, c.model].filter(Boolean).join(' ')]));
     const now = Date.now();
+    const sh = settings.storeHours && settings.storeHours.days ? settings.storeHours : hours.defaultStoreHours();
+    const tz = sh.timezone;
+    const today = dayNumber(now, tz);
+    const byId = new Map(leads.map(l => [l.id, l]));
 
+    // Yesterday's planned tasks nobody finished are replaced by today's plan
+    // instead of piling up.
+    for (const t of tasks) {
+      if (t.status !== 'open' || !t.planned || t.type === 'appointment') continue;
+      if (userIds && !(t.assignedTo && userIds.includes(String(t.assignedTo.id)))) continue;
+      if (dayNumber(new Date(t.dueAt).getTime(), tz) >= today) continue;
+      t.status = 'cancelled';
+      await store.save(q, 'tasks', dealershipId, t.id, { ...t, completedAt: new Date().toISOString(), completedBy: by, outcome: "Replaced by today's plan" });
+    }
+    const open = tasks.filter(t => t.status === 'open');
+    const appointments = open.filter(t => t.type === 'appointment');
+    // An appointment doesn't stop a customer's confirmation call; anything else open does.
+    const busy = new Set(open.filter(t => t.type !== 'appointment').map(t => t.leadId));
+    const openAppointments = new Set(appointments.map(t => t.leadId));
+    const carLabel = new Map(cars.map(c => [c.id, [c.year, c.make, c.model].filter(Boolean).join(' ')]));
+
+    // ----- Must-do: confirm appointments a few days ahead and the day of -----
+    const confirmations = new Map(); // person id -> [{ lead, type, title, why }]
+    const confirmedLeads = new Set();
+    for (const appt of appointments) {
+      const lead = byId.get(appt.leadId);
+      const personId = appt.assignedTo && String(appt.assignedTo.id);
+      if (!lead || !people.has(personId)) continue;
+      const at = new Date(appt.dueAt).getTime();
+      if (at < now) continue;
+      const daysUntil = dayNumber(at, tz) - today;
+      const sent = appt.confirmPlanned || {};
+      const booked = dayNumber(new Date(appt.createdAt || appt.dueAt).getTime(), tz);
+      const weekday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(new Date(at));
+      const time = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(at));
+      const what = appt.title ? `${appt.title} -- ` : '';
+      let task = null;
+      if (daysUntil === 0 && !sent.dayOf) {
+        task = { kind: 'dayOf', title: `Confirm today's ${time} appointment`, why: `${what}appointment today at ${time}. A quick confirmation cuts no-shows.` };
+      } else if (cfg.confirmDaysBefore && daysUntil > 0 && daysUntil <= cfg.confirmDaysBefore && !sent.early && booked < today) {
+        // Booked today for a day or two out: confirming right away is pointless (booked < today).
+        task = { kind: 'early', title: `Confirm ${weekday}'s ${time} appointment`, why: `${what}appointment ${weekday} at ${time}, ${daysUntil} day${daysUntil === 1 ? '' : 's'} away.` };
+      }
+      confirmedLeads.add(lead.id); // an upcoming appointment: no other task needed
+      if (!task) continue;
+      const preferred = ['call', 'text'].includes(lead.bestContact) ? lead.bestContact : 'call';
+      if (!confirmations.has(personId)) confirmations.set(personId, []);
+      confirmations.get(personId).push({ lead, type: preferred, title: task.title, why: task.why, appt, kind: task.kind });
+    }
+
+    // ----- Everyone else: one touch each, for customers not touched today -----
     const byPerson = new Map();
+    const touchedToday = lead => (lead.activities || []).some(a => a.type !== 'status' && dayNumber(new Date(a.date).getTime(), tz) === today);
     for (const lead of leads) {
-      if (inBucket(lead) || busy.has(lead.id)) continue;
+      if (inBucket(lead) || busy.has(lead.id) || confirmedLeads.has(lead.id) || touchedToday(lead)) continue;
       if (lead.snoozedUntil && new Date(lead.snoozedUntil).getTime() > now) continue;
       const stage = stageOf(lead, deals, openAppointments);
       if (!stage || stage === 'delivered') continue;
@@ -232,38 +285,51 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
     let source = aiCall && aiConnected() ? 'ai' : 'rules';
     const results = [];
     let created = 0;
-    for (const [id, list] of byPerson) {
+    for (const id of new Set([...confirmations.keys(), ...byPerson.keys()])) {
       const person = people.get(id);
+      const list = byPerson.get(id) || [];
+      const confirms = confirmations.get(id) || [];
       // Oldest untouched first, so the AI sees the ones that matter if the list is long.
       list.sort((a, b) => (b.lead.hot - a.lead.hot) || (b.idle - a.idle));
-      let picks;
-      if (source === 'ai') {
-        try { picks = await planByAI(person, list, cfg.maxPerPerson); } catch (err) {
+      const room = Math.max(0, cfg.maxPerPerson - confirms.length);
+      let picks = null;
+      if (!room || !list.length) picks = [];
+      else if (source === 'ai') {
+        try { picks = await planByAI(person, list, room); } catch (err) {
           console.error('AI task planning failed, using rules:', err.message);
           source = 'rules';
         }
       }
-      if (!picks) picks = planByRules(list, cfg.maxPerPerson);
-      const due = dueTimes(picks.length, settings.storeHours);
-      const byId = new Map(list.map(c => [c.lead.id, c.lead]));
-      for (const [k, p] of picks.entries()) {
+      if (!picks) picks = planByRules(list, room);
+      const all = [...confirms.map(c => ({ leadId: c.lead.id, type: c.type, title: c.title, why: c.why, confirm: c })), ...picks];
+      const due = dueTimes(all.length, settings.storeHours);
+      for (const [k, p] of all.entries()) {
         const lead = byId.get(p.leadId);
         const task = {
           type: p.type, title: p.title, notes: p.why, dueAt: due[k],
           assignedTo: { id: person.id, name: person.name },
           id: crypto.randomUUID(), leadId: lead.id, leadName: lead.name, status: 'open',
           createdBy: by, createdAt: new Date().toISOString(), completedAt: null, completedBy: null, outcome: '',
-          planned: source // 'ai' or 'rules'
+          planned: p.confirm ? 'confirm' : source // 'confirm', 'ai', or 'rules'
         };
+        if (p.confirm) {
+          task.appointmentId = p.confirm.appt.id;
+          // A day-of confirmation is due before the appointment itself.
+          const before = new Date(p.confirm.appt.dueAt).getTime() - 60 * 60000;
+          if (p.confirm.kind === 'dayOf' && new Date(task.dueAt).getTime() > before) task.dueAt = new Date(Math.max(now, before)).toISOString();
+          const appt = p.confirm.appt;
+          appt.confirmPlanned = { ...(appt.confirmPlanned || {}), [p.confirm.kind]: new Date().toISOString() };
+          await store.save(q, 'tasks', dealershipId, appt.id, appt);
+        }
         await store.insert(q, 'tasks', dealershipId, task);
       }
-      created += picks.length;
-      results.push({ id, name: person.name, created: picks.length });
-      if (picks.length) {
+      created += all.length;
+      results.push({ id, name: person.name, created: all.length, confirmations: confirms.length, left: list.length - picks.length });
+      if (all.length) {
         await alerts.notify(q, {
           dealershipId, type: 'task_assigned', userIds: [id], actorId: by.id,
-          title: `Your day is planned: ${picks.length} task${picks.length === 1 ? '' : 's'}`,
-          body: picks.slice(0, 3).map(p => `${byId.get(p.leadId).name} -- ${p.title}`).join(' · '),
+          title: `Your day is planned: ${all.length} task${all.length === 1 ? '' : 's'}`,
+          body: all.slice(0, 3).map(p => `${byId.get(p.leadId).name} -- ${p.title}`).join(' · '),
           link: null, dueAt: due[0]
         });
       }
@@ -278,6 +344,24 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
     });
     return { source, created, people: results };
   });
+}
+
+// Someone logged a call, text, email, or visit on a customer: their planned
+// task for it is done (nobody should have to tick it off separately).
+async function completeByTouch(q, req, leadId, activity) {
+  if (!['call', 'text', 'email', 'visit'].includes(activity.type)) return 0;
+  const { rows } = await q.query(
+    `SELECT id FROM tasks WHERE dealership_id = $1 AND data->>'leadId' = $2 AND data->>'status' = 'open' AND data ? 'planned' AND data->>'type' <> 'appointment'`,
+    [req.dealershipId, leadId]);
+  for (const { id } of rows) {
+    const t = await store.get(q, 'tasks', req.dealershipId, id, { forUpdate: true });
+    if (!t || t.status !== 'open') continue;
+    await store.save(q, 'tasks', req.dealershipId, t.id, {
+      ...t, status: 'done', completedAt: new Date().toISOString(), completedBy: { id: req.user.id, name: req.user.name },
+      outcome: `Done -- ${activity.type} logged${activity.reached ? ' (talked)' : ''}`
+    });
+  }
+  return rows.length;
 }
 
 function todayKey(storeHours) {
@@ -325,7 +409,7 @@ function router() {
       const settings = rows[0].settings || {};
       const before = settingsFrom(settings);
       const b = req.body || {};
-      const next = settingsFrom({ aiTasks: { ...before, ...('enabled' in b ? { enabled: b.enabled === true || b.enabled === 'true' } : {}), ...('maxPerPerson' in b ? { maxPerPerson: b.maxPerPerson } : {}) } });
+      const next = settingsFrom({ aiTasks: { ...before, ...('enabled' in b ? { enabled: b.enabled === true || b.enabled === 'true' } : {}), ...('maxPerPerson' in b ? { maxPerPerson: b.maxPerPerson } : {}), ...('confirmDaysBefore' in b ? { confirmDaysBefore: b.confirmDaysBefore } : {}) } });
       const { lastRun, ...keep } = next;
       await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, aiTasks: { ...keep, lastRun: before.lastRun } }]);
       await audit.updated(q, req, 'settings', { ...before, id: 'ai-tasks' }, { ...next, id: 'ai-tasks' }, 'AI task planning');
@@ -346,4 +430,4 @@ function router() {
   return r;
 }
 
-module.exports = { router, plan, sweep, useAI, planByRules, stageOf, dueTimes, settingsFrom };
+module.exports = { router, plan, sweep, useAI, planByRules, stageOf, dueTimes, settingsFrom, completeByTouch };

@@ -97,6 +97,65 @@ test('settings: managers only; the daily limit', async () => {
   assert.strictEqual(cfg.aiConnected, false);
 });
 
+test('appointments: confirmed a couple of days before and the day of, with no other tasks for that customer', async () => {
+  await as(manager, 'PUT', '/ai-tasks', { maxPerPerson: 15, confirmDaysBefore: 2 });
+  const did = await h.defaultDealershipId();
+  const cust = await lead(manager, { name: 'Kim Sato', sales1Id: s2.id });
+  // Booked last week for 2 days from now.
+  const appt = (await as(s2, 'POST', '/tasks', { leadId: cust.id, type: 'appointment', title: 'Test drive', dueAt: new Date(Date.now() + 2 * 86400000).toISOString(), assignedToId: s2.id })).body;
+  const stored = await h.store.get(h.store.pool, 'tasks', did, appt.id);
+  await h.store.save(h.store.pool, 'tasks', did, appt.id, { ...stored, createdAt: new Date(Date.now() - 6 * 86400000).toISOString() });
+
+  await as(s2, 'POST', '/ai-tasks/run', {});
+  const forKim = (await openTasksFor(s2)).filter(t => t.leadId === cust.id);
+  const confirm = forKim.find(t => t.planned === 'confirm');
+  assert.ok(confirm, 'a confirmation task');
+  assert.match(confirm.title, /^Confirm \w+day's .+ appointment$/);
+  assert.strictEqual(confirm.appointmentId, appt.id);
+  assert.strictEqual(forKim.length, 2, 'the appointment and its confirmation -- nothing else');
+
+  // Done by logging the call; planning again doesn't ask twice.
+  await as(s2, 'POST', `/leads/${cust.id}/activities`, { type: 'call', text: 'Confirmed for Saturday', reached: true });
+  assert.strictEqual((await openTasksFor(s2)).filter(t => t.leadId === cust.id && t.planned).length, 0, 'logging the call finished it');
+  await as(s2, 'POST', '/ai-tasks/run', {});
+  assert.strictEqual((await openTasksFor(s2)).filter(t => t.leadId === cust.id && t.planned).length, 0);
+
+  // The day of (an hour from now): confirmed again, before the appointment.
+  const later = await h.store.get(h.store.pool, 'tasks', did, appt.id);
+  const at = Date.now() + 3 * 3600000;
+  const tz = 'America/Chicago';
+  const sameDay = JSON.stringify(require('../hours').localDate(at, tz)) === JSON.stringify(require('../hours').localDate(Date.now(), tz));
+  await h.store.save(h.store.pool, 'tasks', did, appt.id, { ...later, dueAt: new Date(at).toISOString() });
+  await as(s2, 'POST', '/ai-tasks/run', {});
+  const dayOf = (await openTasksFor(s2)).find(t => t.leadId === cust.id && t.planned === 'confirm');
+  if (sameDay) {
+    assert.ok(dayOf, 'day-of confirmation');
+    assert.match(dayOf.title, /^Confirm today's/);
+    assert.ok(new Date(dayOf.dueAt).getTime() <= at - 3600000 + 1000, 'due before the appointment');
+  }
+});
+
+test("one touch a day: touched customers are skipped and yesterday's leftovers are replaced", async () => {
+  const did = await h.defaultDealershipId();
+  const x = await lead(manager, { name: 'Lou Fox', sales1Id: s1.id });
+  const y = await lead(manager, { name: 'May Cho', sales1Id: s1.id });
+  await as(s1, 'POST', `/leads/${y.id}/activities`, { type: 'text', text: 'Sent photos' });
+  await as(s1, 'POST', '/ai-tasks/run', {});
+  const mine = await openTasksFor(s1);
+  const forX = mine.find(t => t.leadId === x.id && t.planned);
+  assert.ok(forX, 'untouched customer gets a task');
+  assert.ok(!mine.some(t => t.leadId === y.id && t.planned), 'already touched today: no task');
+
+  // Pretend it was yesterday's and nobody did it.
+  const old = await h.store.get(h.store.pool, 'tasks', did, forX.id);
+  await h.store.save(h.store.pool, 'tasks', did, forX.id, { ...old, dueAt: new Date(Date.now() - 86400000).toISOString() });
+  await as(s1, 'POST', '/ai-tasks/run', {});
+  const replaced = await h.store.get(h.store.pool, 'tasks', did, forX.id);
+  assert.strictEqual(replaced.status, 'cancelled');
+  assert.match(replaced.outcome, /Replaced/);
+  assert.strictEqual((await openTasksFor(s1)).filter(t => t.leadId === x.id && t.planned).length, 1, 'one fresh task, not two');
+});
+
 test('tasks are spread through open hours', () => {
   const hoursAllWeek = { timezone: 'America/Phoenix', days: Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map(d => [d, { closed: false, open: '09:00', close: '18:00' }])) };
   // 7am Phoenix (14:00 UTC): starts at opening, 20 minutes apart.

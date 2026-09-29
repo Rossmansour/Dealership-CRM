@@ -1518,12 +1518,25 @@ function renderPipelineTasks() {
     .filter(t => new Date(t.dueAt) <= endOfToday)
     .filter(t => !mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id));
   const upcoming = openTasks.filter(t => new Date(t.dueAt) > endOfToday && (!mine || (t.assignedTo && currentUser && t.assignedTo.id === currentUser.id))).length;
+  // Every open customer should get touched once a day: how many have been.
+  const me = currentUser && String(currentUser.id);
+  const active = workingLeads().filter(l => {
+    const stage = pipelineStageOf(l);
+    if (!stage || stage === 'delivered' || isSnoozed(l)) return false;
+    return !mine || String(l.sales1Id) === me || String(l.bdc1Id) === me;
+  });
+  const touched = active.filter(l => (l.activities || []).some(a => a.type !== 'status' && isToday(a.date))).length;
+  const touchPct = active.length ? Math.round(touched / active.length * 100) : 0;
   const plansOwn = currentUser && ['salesperson', 'bdc'].includes(currentUser.role);
   const plansAll = userCan('manageRotation');
   const cfg = aiTaskCfg;
   el.innerHTML = html`
     <div class="pipeline-tasks-head">
       <h2>${mine ? 'My' : "Everyone's"} tasks today <span class="cp-count">${due.length}</span></h2>
+      ${active.length ? html`<div class="touch-meter" title="${mine ? 'Your' : 'All'} open customers with a call, text, email, note, or visit logged today">
+        <span class="touch-meter-bar"><span style="width:${touchPct}%"></span></span>
+        <span><strong>${touched}</strong> of ${active.length} customers touched today</span>
+      </div>` : ''}
       <div class="pipeline-tasks-tools">
         ${plansOwn ? html`<button type="button" class="btn-secondary btn-small" onclick="planTasks(false)" title="Pick today's calls, texts, and emails from your customers">✨ Plan my day</button>` : ''}
         ${plansAll ? html`<button type="button" class="btn-secondary btn-small" onclick="planTasks(true)" title="Plan today's tasks for every salesperson and BDC agent">✨ Plan everyone's day</button>
@@ -1537,8 +1550,9 @@ function renderPipelineTasks() {
     ${plansAll && aiTaskSettingsOpen && cfg ? html`<div class="ai-task-settings">
       <label class="check-label"><input type="checkbox" id="aiTaskEnabled" ${cfg.enabled ? html`checked` : ''} /> Plan every salesperson's and BDC agent's day each morning when the store opens</label>
       <label>Most tasks per person per day <input type="number" id="aiTaskMax" min="1" max="40" value="${cfg.maxPerPerson}" /></label>
+      <label>Confirm appointments <input type="number" id="aiTaskConfirm" min="0" max="7" value="${cfg.confirmDaysBefore}" /> days before, and again the day of</label>
       <p class="audit-note">${cfg.aiConnected ? 'Planned by AI from each person\'s customers -- no phone numbers, emails, or credit apps are sent.' : 'AI isn\'t connected (GEMINI_API_KEY), so tasks are planned by simple rules for now.'}
-        Customers who already have an open task are skipped.${cfg.lastRun ? ` Last planned ${new Date(cfg.lastRun.at).toLocaleString()}: ${cfg.lastRun.created} task${cfg.lastRun.created === 1 ? '' : 's'}.` : ''}</p>
+        One task per customer per day; customers already touched today, with an open task, or with an upcoming appointment are skipped. Yesterday's unfinished planned tasks are replaced, and logging a call, text, or email finishes that customer's task.${cfg.lastRun ? ` Last planned ${new Date(cfg.lastRun.at).toLocaleString()}: ${cfg.lastRun.created} task${cfg.lastRun.created === 1 ? '' : 's'}.` : ''}</p>
       <button type="button" class="btn-primary btn-small" onclick="saveAiTaskSettings()">Save</button>
     </div>` : ''}
     ${due.length ? html`<div class="pipeline-task-list">${due.map(t => {
@@ -1572,7 +1586,10 @@ window.toggleAiTaskSettings = async function() {
 window.saveAiTaskSettings = async function() {
   const res = await fetch(`${API}/ai-tasks`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: document.getElementById('aiTaskEnabled').checked, maxPerPerson: Number(document.getElementById('aiTaskMax').value) })
+    body: JSON.stringify({
+      enabled: document.getElementById('aiTaskEnabled').checked, maxPerPerson: Number(document.getElementById('aiTaskMax').value),
+      confirmDaysBefore: Number(document.getElementById('aiTaskConfirm').value)
+    })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) return alert(body.error || 'Could not save.');

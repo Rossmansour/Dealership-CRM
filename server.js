@@ -968,6 +968,8 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   if (['call', 'text', 'email'].includes(activity.type) && (req.body.reached === true || req.body.reached === 'true')) activity.reached = true;
   const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
+  // That touch finishes the customer's planned task for today.
+  await store.tx(q => taskplan.completeByTouch(q, req, req.params.id, activity));
   res.status(201).json(activity);
 }));
 
@@ -1049,6 +1051,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       direction: 'out', message: text || '', photo: photoPath || null
     };
     await addLeadActivity(req, lead.id, activity, 'send_text');
+    await store.tx(q => taskplan.completeByTouch(q, req, lead.id, activity));
 
     res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
   } catch (err) {
