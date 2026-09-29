@@ -17,6 +17,8 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 
 ## Features
 
+DealerDomus is made of modules, each named as its own product so stores can buy the whole thing or just the pieces they need: **CRM Domus** (customers and leads), **Desk Domus** (deals, desking, F&I), **Inventory Domus** (inventory, appraisals, market pricing), **Recon Domus** (reconditioning, in its own browser tab), **Service Domus**, **Parts Domus**, and **Accounting Domus**. They all share one login and one set of data.
+
 **Inventory Management**
 - Add, edit, and delete vehicles (make, model, year, VIN, mileage, cost, price)
 - Track status through the sales pipeline: `available → pending → sold`
