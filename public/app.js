@@ -4540,8 +4540,10 @@ window.openDealWorkspace = function(dealId) {
   renderCreditAppFields(deal.creditApp);
   renderDealCreditSync(deal);
 
-  // Always open back on the Desking sub-tab
+  // Always open back on the Desking sub-tab, Customer section
   switchSubTab('desking');
+  showDeskTab('customer');
+  updateDeskSummaries();
 
   // Full page takeover: hide the normal app chrome so the deal gets the
   // whole screen (this is a lot of fields -- a modal was too cramped).
@@ -4576,7 +4578,9 @@ function updateDealTypePanels(dealType) {
   const isCash = dealType === 'cash';
 
   document.getElementById('retailPanel').style.display = isLease ? 'none' : 'block';
-  document.getElementById('leasePanel').style.display = isLease ? 'block' : 'none';
+  document.getElementById('retailFees').style.display = isLease ? 'none' : 'block';
+  document.getElementById('dkLeaseTab').style.display = isLease ? '' : 'none';
+  if (!isLease && document.querySelector('.dk-tab.active[data-dk="lease"]')) showDeskTab('customer');
   document.getElementById('msrpLabel').style.display = isLease ? 'block' : 'none';
   document.getElementById('termLabel').style.display = isCash ? 'none' : 'block';
   document.getElementById('aprLabel').style.display = isCash ? 'none' : 'block';
@@ -4623,6 +4627,70 @@ function renderDealSummary(deal) {
   }
 
   document.getElementById('readoutTotalDealCost').textContent = `$${(deal.totalDealCost || 0).toLocaleString()}`;
+  renderDealBreakdown(deal);
+  updateDeskSummaries();
+}
+
+// ----- Desking layout: tabs on the left, the structure in the middle -----
+function showDeskTab(name) {
+  document.querySelectorAll('.dk-tab').forEach(t => t.classList.toggle('active', t.dataset.dk === name));
+  document.querySelectorAll('.dk-panel').forEach(p => p.classList.toggle('active', p.dataset.dkPanel === name));
+}
+document.getElementById('dkTabs').addEventListener('click', (e) => {
+  const t = e.target.closest('.dk-tab');
+  if (t) showDeskTab(t.dataset.dk);
+});
+
+// Each tab shows its total under its name, as you type.
+function updateDeskSummaries() {
+  const num = id => Number(document.getElementById(id).value) || 0;
+  const m = v => `$${Math.round(v).toLocaleString()}`;
+  const lead = document.getElementById('dealAssignedLeadId');
+  const car = document.getElementById('dealAssignedCarId');
+  const leadName = lead.value ? lead.options[lead.selectedIndex].textContent : '';
+  const carName = car.value ? car.options[car.selectedIndex].textContent.replace(/ - \$[\d,.]+$/, '') : '';
+  const isLease = document.getElementById('dealTypeSelect').value === 'lease';
+  document.getElementById('dkSumCustomer').textContent = leadName || 'Not picked';
+  const state = document.getElementById('dealState').value.trim().toUpperCase();
+  document.getElementById('dkSumTaxes').textContent = `${state ? `${state} · ` : ''}${num('dealTaxRate')}%`;
+  const fees = num('dealDocFee') + num('dealDealerFees') + num('dealLicenseFee') + (isLease ? 0 : num('dealTitleFee') + num('dealRegistrationFee'));
+  document.getElementById('dkSumFees').textContent = m(fees);
+  document.getElementById('dkSumRebates').textContent = num('dealRebate') ? m(num('dealRebate')) : 'None';
+  const hasTrade = document.getElementById('hasTradeCheckbox').checked;
+  const net = num('dealTradeInValue') - num('dealTradeInPayoff');
+  document.getElementById('dkSumTrade').textContent = hasTrade ? `${net < 0 ? '−' : ''}${m(Math.abs(net))} net` : 'None';
+  const products = num('dealGapPremium') + num('dealServicePremium') + num('dealMaintenancePremium') + num('dealAftermarketAmount');
+  document.getElementById('dkSumProducts').textContent = products ? m(products) : 'None';
+  document.getElementById('dkSumLease').textContent = `${num('dealResidualPercent')}% residual`;
+  document.getElementById('dkHeadline').innerHTML = html`<strong>${leadName || 'No customer yet'}</strong><span>${carName || 'No vehicle yet'}</span>`;
+}
+document.getElementById('deskingForm').addEventListener('input', updateDeskSummaries);
+document.getElementById('deskingForm').addEventListener('change', updateDeskSummaries);
+
+// The deal's structure, line by line, from its last save.
+function renderDealBreakdown(deal) {
+  const n = v => Number(v) || 0;
+  const m = v => `$${n(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const type = deal.dealType || 'retail';
+  const row = (label, v, sign = '', cls = '') => html`<div class="dk-line ${cls}"><span>${label}</span><strong>${sign}${m(v)}</strong></div>`;
+  let lines;
+  if (type === 'lease') {
+    lines = html`${row('Selling price', deal.vehiclePrice)}${row('Gross cap cost', deal.grossCapCost)}
+      ${row('Cap cost reduction', deal.totalCapReduction, '−')}${row('Net cap cost', deal.netCapCost, '', 'dk-sub')}
+      ${row('Residual', deal.residualAmount)}${row('Due at signing', deal.dueAtSigning, '', 'dk-sub')}`;
+  } else {
+    const fees = n(deal.docFee) + n(deal.dealerFees) + n(deal.licenseFee) + n(deal.titleFee) + n(deal.registrationFee);
+    const products = n(deal.gapPremium) + n(deal.servicePremium) + n(deal.maintenancePremium) + n(deal.aftermarketAmount);
+    const tradeNet = deal.hasTrade ? n(deal.tradeInValue) - n(deal.tradeInPayoff) : 0;
+    lines = html`${row(type === 'lease' ? 'Selling price' : 'Vehicle price', deal.vehiclePrice)}
+      ${n(deal.rebate) ? row('Rebates', deal.rebate, '−') : ''}
+      ${row('Fees', fees, '+')}
+      ${products ? row('F&I products', products, '+') : ''}
+      ${row(`Sales tax (${n(deal.taxRate)}%)`, deal.salesTax, '+')}
+      ${deal.hasTrade ? row(tradeNet >= 0 ? 'Trade equity' : 'Negative equity', Math.abs(tradeNet), tradeNet >= 0 ? '−' : '+') : ''}
+      ${n(deal.downPayment) ? row('Down payment', deal.downPayment, '−') : ''}`;
+  }
+  document.getElementById('dkBreakdown').innerHTML = lines;
 }
 
 // Groundwork for the future Service module: this reads a car's openROs
