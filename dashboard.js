@@ -54,7 +54,7 @@ function dealGross(deal, car, settings, tradeAcv) {
   const pack = type === 'new' ? n(settings.newCarPack) : n(settings.appraisalPack);
   const overAllowance = tradeAcv !== null && tradeAcv !== undefined && deal.hasTrade ? n(deal.tradeInValue) - n(tradeAcv) : 0;
   const front = n(deal.vehiclePrice) - n(car && car.cost) - pack + n(deal.docFee) - overAllowance;
-  const products = n(deal.gapPremium) + n(deal.servicePremium) + n(deal.maintenancePremium) + n(deal.aftermarketAmount);
+  const products = n(deal.gapPremium) + n(deal.servicePremium) + n(deal.maintenancePremium) + n(deal.aftermarketAmount) + n(deal.creditInsPremium);
   const finance = products - n(deal.fiProductCost) + n(deal.reserve);
   return { type, front, finance, incentives: n(deal.incentives), pack, overAllowance };
 }
@@ -167,7 +167,7 @@ function reviewList(data, key, from, to) {
     const t = soldAt ? new Date(soldAt).getTime() : NaN;
     const g = dealGross(d, car, data.settings, acvByDeal.get(d.id));
     if (t >= from && t < to && !(car && car.soldAs === 'wholesale')) {
-      const products = n(d.gapPremium) + n(d.servicePremium) + n(d.maintenancePremium) + n(d.aftermarketAmount);
+      const products = n(d.gapPremium) + n(d.servicePremium) + n(d.maintenancePremium) + n(d.aftermarketAmount) + n(d.creditInsPremium);
       if (!products) out.noProducts.push(d.id);
       if (g.front < 0) out.negativeFront.push(d.id);
       if (g.overAllowance > overLimit) out.overAllowance.push(d.id);

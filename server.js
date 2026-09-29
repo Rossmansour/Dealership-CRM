@@ -1336,7 +1336,9 @@ function extractFiProducts(input) {
     licenseFee: Number(input.licenseFee) || 0,
     otherGovFees: Number(input.otherGovFees) || 0, // state fee lines beyond license / registration / title
     priorLeaseBalance: Number(input.priorLeaseBalance) || 0, // a lease payoff rolled into this deal
-    taxableDealerFees: Number(input.taxableDealerFees) || 0 // dealer fee lines the state taxes
+    taxableDealerFees: Number(input.taxableDealerFees) || 0, // dealer fee lines the state taxes
+    creditInsPremium: Number(input.creditInsPremium) || 0, // credit life / A&H / IUI, financed
+    taxableProducts: Number(input.taxableProducts) || 0 // aftermarket items the state taxes
   };
 }
 
@@ -1352,6 +1354,65 @@ const dDate = v => { const d = v ? new Date(v) : null; return d && !Number.isNaN
 const sum = (list, key) => round2(list.reduce((t, x) => t + dNum(x[key]), 0));
 const DEAL_EMPLOYEE_ROLES = ['sales1', 'sales2', 'sales3', 'sales4', 'deskManager', 'salesManager', 'internetManager', 'teamManager', 'fiManager', 'closer1', 'closer2'];
 const GOV_FEE_FIELDS = { license: 'licenseFee', registration: 'registrationFee', title: 'titleFee' };
+
+// F&I products, each with what the customer pays (premium / price) and what
+// the store pays (cost). When a deal has product lines, the F&I product cost
+// used for back-end gross is the sum of their costs.
+const cleanFields = (o, spec) => Object.fromEntries(Object.entries(spec).map(([k, kind]) => {
+  const v = (o || {})[k];
+  return [k, kind === 'money' ? dNum(v) : kind === 'int' ? Math.round(dNum(v)) : kind === 'bool' ? !!v : kind === 'date' ? dDate(v) : dText(v, kind)];
+}));
+const WARRANTY_SPEC = { kind: 20, premium: 'money', cost: 'money', planName: 80, planCode: 30, months: 'int', miles: 'int', deductible: 'money', policyNumber: 40, company: 80, planType: 20 };
+const AFTERMARKET_SPEC = { code: 20, description: 100, price: 'money', cost: 'money', taxable: 'bool', weOwe: 'bool', vendor: 80, months: 'int', miles: 'int', deductible: 'money', itemize: 'bool', preInstalled: 'bool' };
+const COVERAGE_SPEC = { type: 40, premium: 'money', cost: 'money' };
+const PAPER_SPECS = {
+  insurance: { company: 80, agent: 80, phone: 30, email: 120, policyNumber: 60, effective: 'date', expires: 'date', compDeductible: 'money', collDeductible: 'money', insuredParty: 40, notes: 300 },
+  misc: { withRecourse: 20, regClass: 30, regEffDate: 'date', regExpDate: 'date', tempPermit: 40, tempPlate: 20, tempExpDate: 'date', inspectionCert: 40, inspectionDate: 'date',
+    inspectionStation: 80, advertisingCode: 40, invoiceNumber: 40, defect1: 120, defect2: 120, defect3: 120 },
+  titling: { taxId: 40, lienNumber: 40, titleName: 120, lienholderName: 120, lienholderStreet: 120, lienholderCity: 60, lienholderState: 2, lienholderZip: 10, notes: 300 }
+};
+function structureProducts(d) {
+  const out = {};
+  let touched = false;
+  const costs = [];
+  if (Array.isArray(d.warranties)) {
+    touched = true;
+    const list = d.warranties.slice(0, 4).map(w => cleanFields(w, WARRANTY_SPEC)).map(w => ({ ...w, kind: w.kind === 'maintenance' ? 'maintenance' : 'service' }))
+      .filter(w => w.premium || w.cost || w.planName || w.company);
+    out.warranties = list;
+    out.servicePremium = sum(list.filter(w => w.kind === 'service'), 'premium');
+    out.maintenancePremium = sum(list.filter(w => w.kind === 'maintenance'), 'premium');
+    costs.push(sum(list, 'cost'));
+  }
+  if (d.gap !== undefined) {
+    touched = true;
+    out.gap = d.gap && typeof d.gap === 'object' ? cleanFields(d.gap, { company: 80, premium: 'money', cost: 'money', term: 'int', policyNumber: 40 }) : null;
+    out.gapPremium = out.gap ? out.gap.premium : 0;
+    costs.push(out.gap ? out.gap.cost : 0);
+  }
+  if (d.creditInsurance !== undefined) {
+    touched = true;
+    const c = d.creditInsurance && typeof d.creditInsurance === 'object' ? d.creditInsurance : null;
+    out.creditInsurance = c ? { company: dText(c.company, 80), life: cleanFields(c.life, COVERAGE_SPEC), ah: cleanFields(c.ah, COVERAGE_SPEC), iui: cleanFields(c.iui, COVERAGE_SPEC) } : null;
+    const parts = out.creditInsurance ? [out.creditInsurance.life, out.creditInsurance.ah, out.creditInsurance.iui] : [];
+    out.creditInsPremium = sum(parts, 'premium');
+    costs.push(sum(parts, 'cost'));
+  }
+  if (Array.isArray(d.aftermarkets)) {
+    touched = true;
+    const list = d.aftermarkets.slice(0, 20).map(a => cleanFields(a, AFTERMARKET_SPEC)).filter(a => a.description || a.price || a.cost || a.code);
+    out.aftermarkets = list;
+    out.aftermarketAmount = sum(list, 'price');
+    out.taxableProducts = sum(list.filter(a => a.taxable), 'price');
+    costs.push(sum(list, 'cost'));
+  }
+  if (touched) out.fiProductCost = round2(costs.reduce((t, c) => t + c, 0));
+  for (const [key, spec] of Object.entries(PAPER_SPECS)) if (d[key] && typeof d[key] === 'object') out[key] = cleanFields(d[key], spec);
+  if (Array.isArray(d.thirdParties)) {
+    out.thirdParties = d.thirdParties.slice(0, 20).map(t => cleanFields(t, { role: 40, name: 120, address: 200, phone: 30, email: 120 })).filter(t => t.name || t.role);
+  }
+  return out;
+}
 
 function structureDeal(d) {
   const out = {};
@@ -1417,6 +1478,7 @@ function structureDeal(d) {
   if (d.employees && typeof d.employees === 'object') {
     out.employees = Object.fromEntries(DEAL_EMPLOYEE_ROLES.map(r => [r, dText(d.employees[r], 60) || null]));
   }
+  Object.assign(out, structureProducts(d));
   if (d.coLeadId !== undefined) out.coLeadId = dText(d.coLeadId, 60) || null;
   for (const f of ['lender', 'program', 'county', 'city']) if (d[f] !== undefined) out[f] = dText(d[f], 80);
   if (d.dealDate !== undefined) out.dealDate = dDate(d.dealDate);
@@ -1619,10 +1681,10 @@ function calculateRetailDeal(input) {
   // matching the documented CA fallback used for unbuilt states.
   const taxableAmount = (state === 'AZ'
     ? Math.max(vehiclePrice - netTradeIn, 0)
-    : vehiclePrice) + fi.taxableDealerFees;
+    : vehiclePrice) + fi.taxableDealerFees + fi.taxableProducts;
   const salesTax = taxableAmount * (taxRate / 100);
 
-  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees +
+  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees + fi.creditInsPremium +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   // What's left to finance after trade-in, rebate, and down payment are
@@ -1699,7 +1761,7 @@ function calculateLeaseDeal(input) {
 
   // Gross capitalized cost: the negotiated price plus everything being
   // rolled into the lease (fees, F&I products) instead of paid upfront.
-  const grossCapCost = vehiclePrice + docFee + acquisitionFee + fi.otherGovFees + fi.priorLeaseBalance +
+  const grossCapCost = vehiclePrice + docFee + acquisitionFee + fi.otherGovFees + fi.priorLeaseBalance + fi.creditInsPremium +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   const netTradeIn = tradeInValue - tradeInPayoff;
@@ -1792,9 +1854,9 @@ function calculateCashDeal(input) {
   const netTradeIn = tradeInValue - tradeInPayoff;
   const taxableAmount = (state === 'AZ'
     ? Math.max(vehiclePrice - netTradeIn, 0)
-    : vehiclePrice) + fi.taxableDealerFees;
+    : vehiclePrice) + fi.taxableDealerFees + fi.taxableProducts;
   const salesTax = taxableAmount * (taxRate / 100);
-  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees +
+  const totalFees = docFee + titleFee + registrationFee + fi.otherGovFees + fi.creditInsPremium +
     fi.gapPremium + fi.servicePremium + fi.maintenancePremium + fi.aftermarketAmount + fi.dealerFees + fi.licenseFee;
 
   let totalDue = vehiclePrice - netTradeIn - rebate - downPayment + salesTax + totalFees + fi.priorLeaseBalance;
@@ -2053,7 +2115,9 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     // Store-side money (F&I cost, reserve, incentives, chargebacks) is only
     // changed by managers and F&I.
     const ACCOUNTING = ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate'];
-    if (!auth.can(req.user, 'editDealAccounting')) for (const f of ACCOUNTING) delete updates[f];
+    // F&I products (with their costs) are F&I's and managers' to change.
+    const PRODUCTS = ['warranties', 'gap', 'creditInsurance', 'aftermarkets', 'gapPremium', 'servicePremium', 'maintenancePremium', 'aftermarketAmount', 'creditInsPremium'];
+    if (!auth.can(req.user, 'editDealAccounting')) for (const f of [...ACCOUNTING, ...PRODUCTS]) delete updates[f];
     for (const f of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount']) {
       if (f in updates) updates[f] = Number(String(updates[f]).replace(/[$,\s]/g, '')) || 0;
     }

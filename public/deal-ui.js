@@ -3,8 +3,10 @@
 // vehicle and buyer), the sales price, the down payment, and the payment --
 // recalculate as you type. Lines marked ▤ open their details: customer and
 // co-buyer, vehicle, up to three trades, a prior lease payoff, rebates,
-// dealer fees, taxes & state fees, deferred down payments, the people on
-// the deal, and (managers) store gross. Every section's page keeps the
+// dealer fees, taxes & state fees, deferred down payments, F&I products
+// (service contracts, maintenance, GAP, credit insurance, aftermarkets --
+// each with price and cost), insurance, miscellaneous, titling, third
+// parties, the people on the deal, and (managers) store gross. Every section's page keeps the
 // section list on the left and the payment on the right.
 // Loaded after app.js and uses its helpers and data (deals, leads, cars,
 // appraisals, staffList).
@@ -14,8 +16,12 @@ const dx = { deal: null, w: null, section: 'main', dirty: false, preview: null, 
 const DX_SECTIONS = [
   ['main', 'Deal'], ['customer', 'Customer'], ['vehicle', 'Vehicle'], ['trades', 'Trade-in'], ['priorLease', 'Prior lease'],
   ['rebates', 'Rebates'], ['dealerFees', 'Dealer fees'], ['taxes', 'Taxes & fees'], ['deferred', 'Deferred payments'],
+  ['warranty', 'Service & maintenance'], ['gapSec', 'GAP'], ['creditIns', 'Credit insurance'], ['aftermarkets', 'Aftermarkets'],
+  ['insurance', 'Insurance'], ['misc', 'Miscellaneous'], ['titling', 'Titling'], ['thirdParties', 'Third parties'],
   ['employees', 'Employees'], ['gross', 'Store gross']
 ];
+// Sections with F&I products (and their costs): F&I and managers change them.
+const DX_PRODUCT_SECTIONS = ['warranty', 'gapSec', 'creditIns', 'aftermarkets'];
 const DX_EMPLOYEES = [
   ['sales1', 'Salesperson 1'], ['sales2', 'Salesperson 2'], ['sales3', 'Salesperson 3'], ['sales4', 'Salesperson 4'],
   ['deskManager', 'Desk manager'], ['salesManager', 'Sales manager'], ['internetManager', 'Internet manager'], ['teamManager', 'Team manager'],
@@ -43,6 +49,16 @@ function dxWorking(d) {
     { key: 'title', description: 'Title fee', amount: d.titleFee || 0 }
   ];
   const hasSplit = d.stateTaxRate !== undefined && d.stateTaxRate !== null;
+  // F&I products as lines. Older deals only have a premium per product (and
+  // one F&I cost for all of them), so the cost goes on the first product.
+  const hasLines = Array.isArray(d.warranties) || Array.isArray(d.aftermarkets) || d.gap !== undefined || d.creditInsurance !== undefined;
+  let legacyCost = hasLines ? 0 : dxN(d.fiProductCost);
+  const takeCost = () => { const c = legacyCost; legacyCost = 0; return c; };
+  const warranties = hasLines ? (d.warranties || []) : [
+    ...(dxN(d.servicePremium) ? [{ kind: 'service', premium: d.servicePremium, cost: takeCost() }] : []),
+    ...(dxN(d.maintenancePremium) ? [{ kind: 'maintenance', premium: d.maintenancePremium, cost: takeCost() }] : [])];
+  const gap = hasLines ? (d.gap || null) : dxN(d.gapPremium) ? { premium: d.gapPremium, cost: takeCost() } : null;
+  const aftermarkets = hasLines ? (d.aftermarkets || []) : dxN(d.aftermarketAmount) ? [{ description: 'Aftermarket', price: d.aftermarketAmount, cost: takeCost() }] : [];
   return {
     leadId: d.leadId || '', coLeadId: d.coLeadId || '', carId: d.carId || '', dealType: d.dealType || 'retail',
     dealDate: d.dealDate || String(d.dateCreated || '').slice(0, 10) || dxToday(), lender: d.lender || '', program: d.program || 'Normal',
@@ -62,16 +78,23 @@ function dxWorking(d) {
     moneyFactor: v(d.moneyFactor), securityDeposit: v(d.securityDeposit), advancedPayments: v(d.advancedPayments),
     employees: { ...(d.employees || { sales1: lead ? lead.sales1Id || '' : '', sales2: lead ? lead.sales2Id || '' : '' }) },
     fiProductCost: v(d.fiProductCost), reserve: v(d.reserve), incentives: v(d.incentives), chargebackAmount: v(d.chargebackAmount),
-    chargebackDate: d.chargebackDate ? String(d.chargebackDate).slice(0, 10) : ''
+    chargebackDate: d.chargebackDate ? String(d.chargebackDate).slice(0, 10) : '',
+    _productLines: hasLines,
+    warranties: warranties.map(x => ({ ...x })), gap: gap ? { ...gap } : null, aftermarkets: aftermarkets.map(x => ({ ...x })),
+    creditInsurance: d.creditInsurance ? { company: d.creditInsurance.company || '', life: { ...(d.creditInsurance.life || {}) }, ah: { ...(d.creditInsurance.ah || {}) }, iui: { ...(d.creditInsurance.iui || {}) } } : null,
+    insurance: { ...(d.insurance || {}) }, misc: { ...(d.misc || {}) }, titling: { ...(d.titling || {}) },
+    thirdParties: Array.isArray(d.thirdParties) ? d.thirdParties.map(x => ({ ...x })) : []
   };
 }
 
 function dxPayload() {
   const w = dx.w;
   const p = { ...w, leadId: w.leadId || null, coLeadId: w.coLeadId || null, carId: w.carId || null };
-  for (const k of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate']) delete p[k];
+  for (const k of ['fiProductCost', 'reserve', 'incentives', 'chargebackAmount', 'chargebackDate', '_productLines']) delete p[k];
+  // Product lines go only once they've been used (older deals keep their F&I cost until then).
+  if (!w._productLines) for (const k of ['warranties', 'gap', 'creditInsurance', 'aftermarkets']) delete p[k];
   if (dxCanGross()) {
-    Object.assign(p, { fiProductCost: w.fiProductCost, reserve: w.reserve, incentives: w.incentives, chargebackAmount: w.chargebackAmount,
+    Object.assign(p, { ...(w._productLines ? {} : { fiProductCost: w.fiProductCost }), reserve: w.reserve, incentives: w.incentives, chargebackAmount: w.chargebackAmount,
       chargebackDate: w.chargebackDate ? `${w.chargebackDate}T12:00:00` : null });
   }
   return p;
@@ -140,7 +163,7 @@ function dxFigures() {
   const w = dx.w;
   const type = w.dealType;
   const lease = type === 'lease';
-  const products = dxN(p.servicePremium) + dxN(p.maintenancePremium) + dxN(p.gapPremium) + dxN(p.aftermarketAmount);
+  const products = dxN(p.servicePremium) + dxN(p.maintenancePremium) + dxN(p.gapPremium) + dxN(p.aftermarketAmount) + dxN(p.creditInsPremium);
   const gov = dxN(p.licenseFee) + dxN(p.registrationFee) + dxN(p.titleFee) + dxN(p.otherGovFees);
   const fees = dxN(p.docFee) + gov + dxN(p.dealerFees) + (lease ? dxN(p.acquisitionFee) : 0);
   const netTrade = dxN(p.tradeInValue) - dxN(p.tradeInPayoff);
@@ -156,7 +179,9 @@ function dxFigures() {
     financeCharge: Math.max(0, dxN(p.totalOfPayments) - dxN(p.amountFinanced)),
     totalOfPayments: dxN(p.totalOfPayments), payment: dxN(p.monthlyPayment), totalDealCost: dxN(p.totalDealCost),
     grossCap: dxN(p.grossCapCost), residual: dxN(p.residualAmount), dueAtSigning: dxN(p.dueAtSigning), capReduction: dxN(p.totalCapReduction),
-    days: p.daysToFirstPayment
+    days: p.daysToFirstPayment,
+    service: dxN(p.servicePremium), maintenance: dxN(p.maintenancePremium), gap: dxN(p.gapPremium), aftermarket: dxN(p.aftermarketAmount),
+    creditIns: dxN(p.creditInsPremium), productCost: dxN(p.fiProductCost)
   };
 }
 function dxUpdateOutputs() {
@@ -232,11 +257,12 @@ function dxMain() {
       <h3>Sales price</h3>
       ${lease ? dxRow('MSRP', dxIn('msrp', { type: 'number', cls: 'dx-money' })) : ''}
       ${dxRow('Selling price', dxIn('vehiclePrice', { type: 'number', cls: 'dx-money dx-big' }))}
-      ${dxRow('Aftermarkets', dxIn('aftermarketAmount', { type: 'number', cls: 'dx-money' }))}
+      ${dxRow('Aftermarkets', dxOut('aftermarket'), 'aftermarkets')}
       ${dxRow('Doc fee', dxIn('docFee', { type: 'number', cls: 'dx-money' }))}
-      ${dxRow('Service contract', dxIn('servicePremium', { type: 'number', cls: 'dx-money' }))}
-      ${dxRow('Maintenance', dxIn('maintenancePremium', { type: 'number', cls: 'dx-money' }))}
-      ${dxRow('GAP', dxIn('gapPremium', { type: 'number', cls: 'dx-money' }))}
+      ${dxRow('Service contract', dxOut('service'), 'warranty')}
+      ${dxRow('Maintenance', dxOut('maintenance'), 'warranty')}
+      ${dxRow('GAP', dxOut('gap'), 'gapSec')}
+      ${dxRow('Credit insurance', dxOut('creditIns'), 'creditIns')}
       ${dxRow('Prior lease balance', dxOut('priorLease'), 'priorLease')}
       ${dxRow('License fee', dxOut('license'), 'taxes')}
       ${dxRow('Dealer fees', dxOut('dealerFees'), 'dealerFees')}
@@ -382,6 +408,44 @@ function dxSection(k) {
       ${dxLines('deferred', [['amount', 'Amount', 'number'], ['date', 'Due date', 'date']], 3)}
       <p class="dx-sub">Deferred down: <strong data-out="deferred"></strong></p>`;
   }
+  if (DX_PRODUCT_SECTIONS.includes(k)) {
+    // Salespeople see the products; F&I and managers change them (and see cost).
+    return html`<fieldset class="dx-fs" ${dxCanGross() ? '' : html`disabled`}>${dxProducts(k)}</fieldset>
+      ${dxCanGross() ? '' : html`<p class="dx-sub">F&amp;I and managers set up products.</p>`}`;
+  }
+  if (k === 'insurance') {
+    return html`<h2>Insurance</h2><p class="dx-sub">The customer's auto insurance on this vehicle.</p><div class="dx-card"><div class="dx-grid">
+      ${dxObjField('insurance', 'company', 'Company')}${dxObjField('insurance', 'agent', 'Agent')}${dxObjField('insurance', 'phone', 'Phone')}${dxObjField('insurance', 'email', 'Email', 'email')}
+      ${dxObjField('insurance', 'policyNumber', 'Policy #')}${dxObjField('insurance', 'effective', 'Effective', 'date')}${dxObjField('insurance', 'expires', 'Expires', 'date')}
+      ${dxObjField('insurance', 'compDeductible', 'Comprehensive deductible', 'number')}${dxObjField('insurance', 'collDeductible', 'Collision deductible', 'number')}
+      ${dxObjField('insurance', 'insuredParty', 'Insured party')}</div>${dxObjField('insurance', 'notes', 'Notes')}</div>`;
+  }
+  if (k === 'misc') {
+    return html`<h2>Miscellaneous</h2><div class="dx-two">
+      <div class="dx-card"><h3>Registration &amp; temp plate</h3><div class="dx-grid">
+        ${dxObjField('misc', 'regClass', 'Registration class')}${dxObjField('misc', 'regEffDate', 'Registration effective', 'date')}${dxObjField('misc', 'regExpDate', 'Registration expires', 'date')}
+        ${dxObjField('misc', 'tempPermit', 'Temp permit #')}${dxObjField('misc', 'tempPlate', 'Temp plate')}${dxObjField('misc', 'tempExpDate', 'Temp expires', 'date')}</div></div>
+      <div class="dx-card"><h3>Inspection &amp; other</h3><div class="dx-grid">
+        ${dxObjField('misc', 'inspectionCert', 'Inspection cert #')}${dxObjField('misc', 'inspectionDate', 'Inspection date', 'date')}${dxObjField('misc', 'inspectionStation', 'Inspection station')}
+        ${dxObjField('misc', 'invoiceNumber', 'Invoice #')}${dxObjField('misc', 'advertisingCode', 'Advertising code')}
+        <label>With recourse<select data-obj="misc" data-k="withRecourse">${['', 'No', 'Yes', 'Limited'].map(o => html`<option ${(dx.w.misc.withRecourse || '') === o ? html`selected` : ''}>${o}</option>`)}</select></label></div></div>
+    </div>
+    <div class="dx-card"><h3>Used vehicle defects to disclose on F&amp;I contracts</h3>
+      ${dxObjField('misc', 'defect1', 'Defect 1')}${dxObjField('misc', 'defect2', 'Defect 2')}${dxObjField('misc', 'defect3', 'Defect 3')}</div>`;
+  }
+  if (k === 'titling') {
+    return html`<h2>Titling</h2><div class="dx-two">
+      <div class="dx-card"><h3>Title</h3>${dxObjField('titling', 'titleName', 'Titled to (name as it goes on the title)')}
+        <div class="dx-grid">${dxObjField('titling', 'taxId', 'Tax ID #')}${dxObjField('titling', 'lienNumber', 'Lien #')}</div>
+        <p class="dx-sub">Lender on the deal: ${dx.w.lender || 'cash'}</p></div>
+      <div class="dx-card"><h3>Lienholder</h3>${dxObjField('titling', 'lienholderName', 'Name')}${dxObjField('titling', 'lienholderStreet', 'Street')}
+        <div class="dx-grid">${dxObjField('titling', 'lienholderCity', 'City')}${dxObjField('titling', 'lienholderState', 'State')}${dxObjField('titling', 'lienholderZip', 'ZIP')}</div></div>
+    </div>${dxObjField('titling', 'notes', 'Notes')}`;
+  }
+  if (k === 'thirdParties') {
+    return html`<h2>Third parties</h2><p class="dx-sub">Anyone else on the deal: a cosigner's attorney, a business contact, a power of attorney...</p>
+      ${dxLines('thirdParties', [['role', 'Role', 'text'], ['name', 'Name', 'text'], ['address', 'Address', 'text'], ['phone', 'Phone', 'text'], ['email', 'Email', 'email']], 20)}`;
+  }
   if (k === 'employees') {
     return html`<h2>Employees</h2><div class="dx-card"><div class="dx-grid dx-grid-3">
       ${DX_EMPLOYEES.map(([role, label]) => html`<label>${label}<select data-obj="employees" data-k="${role}">${dxStaffOptions(w.employees[role] || '')}</select></label>`)}
@@ -390,11 +454,87 @@ function dxSection(k) {
   if (k === 'gross' && dxCanGross()) {
     const L = (label, key, type = 'number') => html`<label>${label}<input type="${type}" data-f="${key}" value="${w[key] ?? ''}" /></label>`;
     return html`<h2>Store gross</h2><p class="dx-sub">Managers and F&amp;I. Feeds the dashboard and the deal recap.</p>
-      <div class="dx-card"><div class="dx-grid">${L('F&I product cost', 'fiProductCost')}${L('Lender reserve', 'reserve')}${L('Incentives (dealer cash)', 'incentives')}
+      <div class="dx-card"><div class="dx-grid">${w._productLines
+        ? html`<label>F&amp;I product cost<strong class="dx-readonly" data-out="productCost"></strong><small class="dx-sub">from the product lines</small></label>`
+        : L('F&I product cost', 'fiProductCost')}${L('Lender reserve', 'reserve')}${L('Incentives (dealer cash)', 'incentives')}
         ${L('Chargeback amount', 'chargebackAmount')}${L('Chargeback date', 'chargebackDate', 'date')}</div></div>`;
   }
   return '';
 }
+const dxObjField = (obj, key, label, type = 'text') => html`<label class="dx-field">${label}<input type="${type}" data-obj="${obj}" data-k="${key}" value="${dx.w[obj][key] ?? ''}" /></label>`;
+
+// ---------- F&I products ----------
+function dxAftermarketTotals() {
+  const price = dx.w.aftermarkets.reduce((t, a) => t + dxN(a.price), 0);
+  const cost = dx.w.aftermarkets.reduce((t, a) => t + dxN(a.cost), 0);
+  return html`Aftermarkets <strong>${dxM(price)}</strong>${dxCanGross() ? html` · cost ${dxM(cost)} · profit <strong>${dxM(price - cost)}</strong>` : ''}`.toString();
+}
+// Profit and totals on the product pages, as you type.
+function dxProductNotes() {
+  document.querySelectorAll('#dx [data-profit]').forEach(el => {
+    const [list, i] = el.dataset.profit.split('|');
+    const x = list === 'gap' ? dx.w.gap : dx.w[list][Number(i)];
+    if (!x) return;
+    const v = dxN(x.premium) - dxN(x.cost);
+    el.textContent = dxM(v);
+    el.classList.toggle('rc-late', v < 0);
+  });
+  const t = document.querySelector('#dx [data-amtotals]');
+  if (t) t.innerHTML = dxAftermarketTotals();
+}
+function dxProducts(k) {
+  const w = dx.w;
+  const gross = dxCanGross();
+  const profit = (price, cost, ref) => html`<span class="dx-profit ${dxN(price) - dxN(cost) < 0 ? 'rc-late' : ''}" data-profit="${ref}">${dxM(dxN(price) - dxN(cost))}</span>`;
+  const F = (path, key, label, type = 'text', value) => html`<label>${label}<input type="${type}" ${new SafeHtml(path)} data-k="${key}" value="${value ?? ''}" /></label>`;
+  if (k === 'warranty') {
+    const cards = w.warranties.map((x, i) => {
+      const path = `data-list="warranties" data-i="${i}"`;
+      const n = w.warranties.slice(0, i + 1).filter(y => y.kind === x.kind).length;
+      return html`<div class="dx-card"><h3>${x.kind === 'maintenance' ? 'Maintenance plan' : 'Service contract'} ${n} <button type="button" class="link-btn" data-del="warranties|${i}">Remove</button></h3>
+        <div class="dx-grid dx-grid-money">${F(path, 'premium', 'Premium (customer pays)', 'number', x.premium)}${gross ? html`${F(path, 'cost', 'Cost', 'number', x.cost)}<label>Profit${profit(x.premium, x.cost, `warranties|${i}`)}</label>` : ''}</div>
+        <div class="dx-grid">${F(path, 'company', 'Company', 'text', x.company)}${F(path, 'planName', 'Plan', 'text', x.planName)}${F(path, 'planCode', 'Plan code', 'text', x.planCode)}
+          <label>Plan type<select ${new SafeHtml(path)} data-k="planType">${['', 'New', 'Used', 'CPO'].map(o => html`<option ${(x.planType || '') === o ? html`selected` : ''}>${o}</option>`)}</select></label>
+          ${F(path, 'months', 'Months', 'number', x.months)}${F(path, 'miles', 'Miles', 'number', x.miles)}${F(path, 'deductible', 'Deductible', 'number', x.deductible)}${F(path, 'policyNumber', 'Policy #', 'text', x.policyNumber)}</div></div>`;
+    });
+    const count = kind => w.warranties.filter(x => x.kind === kind).length;
+    return html`<h2>Service contracts &amp; maintenance</h2>${cards}
+      ${w.warranties.length ? '' : html`<p class="dx-sub">No service contract or maintenance plan on this deal.</p>`}
+      <div class="dx-add-row">${count('service') < 2 ? html`<button type="button" class="btn-secondary" data-add="service">+ Service contract</button>` : ''}
+        ${count('maintenance') < 2 ? html`<button type="button" class="btn-secondary" data-add="maintenance">+ Maintenance plan</button>` : ''}</div>
+      <p class="dx-sub">Service contracts <strong data-out="service"></strong> · maintenance <strong data-out="maintenance"></strong></p>`;
+  }
+  if (k === 'gapSec') {
+    const g = w.gap;
+    return html`<h2>GAP</h2>${g ? html`<div class="dx-card"><h3>GAP <button type="button" class="link-btn" data-del="gap|0">No GAP</button></h3>
+        <div class="dx-grid dx-grid-money">${F('data-obj="gap"', 'premium', 'Premium (customer pays)', 'number', g.premium)}${gross ? html`${F('data-obj="gap"', 'cost', 'Cost', 'number', g.cost)}<label>Profit${profit(g.premium, g.cost, 'gap')}</label>` : ''}</div>
+        <div class="dx-grid">${F('data-obj="gap"', 'company', 'Company', 'text', g.company)}${F('data-obj="gap"', 'term', 'Term (months)', 'number', g.term)}${F('data-obj="gap"', 'policyNumber', 'Policy #', 'text', g.policyNumber)}</div></div>`
+      : html`<p class="dx-sub">No GAP on this deal.</p><button type="button" class="btn-secondary" data-add="gap">+ Add GAP</button>`}`;
+  }
+  if (k === 'creditIns') {
+    const c = w.creditInsurance;
+    if (!c) return html`<h2>Credit insurance</h2><p class="dx-sub">No credit insurance on this deal.</p><button type="button" class="btn-secondary" data-add="creditInsurance">+ Add credit insurance</button>`;
+    const cov = (key, label) => html`<tr><th>${label}</th>
+      <td><input type="text" data-obj="creditInsurance.${key}" data-k="type" value="${c[key].type || ''}" aria-label="${label} type" /></td>
+      <td><input type="number" data-obj="creditInsurance.${key}" data-k="premium" value="${c[key].premium ?? ''}" aria-label="${label} premium" /></td>
+      ${gross ? html`<td><input type="number" data-obj="creditInsurance.${key}" data-k="cost" value="${c[key].cost ?? ''}" aria-label="${label} cost" /></td>` : ''}</tr>`;
+    return html`<h2>Credit insurance</h2><div class="dx-card"><h3>Coverage <button type="button" class="link-btn" data-del="creditInsurance|0">No insurance</button></h3>
+      <label class="dx-field">Company<input type="text" data-obj="creditInsurance" data-k="company" value="${c.company || ''}" /></label>
+      <table class="dx-lines"><thead><tr><th></th><th>Type</th><th>Premium</th>${gross ? html`<th>Cost</th>` : ''}</tr></thead><tbody>
+        ${cov('life', 'Life')}${cov('ah', 'A&H (disability)')}${cov('iui', 'IUI (unemployment)')}</tbody></table>
+      <p class="dx-sub">Total premium <strong data-out="creditIns"></strong>, financed with the deal.</p></div>`;
+  }
+  if (k === 'aftermarkets') {
+    const cols = [['code', 'Code', 'text'], ['description', 'Description', 'text'], ['price', 'Price', 'number'], ...(gross ? [['cost', 'Cost', 'number']] : []),
+      ['taxable', 'Tax', 'checkbox'], ['weOwe', 'We owe', 'checkbox'], ['vendor', 'Vendor', 'text'], ['months', 'Months', 'number'], ['miles', 'Miles', 'number'],
+      ['itemize', 'Itemize', 'checkbox'], ['preInstalled', 'Pre-installed', 'checkbox']];
+    return html`<h2>Aftermarkets</h2><p class="dx-sub">Add-ons: tint, wheel &amp; tire, accessories. Taxed items are added to the taxed amount; "we owe" items print on the We-Owe sheet.</p>
+      <div class="dx-wide">${dxLines('aftermarkets', cols, 20)}</div>
+      <p class="dx-sub" data-amtotals>${new SafeHtml(dxAftermarketTotals())}</p>`;
+  }
+  return '';
+}
+
 const dxFact = (label, value) => html`<div><span>${label}</span><strong>${value === '' || value === null || value === undefined ? '—' : value}</strong></div>`;
 
 // A small table of lines (rebates, fees...). fixed(i): a line that can't be removed.
@@ -442,8 +582,9 @@ function dxSet(t) {
   const val = t.type === 'checkbox' ? t.checked : t.value;
   if (t.dataset.f) dx.w[t.dataset.f] = val;
   else if (t.dataset.list) dx.w[t.dataset.list][Number(t.dataset.i)][t.dataset.k] = val;
-  else if (t.dataset.obj) dx.w[t.dataset.obj][t.dataset.k] = val;
+  else if (t.dataset.obj) t.dataset.obj.split('.').reduce((o, k) => o[k], dx.w)[t.dataset.k] = val;
   else return false;
+  if (['warranties', 'aftermarkets'].includes(t.dataset.list) || /^(gap|creditInsurance)/.test(t.dataset.obj || '')) dx.w._productLines = true;
   return true;
 }
 const dxRoot = document.getElementById('dx');
@@ -451,6 +592,7 @@ dxRoot.addEventListener('input', (e) => {
   if (!dxSet(e.target)) return;
   dxMarkDirty();
   if (e.target.dataset.list === 'trades') dxTradeNote(Number(e.target.dataset.i));
+  if (DX_PRODUCT_SECTIONS.includes(dx.section)) dxProductNotes();
   dxRecalc();
 });
 // The net trade / over-under line under a trade, as you type.
@@ -465,6 +607,7 @@ function dxTradeNoteHtml(t) {
 }
 dxRoot.addEventListener('change', (e) => {
   if (!dxSet(e.target)) return;
+  if (DX_PRODUCT_SECTIONS.includes(dx.section)) dxProductNotes();
   dxMarkDirty();
   dxRecalc(0);
 });
@@ -475,16 +618,23 @@ dxRoot.addEventListener('click', async (e) => {
   const add = e.target.closest('[data-add]');
   if (add) {
     const list = add.dataset.add;
+    if (list === 'gap') { dx.w.gap = { company: '', premium: '', cost: '', term: '', policyNumber: '' }; dx.w._productLines = true; dx.dirty = true; renderDx(); return dxRecalc(0); }
+    if (list === 'creditInsurance') { dx.w.creditInsurance = { company: '', life: {}, ah: {}, iui: {} }; dx.w._productLines = true; dx.dirty = true; return renderDx(); }
     const blank = { trades: { allowance: '', payoff: '', acv: '' }, rebates: { description: '', amount: '' }, dealerFeeLines: { description: '', amount: '', taxable: false, paidTo: '' },
-      govFees: { key: '', description: '', amount: '' }, deferred: { amount: '', date: '' } }[list];
-    dx.w[list].push({ ...blank });
+      govFees: { key: '', description: '', amount: '' }, deferred: { amount: '', date: '' }, service: { kind: 'service', premium: '', cost: '' },
+      maintenance: { kind: 'maintenance', premium: '', cost: '' }, aftermarkets: { description: '', price: '', cost: '', taxable: false, weOwe: false },
+      thirdParties: { role: '', name: '', address: '', phone: '', email: '' } }[list];
+    if (list === 'service' || list === 'maintenance') { dx.w.warranties.push({ ...blank }); dx.w._productLines = true; }
+    else { dx.w[list].push({ ...blank }); if (list === 'aftermarkets') dx.w._productLines = true; }
     dx.dirty = true;
     return renderDx();
   }
   const del = e.target.closest('[data-del]');
   if (del) {
     const [list, i] = del.dataset.del.split('|');
-    dx.w[list].splice(Number(i), 1);
+    if (list === 'gap' || list === 'creditInsurance') dx.w[list] = null;
+    else dx.w[list].splice(Number(i), 1);
+    if (['warranties', 'aftermarkets', 'gap', 'creditInsurance'].includes(list)) dx.w._productLines = true;
     dx.dirty = true;
     renderDx();
     return dxRecalc(0);

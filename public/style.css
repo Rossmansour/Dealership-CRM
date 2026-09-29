@@ -2683,3 +2683,15 @@ body.rc-body { margin: 0; min-height: 100vh; }
   .dx-lines tr { border-bottom: 1px solid var(--border); padding: 4px 0; }
   .dx-lines td { display: block; }
 }
+.dx-fs { border: none; margin: 0; padding: 0; min-width: 0; }
+.dx-fs[disabled] input, .dx-fs[disabled] select { background: var(--surface-alt); }
+.dx-add-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.dx-profit { font-weight: 700; padding: 6px 0; }
+.dx-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.dx-field input { width: 100%; }
+.dx-readonly { padding: 6px 0; font-size: 14px; color: var(--text); }
+.dx-wide { overflow-x: auto; }
+.dx-wide .dx-lines { min-width: 900px; }
+.dx-wide .dx-lines td:nth-child(2) input { min-width: 180px; }
+.dx-lines th[scope], .dx-lines tbody th { text-align: left; font-size: 13px; color: var(--text); padding-right: 8px; white-space: nowrap; }
+@media (max-width: 760px) { .dx-wide .dx-lines { min-width: 0; } }
