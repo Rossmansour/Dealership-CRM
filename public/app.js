@@ -1489,9 +1489,9 @@ function renderPipeline() {
     fromHere -= list.length;
     return html`
       <div class="pipeline-stage stage-${st.key}" title="${st.hint}">
-        <div class="pipeline-step"><span class="pipeline-step-num">${i + 1}</span><span class="pipeline-stage-label">${st.label}</span></div>
+        <span class="pipeline-dot">${i + 1}</span>
+        <span class="pipeline-stage-label">${st.label}</span>
         <button type="button" class="pipeline-count" onclick="openPipelineList(${js(st.key)}, 'all')" title="Show these customers">${list.length.toLocaleString()}</button>
-        <div class="pipeline-reach" aria-label="${reach}% of customers got this far"><span style="width:${reach}%"></span></div>
         <div class="pipeline-reach-text">${i === 0 ? 'all customers' : `${reach}% got this far`}</div>
         <div class="pipeline-stage-sub">
           ${open ? html`

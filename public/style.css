@@ -1373,35 +1373,33 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 .pipeline-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
 .pipeline-filters select { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
 
-/* One board split into steps: step number and name, the count, and a bar
-   showing how many customers got at least this far. */
-.pipeline-stages {
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 28px 0 14px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+/* A path: numbered dots joined by one line, each step's name and count
+   underneath. */
+.pipeline-stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 40px 0 18px; }
+.pipeline-stage { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; padding: 0 6px; --dot: var(--blue); }
+/* The line runs through the dots, from the first dot to the last. */
+.pipeline-stage::before { content: ''; position: absolute; top: 17px; left: 0; right: 0; height: 3px; background: var(--border); z-index: 0; }
+.pipeline-stage:first-child::before { left: 50%; }
+.pipeline-stage:last-child::before { right: 50%; }
+.stage-new { --dot: #94a3b8; }
+.stage-attempted { --dot: #60a5fa; }
+.stage-engaged { --dot: var(--blue); }
+.stage-visit { --dot: #4f46e5; }
+.stage-proposal { --dot: #7c3aed; }
+.stage-delivered { --dot: var(--green); }
+.pipeline-dot {
+  position: relative; z-index: 1; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--dot); color: #fff; font-weight: 800; font-size: 15px; box-shadow: 0 0 0 5px var(--bg);
 }
-.pipeline-stage { display: flex; flex-direction: column; align-items: flex-start; padding: 16px 18px 14px; border-left: 1px solid var(--border); border-top: 3px solid var(--blue); min-width: 0; }
-.pipeline-stage:first-child { border-left: 0; }
-.stage-new { border-top-color: #94a3b8; }
-.stage-attempted { border-top-color: #60a5fa; }
-.stage-engaged { border-top-color: var(--blue); }
-.stage-visit { border-top-color: #4f46e5; }
-.stage-proposal { border-top-color: #7c3aed; }
-.stage-delivered { border-top-color: var(--green); background: rgba(22, 163, 74, 0.05); }
-.pipeline-step { display: flex; align-items: center; gap: 8px; }
-.pipeline-step-num { width: 22px; height: 22px; border-radius: 6px; background: var(--surface-alt); color: var(--text-secondary); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.pipeline-stage-label { margin-top: 12px; font-weight: 700; font-size: 12.5px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.06em; }
 .pipeline-count {
   border: none; background: none; padding: 0; cursor: pointer; font: inherit;
-  font-size: 38px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-top: 6px;
+  font-size: 40px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; color: var(--text); margin-top: 2px;
 }
-.pipeline-count:hover, .pipeline-count:focus-visible { color: var(--blue); outline: none; }
+.pipeline-count:hover, .pipeline-count:focus-visible { color: var(--dot); outline: none; }
 .stage-delivered .pipeline-count { color: var(--green); }
-.pipeline-stage-label { font-weight: 700; font-size: 13px; color: var(--text); text-transform: uppercase; letter-spacing: 0.04em; }
-.pipeline-reach { width: 100%; height: 5px; background: var(--surface-alt); border-radius: 3px; margin: 8px 0 4px; overflow: hidden; }
-.pipeline-reach span { display: block; height: 100%; background: var(--blue); border-radius: 3px; }
-.stage-new .pipeline-reach span { background: #94a3b8; }
-.stage-delivered .pipeline-reach span { background: var(--green); }
-.pipeline-reach-text { font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px; }
-.pipeline-stage-sub { display: flex; gap: 12px; min-height: 22px; }
+.pipeline-reach-text { font-size: 11.5px; color: var(--text-muted); margin-bottom: 6px; }
+.pipeline-stage-sub { display: flex; gap: 12px; min-height: 22px; justify-content: center; }
 .pipeline-sub { border: none; background: none; padding: 2px 0; cursor: pointer; font: inherit; font-size: 13px; color: var(--text-secondary); }
 .pipeline-sub:hover, .pipeline-sub:focus-visible { color: var(--text); text-decoration: underline; outline: none; }
 .pipeline-sub.muted { cursor: default; text-decoration: none; color: var(--text-muted); }
@@ -1433,9 +1431,8 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 
 /* Small screens: no rail (the pipeline tiles cover it), tighter bar */
 @media (max-width: 1100px) {
-  .pipeline-stages { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .pipeline-stage:nth-child(3n + 1) { border-left: 0; }
-  .pipeline-stage:nth-child(-n + 3) { border-bottom: 1px solid var(--border); }
+  .pipeline-count { font-size: 32px; }
+  .pipeline-stage-label { font-size: 11px; letter-spacing: 0.03em; }
   .quick-search { width: 220px; }
   .account-name, .brand-name, .appbar-module { display: none; }
 }
@@ -1453,11 +1450,20 @@ body.cannot-deleteRecords .activity-delete { display: none; }
   .quick-search input:not(:focus)::placeholder { color: transparent; }
   .quick-search input:focus { position: fixed; left: 10px; right: 10px; top: 11px; width: auto; padding: 0 12px 0 36px; color: var(--text); z-index: 310; }
   .quick-search-results { position: fixed; left: 10px; right: 10px; top: 56px; width: auto; }
-  .pipeline-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 18px; }
-  .pipeline-stage { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .pipeline-stage:nth-child(odd) { border-left: 0; }
-  .pipeline-stage:nth-child(even) { border-left: 1px solid var(--border); }
-  .pipeline-count { font-size: 30px; }
+  /* Phones: the path runs top to bottom -- dot on the left, the rest beside it. */
+  .pipeline-stages { grid-template-columns: minmax(0, 1fr); margin-top: 20px; }
+  .pipeline-stage {
+    display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 14px;
+    align-items: center; text-align: left; padding: 0 0 18px;
+  }
+  .pipeline-stage::before { top: 0; bottom: 0; left: 16.5px; right: auto; width: 3px; height: auto; }
+  .pipeline-stage:first-child::before { top: 18px; left: 16.5px; }
+  .pipeline-stage:last-child::before { bottom: auto; height: 18px; right: auto; }
+  .pipeline-dot { grid-row: 1 / 3; align-self: start; }
+  .pipeline-stage-label { margin: 0; grid-column: 2; }
+  .pipeline-reach-text { grid-column: 2; grid-row: 2; margin: 0; }
+  .pipeline-count { grid-column: 3; grid-row: 1; font-size: 28px; margin: 0; text-align: right; }
+  .pipeline-stage-sub { grid-column: 3; grid-row: 2; justify-content: flex-end; }
 }
 
 /* ---------- Appraisals ---------- */
