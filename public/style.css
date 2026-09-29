@@ -2500,7 +2500,7 @@ body.rc-body { margin: 0; min-height: 100vh; }
   .rc-car-bottom { grid-template-columns: minmax(0, 1fr); }
   .rc-pick-body { grid-template-columns: minmax(0, 1fr); }
 }
-@media print { .rc-top, .rc-body > .rc-tabs, .rc-car-actions, .rc-work-tools, .rc-add-note { display: none !important; } }
+@media print { .rc-top, .rc-body > .rc-tabs, .rc-car-actions, .rc-work-tools, .rc-add-note, .rc-drawer, .rc-drawer-tab { display: none !important; } }
 .rc-strip[hidden] { display: none; }
 .modal-content .rc-pick-side .rc-inline { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; color: var(--text); font-size: 13px; }
 .modal-content .rc-pick-side .rc-inline input { width: auto; margin: 0; }
@@ -2545,3 +2545,20 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .ap-market-suggest { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; font-size: 14px; }
 .ap-market-suggest .audit-note { flex-basis: 100%; }
 #apMarketPlug .pr-comps { margin-top: 6px; }
+
+/* Recon: appraisal pull-out drawer */
+.rc-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; max-width: calc(100vw - 44px); background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12); transform: translateX(100%); visibility: hidden; transition: transform 0.25s ease, visibility 0.25s; z-index: 60; overflow-y: auto; padding: 14px 16px; box-sizing: border-box; }
+.rc-drawer.open { transform: none; visibility: visible; }
+.rc-drawer-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rc-drawer .rc-apr { grid-template-columns: minmax(0, 1fr); border: none; padding: 0; margin: 0; gap: 14px; }
+.rc-drawer .rc-apr-col .rc-info-row { grid-template-columns: 160px minmax(0, 1fr); }
+.rc-drawer-tab { position: fixed; right: 0; top: 50%; transform: translateY(-50%); z-index: 61; writing-mode: vertical-rl; display: flex; align-items: center; gap: 8px;
+  background: var(--navy); color: #fff; border: none; border-radius: 8px 0 0 8px; padding: 14px 7px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600;
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.15); transition: right 0.25s ease; }
+.rc-drawer-tab strong { font-size: 13px; }
+.rc-drawer-tab strong.rc-late { color: #fca5a5; }
+.rc-drawer-tab:hover { filter: brightness(1.15); }
+.rc-drawer-tab.open { right: min(400px, calc(100vw - 44px)); }
+.rc-drawer-arrow { display: inline-block; writing-mode: horizontal-tb; transition: transform 0.25s ease; }
+.rc-drawer-tab.open .rc-drawer-arrow { transform: rotate(180deg); }

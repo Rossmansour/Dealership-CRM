@@ -261,8 +261,35 @@ function closeUnit() {
   render();
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && tab === 'car' && !document.querySelector('.modal.active')) closeUnit();
+  if (e.key !== 'Escape' || tab !== 'car' || document.querySelector('.modal.active')) return;
+  if (drawerOpen) return setDrawer(false); // Esc tucks the appraisal away first
+  closeUnit();
 });
+
+// The appraisal slides out from a pull tab on the right edge and tucks back
+// in. Open or closed is remembered on this computer.
+let drawerOpen = false;
+try { drawerOpen = localStorage.getItem('rcDrawer') === 'open'; } catch { /* private window */ }
+function setDrawer(open) {
+  drawerOpen = open;
+  try { localStorage.setItem('rcDrawer', open ? 'open' : 'closed'); } catch { /* private window */ }
+  document.querySelectorAll('.rc-drawer, .rc-drawer-tab').forEach(el => el.classList.toggle('open', open));
+  document.querySelectorAll('.rc-drawer-tab').forEach(el => el.setAttribute('aria-expanded', String(open)));
+  const d = document.querySelector('.rc-drawer');
+  if (d) d.setAttribute('aria-hidden', String(!open));
+}
+function appraisalDrawer(u) {
+  const g = grossOf(u);
+  return html`<button type="button" class="rc-drawer-tab ${drawerOpen ? 'open' : ''}" data-d="drawer" aria-expanded="${String(drawerOpen)}" title="Appraisal and gross">
+      <span class="rc-drawer-arrow" aria-hidden="true">◀</span><span>Appraisal</span>
+      <strong class="${g.gross < 0 ? 'rc-late' : ''}">${money(g.gross)}</strong>
+    </button>
+    <aside class="rc-drawer ${drawerOpen ? 'open' : ''}" aria-label="Appraisal and gross" aria-hidden="${String(!drawerOpen)}">
+      <div class="rc-drawer-head"><strong>Appraisal &amp; gross</strong>
+        <button type="button" class="btn-secondary btn-small" data-d="drawer">Tuck away ▶</button></div>
+      ${appraisalPanel(u)}
+    </aside>`;
+}
 
 const nextStepOf = u => {
   const steps = board.settings.steps;
@@ -335,7 +362,7 @@ function renderCarPage() {
       </div>
     </div>
 
-    ${appraisalPanel(u)}
+    ${appraisalDrawer(u)}
 
     <div class="rc-work">
       <div class="rc-work-head">
@@ -459,6 +486,7 @@ carEl.addEventListener('click', async (e) => {
   const t = e.target;
   try {
     if (t.closest('[data-d="close"]')) return closeUnit();
+    if (t.closest('[data-d="drawer"]')) return setDrawer(!drawerOpen);
     if (t.closest('[data-d="print"]')) return window.print();
     const move = t.closest('[data-move]');
     if (move) return moveUnit(u, move.dataset.move);

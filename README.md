@@ -143,7 +143,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 - **Send to service**: approved mechanical items become one internal RO with their hours, rate, and parts (cost reaches the car when the RO closes). **Done** on outside work asks the actual cost and adds it to the car right away. Steps taken (with time in each) and notes are at the bottom; the page prints
 - Every car added to inventory goes into recon on its own: used cars at **Purchase / Trade**, new cars at **New - PDI**
 - A trade is stocked in on its own when its deal is delivered (cost = appraised ACV or the trade allowance, stock # T + deal number) and goes straight into recon
-- **Appraisal panel** on each car: ACV, planned recon, target retail and gross; what the car stands in now with approved work; gross at the asking price (and if the waiting work is approved), updated as work is approved or declined; how cars like it have sold here. Managers can change the asking price right there
+- **Appraisal pull tab** on each car (right edge; slides out and tucks back in, Esc closes it): ACV, planned recon, target retail and gross; what the car stands in now with approved work; gross at the asking price (and if the waiting work is approved), updated as work is approved or declined; how cars like it have sold here. Managers can change the asking price right there
 - **Needs approval** and **Performance** (ADR, % on goal, spend per car, spent vs. estimate, average time per step vs. goal) -- all following the All / New / Used choice
 - Steps and goals are set by managers (**Steps & goals**); sales managers, GMs, and the service team (service manager, advisors, technicians) can open it; sales managers approve
 
