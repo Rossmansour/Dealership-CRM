@@ -24,6 +24,7 @@ const parts = require('./parts');
 const recon = require('./recon');
 const pricing = require('./pricing');
 const duplicates = require('./duplicates');
+const taskplan = require('./taskplan');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -137,6 +138,7 @@ app.use('/api', parts.router);
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
+app.use('/api', taskplan.router());
 app.use('/api', docs.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).
@@ -966,6 +968,8 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   if (['call', 'text', 'email'].includes(activity.type) && (req.body.reached === true || req.body.reached === 'true')) activity.reached = true;
   const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
+  // That touch finishes the customer's planned task for today.
+  await store.tx(q => taskplan.completeByTouch(q, req, req.params.id, activity));
   res.status(201).json(activity);
 }));
 
@@ -1047,6 +1051,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       direction: 'out', message: text || '', photo: photoPath || null
     };
     await addLeadActivity(req, lead.id, activity, 'send_text');
+    await store.tx(q => taskplan.completeByTouch(q, req, lead.id, activity));
 
     res.status(201).json({ activity, twilioSid: message.sid, status: message.status });
   } catch (err) {
@@ -3051,6 +3056,9 @@ async function callAI(systemInstruction, history, userMessage) {
   return text;
 }
 
+// AI task planning uses the same AI.
+taskplan.useAI(callAI, () => !!GEMINI_API_KEY);
+
 // Strip sensitive fields before anything gets sent to a third-party AI
 // provider. The AI doesn't need a real SSN to answer "how many leads are
 // in negotiation" or draft a follow-up text -- so it never sees one.
@@ -3374,6 +3382,8 @@ if (require.main === module) {
       const pricingSweep = () => pricing.autoPriceSweep().catch(err => console.error('Auto-pricing failed:', err.message));
       setTimeout(pricingSweep, 60 * 1000);
       setInterval(pricingSweep, 60 * 60 * 1000);
+      // AI task planning: each store's day is planned once, when it opens.
+      setInterval(() => taskplan.sweep().catch(err => console.error('Task planning failed:', err.message)), 5 * 60 * 1000);
     })
     .catch(err => {
       console.error('Failed to start:', err);

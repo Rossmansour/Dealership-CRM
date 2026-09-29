@@ -230,6 +230,15 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - Each is for a customer, assigned to a staff member, with a due time. Completing one notes the outcome in the customer's history
 - The Sales Pipeline home lists **my tasks due today** (overdue first, in red; managers can switch to everyone's), and **My Tasks Due** is a badge on the left rail
 
+**AI task planning** (Sales Pipeline → My tasks today)
+- Each salesperson and BDC agent gets **their own calls, texts, and emails for the day**, picked from the customers assigned to them: who to contact, how, what about, and why (hover a ✨ task to see why). BDC agents work the new and not-yet-reached customers they're on; everything else goes to the salesperson (Sales 1)
+- **✨ Plan my day** (salespeople and BDC) or **✨ Plan everyone's day** (managers), or turn on **⚙ → plan every morning when the store opens** (by the store hours). Managers set the most tasks per person per day
+- **Appointments get confirmed**: a "Confirm Saturday's 2:00 PM appointment" task a couple of days before (managers set how many; 0 = off) and again the morning of, due before the appointment. A customer with an upcoming appointment gets no other tasks
+- **Every customer touched once a day, on a realistic list**: at most one task per customer per day, and only for customers nobody has called, texted, emailed, or seen yet today. The list is capped per person (15 by default); whoever doesn't fit today is first in line tomorrow. "X of Y customers touched today" shows above the list
+- **No pile-up**: yesterday's unfinished planned tasks are replaced by today's plan, and logging a call, text, email, or visit on a customer finishes their planned task by itself
+- Skipped too: customers with another open task, dead or sold customers, snoozed customers, and customers waiting in Duplicate Leads. Tasks are spread through open hours, 20 minutes apart; each person gets one alert that their day is planned
+- The AI (`GEMINI_API_KEY`) sees only first names, pipeline step, days since contact, the last few notes, and the car -- never phone numbers, emails, addresses, or credit apps. Without a key (or if the AI fails), tasks are planned by simple rules instead: first contact for new leads, try again (switching call/text) for unreached ones, follow up on visits and deals in progress, and set appointments with engaged customers going quiet
+
 **Search instead of dropdowns**
 - Everywhere you pick a car or a customer, you type: a car by stock #, any part of the VIN, year, make, model, trim, or color ("H-2020", "odyssey silver"); a customer by name, phone (any format), email, or customer #. Arrow keys and Enter work
 
