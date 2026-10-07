@@ -6179,6 +6179,7 @@ async function alertRequest(path, body) {
 // Opens whatever the alert is about.
 async function openAlertTarget(link) {
   if (!link) return;
+  if (link.kind === 'ro') { document.getElementById('alertsPanel').hidden = true; closeCustomerPage(); showView('service'); openRoById(link.id); return; }
   if (link.kind === 'duplicates') { document.getElementById('alertsPanel').hidden = true; closeCustomerPage(); showView('duplicates'); return; }
   const find = () => (link.kind === 'lead' ? leads : link.kind === 'deal' ? deals : appraisals).some(r => r.id === link.id);
   if (!find()) await loadAll();

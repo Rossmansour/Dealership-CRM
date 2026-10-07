@@ -25,6 +25,7 @@ const recon = require('./recon');
 const pricing = require('./pricing');
 const duplicates = require('./duplicates');
 const taskplan = require('./taskplan');
+const inspection = require('./inspection');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -206,6 +207,9 @@ app.post('/v/:token/played', (req, res, next) => (async () => {
   res.status(204).send();
 })().catch(next));
 
+// A vehicle inspection the customer approves or declines (no sign-in).
+app.use(inspection.publicRouter());
+
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
 app.use('/api', alerts.router);
@@ -217,6 +221,19 @@ app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
 app.use('/api', taskplan.router());
+app.use('/api', inspection.router({
+  mediaUpload,
+  publicBase: req => publicBase(req),
+  sendSms: async (to, body) => {
+    if (!twilioClient) return false;
+    await twilioClient.messages.create({ body, from: smsFrom, to });
+    return true;
+  },
+  present: async (ro, req) => {
+    const [settings, pays] = [await service.settingsOf(store.pool, req.dealershipId), await service.payMap(store.pool, req.dealershipId)];
+    return service.present(ro, settings, pays, { forTech: req.user.role === 'technician' });
+  }
+}));
 app.use('/api', docs.router);
 
 // Shorthand for routes limited to certain roles (see PERMISSIONS in auth.js).

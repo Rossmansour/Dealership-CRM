@@ -154,6 +154,9 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Dashboard → Service & Parts**: service gross, parts gross, ROs, effective labor rate, and hours per RO from closed ROs; the Store tab and Expenses & Net now include them
 - **Setup** (service managers, GMs, admins): labor rates (customer / warranty / internal), shop supplies, tax on parts and/or labor, and each tech's pay
 - New roles: **Service Advisor** and **Technician**
+- **Vehicle inspections** (on each RO): **Start inspection** opens a checklist -- tires and wheels, brakes, fluids, under the hood, lights and wipers, under the vehicle -- plus any item you add. The technician marks each item **Good / Soon / Now**, writes what they found, and adds **photos or videos** straight from the phone camera. The advisor prices each Soon/Now item (labor hours at the customer labor rate + parts)
+- **Send to customer**: the customer gets a text with a link (or, before texting is set up, the advisor copies the link). The page -- no sign-in -- shows their vehicle, what needs attention now, soon, and what looks good, with the pictures and prices, and they tap **Approve** or **Not now** on each item
+- **Approved items become jobs on the RO** automatically (customer pay, the hours and parts from the estimate). The advisor gets a **Customer answered an inspection** alert, the RO shows sent / opened / answered, and the customer's history notes what they approved and declined. Declined items stay on the RO for a later follow-up. Answered items are locked
 
 
 **Recon** (its own section in the sidebar, above Service; opens in its own tab, or go to `/recon`)
