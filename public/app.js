@@ -168,7 +168,7 @@ themeToggleBtn.addEventListener('click', () => {
 const MODULES = [
   { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
-  { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'leads', 'board', 'duplicates', 'reports', 'assistant'],
+  { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'messages', 'leads', 'board', 'duplicates', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', brand: 'Desk Domus', label: 'Sales & F&I', views: ['deals'],
     icon: '<svg viewBox="0 0 24 24"><path d="M3 12.5l4.5-4 3 1.5 3-2.5 3 1 4.5 4"/><path d="M5 11l5.5 5.5a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L10 11"/><path d="M13 16.5l1 1a1.6 1.6 0 0 0 2.2 0l.3-.3a1.6 1.6 0 0 0 0-2.2L13.5 12"/><path d="M16.5 15l.5.5a1.6 1.6 0 0 0 2.3-2.3l-2.8-2.7"/></svg>' },
@@ -185,14 +185,14 @@ const MODULES = [
 ];
 
 const VIEW_PANELS = {
-  pipeline: 'pipeline', leads: 'leads', board: 'leads', duplicates: 'duplicatesPanel', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
+  pipeline: 'pipeline', messages: 'messagesPanel', leads: 'leads', board: 'leads', duplicates: 'duplicatesPanel', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
   reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
 };
 let currentView = 'pipeline';
 
 // Names of each screen, for the sidebar dropdowns.
 const VIEW_LABELS = {
-  execdash: 'Dashboard', pipeline: 'Sales Pipeline', leads: 'Customers', board: 'Customer Board', duplicates: 'Duplicate Leads', reports: 'Reports',
+  execdash: 'Dashboard', pipeline: 'Sales Pipeline', messages: 'Messages', leads: 'Customers', board: 'Customer Board', duplicates: 'Duplicate Leads', reports: 'Reports',
   assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', pricing: 'Market Pricing', service: 'Repair Orders',
   serviceappts: 'Appointments', recon: 'Recon Domus ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
@@ -285,6 +285,8 @@ function showView(view) {
   if (view === 'partsorders') openOrdersView();
   if (view === 'pricing') openPricingView();
   if (view === 'duplicates') openDuplicatesView();
+  // (messages-ui.js loads after this file; it opens Messages itself if the app starts there.)
+  if (typeof openMessagesView === 'function') { if (view === 'messages') openMessagesView(); else stopMessagesPolling(); }
   window.scrollTo(0, 0);
 }
 
@@ -299,7 +301,11 @@ document.querySelectorAll('.nav-icon[data-view]').forEach(btn => {
 
 document.getElementById('brandHomeBtn').addEventListener('click', () => showView('pipeline'));
 renderModuleNav();
-showView('pipeline');
+// The phone app's "Messages" shortcut opens straight to Messages.
+showView(new URLSearchParams(location.search).get('view') === 'messages' ? 'messages' : 'pipeline');
+
+// Installable on phones (Add to Home Screen).
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // ---------- Data loading ----------
 
@@ -1623,6 +1629,8 @@ function attentionCounts() {
   const followUp = workingLeads().filter(needsFollowUp);
   const newToday = workingLeads().filter(l => isToday(l.dateAdded));
   const dupes = leads.filter(inDupBucket);
+  const me = currentUser && String(currentUser.id);
+  const unreadTexts = leads.filter(l => l.unreadTexts && [l.sales1Id, l.sales2Id, l.bdc1Id, l.bdc2Id].map(String).includes(me));
   const keysOutCarIds = new Set(vehicleKeys.filter(k => k.status === 'out').map(k => k.carId));
   const keysOut = cars.filter(c => keysOutCarIds.has(c.id));
   const aged = cars.filter(c => c.status !== 'sold' && (Date.now() - new Date(c.dateAdded)) / DAY_MS >= AGED_INVENTORY_DAYS);
@@ -1637,6 +1645,8 @@ function attentionCounts() {
       open: () => { setLeadsListFilter('Follow-up due', followUp.map(l => l.id)); showView('leads'); } },
     { key: 'newtoday', label: 'New Today', icon: ICONS.userPlus, color: 'blue', count: newToday.length,
       open: () => { setLeadsListFilter('New today', newToday.map(l => l.id)); showView('leads'); } },
+    { key: 'messages', label: 'Unread Texts', icon: ICONS.chat, color: 'blue', count: unreadTexts.length, railOnly: !unreadTexts.length,
+      open: () => showView('messages') },
     { key: 'duplicates', label: 'Duplicate Leads', icon: ICONS.copy, color: 'amber', count: dupes.length, railOnly: !dupes.length,
       open: () => showView('duplicates') },
     { key: 'proposals', label: 'Open Proposals', icon: ICONS.calc, color: 'violet', count: proposals.length, railOnly: true,
@@ -5738,6 +5748,8 @@ async function loadAndRenderUsers() {
         <td>${u.name}${isMe ? ' (you)' : ''}</td>
         <td>${u.email}</td>
         <td>${roleSelect}</td>
+        <td><input type="tel" class="user-phone-input" value="${u.directNumber}" placeholder="+1 602 555 0100" onchange="updateUser(${js(u.id)}, { directNumber: this.value })" aria-label="Direct number for ${u.name}" /></td>
+        <td><input type="tel" class="user-phone-input" value="${u.cellPhone}" placeholder="Their cell" onchange="updateUser(${js(u.id)}, { cellPhone: this.value })" aria-label="Cell phone for ${u.name}" /></td>
         <td>${u.active ? 'Active' : 'Deactivated'}</td>
         <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}</td>
         <td class="row-actions">
@@ -5748,6 +5760,7 @@ async function loadAndRenderUsers() {
   }).join('');
 }
 
+window.updateUser = updateUser;
 async function updateUser(id, changes) {
   const res = await fetch(`${API}/users/${id}`, {
     method: 'PUT',

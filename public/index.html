@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>DealerDomus</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<!-- Installs to a phone's home screen like an app -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+<meta name="theme-color" content="#1a2b4c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="DealerDomus" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <link rel="stylesheet" href="style.css" />
 <script>
   // Applied before the page renders so there's no flash of the wrong
@@ -300,6 +307,26 @@
         <thead><tr><th><input type="checkbox" id="prAll" aria-label="Select all" /></th><th>Car</th><th>Days</th><th>All-in</th><th>Price</th><th>Market</th><th>% of mkt</th><th>Rank</th><th>Suggested</th><th>Gross</th><th>Auto</th></tr></thead>
         <tbody id="prBody"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- MESSAGES (CRM): every text conversation, like a phone's messages app -->
+  <section id="messagesPanel" class="tab-panel">
+    <div class="msg-layout" id="msgLayout">
+      <aside class="msg-list-pane">
+        <div class="msg-list-head">
+          <div><h2>Messages</h2><div class="audit-note" id="msgMyNumber"></div></div>
+          <div class="view-toggle" id="msgScope" hidden>
+            <button type="button" class="view-toggle-btn active" data-scope="mine">Mine</button>
+            <button type="button" class="view-toggle-btn" data-scope="all">Everyone</button>
+          </div>
+        </div>
+        <input type="search" id="msgSearch" placeholder="Search name or number..." />
+        <div class="msg-list" id="msgList"></div>
+      </aside>
+      <section class="msg-thread-pane" id="msgThreadPane">
+        <div class="msg-empty">Pick a conversation.</div>
+      </section>
     </div>
   </section>
 
@@ -1321,7 +1348,7 @@
     </p>
     <table class="data-table">
       <thead>
-        <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Sign-In</th><th></th></tr>
+        <tr><th>Name</th><th>Email</th><th>Role</th><th title="Their own business number (Twilio). Texts and calls to it land in the CRM.">Direct number</th><th title="Calls to their direct number ring here.">Cell phone</th><th>Status</th><th>Last Sign-In</th><th></th></tr>
       </thead>
       <tbody id="usersTableBody"></tbody>
     </table>
@@ -1743,5 +1770,6 @@
 <script src="docs-ui.js"></script>
 <script src="deal-ui.js"></script>
 <script src="dupes-ui.js"></script>
+<script src="messages-ui.js"></script>
 </body>
 </html>

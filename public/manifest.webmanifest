@@ -1,0 +1,18 @@
+{
+  "name": "DealerDomus",
+  "short_name": "DealerDomus",
+  "description": "The whole store in one system: CRM, desking, inventory, recon, service, and parts.",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1a2b4c",
+  "theme_color": "#1a2b4c",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Messages", "url": "/?view=messages", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

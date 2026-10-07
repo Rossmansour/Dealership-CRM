@@ -26,6 +26,7 @@ const pricing = require('./pricing');
 const duplicates = require('./duplicates');
 const taskplan = require('./taskplan');
 const inspection = require('./inspection');
+const phone = require('./phone');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -55,6 +56,9 @@ if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
 }
 // Tests swap in a pretend Twilio.
 function setSmsClient(client, from = '+15550000000') { twilioClient = client; smsFrom = from; }
+// Texts go out from the employee's own number when they have one, so
+// replies come back to them; otherwise from the store's number.
+const fromNumber = user => (user && user.direct_number) || smsFrom;
 
 // ---------- Photo uploads ----------
 // Uploads are held in memory just long enough to hand to photos.js, which
@@ -209,6 +213,8 @@ app.post('/v/:token/played', (req, res, next) => (async () => {
 
 // A vehicle inspection the customer approves or declines (no sign-in).
 app.use(inspection.publicRouter());
+// Texts customers send to an employee's number or the store's (from Twilio).
+app.use(phone.publicRouter({ createLead: (q, who, fields) => createLead(q, who, fields), publicBase: req => publicBase(req) }));
 
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
@@ -221,12 +227,13 @@ app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
 app.use('/api', taskplan.router());
+app.use('/api', phone.router());
 app.use('/api', inspection.router({
   mediaUpload,
   publicBase: req => publicBase(req),
-  sendSms: async (to, body) => {
+  sendSms: async (to, body, user) => {
     if (!twilioClient) return false;
-    await twilioClient.messages.create({ body, from: smsFrom, to });
+    await twilioClient.messages.create({ body, from: fromNumber(user), to });
     return true;
   },
   present: async (ro, req) => {
@@ -258,7 +265,8 @@ const SERVER_MANAGED_FIELDS = {
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   // Duplicate Leads changes through /duplicate and /duplicates.
   // Photos and videos sent to the customer change through /media and /send-text.
-  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf', 'media'],
+  // Unread texts and texting opt-outs come from the texts themselves.
+  leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf', 'media', 'unreadTexts', 'smsOptOut'],
   deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
@@ -1130,6 +1138,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
   const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
   if (!lead.phone) return res.status(400).json({ error: 'This lead has no phone number on file.' });
+  if (lead.smsOptOut) return res.status(400).json({ error: `${lead.name} texted STOP, so they can't be texted until they text START.` });
 
   const { text, photoPath } = req.body;
   const mediaIds = Array.isArray(req.body.mediaIds) ? req.body.mediaIds.map(String).slice(0, 10) : [];
@@ -1157,7 +1166,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
   try {
     const links = videos.map(v => `${publicBase(req)}/v/${v.token}`);
     const body = [text || '', ...links].filter(Boolean).join('\n');
-    const messagePayload = { body, from: smsFrom, to: lead.phone };
+    const messagePayload = { body, from: fromNumber(req.user), to: lead.phone };
     // Picture texts need full, publicly reachable URLs.
     const mediaUrl = [...(photoPath ? [photoPath] : []), ...pics.map(p => p.url)].map(u => photos.publicPhotoUrl(u, req));
     if (mediaUrl.length) messagePayload.mediaUrl = mediaUrl;
@@ -1174,7 +1183,7 @@ app.post('/api/leads/:id/send-text', wrap(async (req, res) => {
       date: new Date().toISOString(),
       by: { id: req.user.id, name: req.user.name },
       // For the Conversation view: what was actually sent, and which way.
-      direction: 'out', message: text || '', photo: photoPath || (pics[0] && pics[0].url) || null,
+      direction: 'out', message: text || '', photo: photoPath || (pics[0] && pics[0].url) || null, from: messagePayload.from,
       photos: [...(photoPath ? [photoPath] : []), ...pics.map(p => p.url)],
       videos: videos.map(v => ({ id: v.id, url: v.url, token: v.token }))
     };
