@@ -256,10 +256,12 @@ function renderRoDetail() {
 
         <div id="roJobs">${ro.jobs.map((j, i) => renderJob(j, i))}</div>
         ${edit ? html`<button type="button" class="btn-secondary" id="roAddJobBtn">+ Add job</button>` : ''}
+        ${isNew ? '' : html`<div class="ro-card insp-card" id="roInspection"></div>`}
       </div>
       <aside class="ro-side" id="roTotals"></aside>
     </div>`;
   renderRoTotals();
+  if (!isNew) renderInspection();
   if (isNew) renderWhoPicker();
   if (edit && typeof attachRoPartPickers === 'function') attachRoPartPickers();
 }
@@ -408,6 +410,135 @@ async function loadTheirVehicles(leadId) {
     markRoDirty();
   };
 }
+
+// ----- Inspection: checklist, photos, prices, and the customer's answers -----
+
+const INSP_STATUS = [['ok', 'Good'], ['soon', 'Soon'], ['now', 'Now']];
+const inspOpen = () => currentRO && RO_OPEN.includes(currentRO.status);
+const canInspect = () => canWriteRO() || isTechUser();
+const inspPrice = i => (Number(i.hours) || 0) * (Number(serviceCfg && serviceCfg.customerLaborRate) || 0) + (Number(i.parts) || 0);
+
+function renderInspection() {
+  const el = document.getElementById('roInspection');
+  if (!el) return;
+  const insp = currentRO.inspection;
+  if (!insp) {
+    el.innerHTML = html`<div class="ro-card-title">Inspection</div>
+      ${inspOpen() && canInspect() ? html`<p class="audit-note">Go down the checklist -- tires, brakes, fluids, and more -- with photos and videos, then send it to the customer to approve the work.</p>
+        <button type="button" class="btn-primary btn-small" data-insp="start">Start inspection</button>` : html`<p class="audit-note">No inspection on this RO.</p>`}`;
+    return;
+  }
+  const edit = inspOpen() && canInspect();
+  const price = inspOpen() && canWriteRO();
+  const items = insp.items;
+  const count = s => items.filter(i => i.status === s).length;
+  const recommended = items.filter(i => i.status === 'soon' || i.status === 'now');
+  const approved = recommended.filter(i => i.decision === 'approved');
+  const sections = [...new Set(items.map(i => i.section))];
+  const sentLine = insp.sentAt ? `Sent ${shortWhen(insp.sentAt)}${insp.viewedAt ? ` · opened ${shortWhen(insp.viewedAt)}` : ' · not opened yet'}${insp.decidedAt ? ` · answered ${shortWhen(insp.decidedAt)}` : ''}` : 'Not sent yet';
+  el.innerHTML = html`
+    <div class="insp-head">
+      <div class="ro-card-title">Inspection</div>
+      <span class="insp-count insp-now">● ${count('now')} now</span><span class="insp-count insp-soon">● ${count('soon')} soon</span><span class="insp-count insp-ok">● ${count('ok')} good</span>
+      <span class="insp-count">${items.filter(i => !i.status).length} not checked</span>
+    </div>
+    <div class="insp-send">
+      <span class="audit-note">${sentLine}${recommended.length ? ` · recommended ${svcMoney(recommended.reduce((s, i) => s + inspPrice(i), 0))}` : ''}${approved.length ? ` · approved ${svcMoney(approved.reduce((s, i) => s + inspPrice(i), 0))}` : ''}</span>
+      ${inspOpen() && canWriteRO() && currentRO.leadId ? html`<button type="button" class="btn-primary btn-small" data-insp="send">${insp.sentAt ? 'Send again' : 'Send to customer'}</button>` : ''}
+    </div>
+    <div class="insp-link" id="inspLink" hidden></div>
+    ${sections.map(sec => html`<div class="insp-section"><div class="insp-section-name">${sec}</div>
+      ${items.filter(i => i.section === sec).map(i => html`
+        <div class="insp-item insp-${i.status || 'none'}" data-item="${i.id}">
+          <div class="insp-row">
+            <span class="insp-name">${i.name}</span>
+            <span class="insp-pills">${INSP_STATUS.map(([s, label]) => html`<button type="button" class="insp-pill insp-pill-${s} ${i.status === s ? 'on' : ''}" data-status="${s}" ${edit && !i.decision ? '' : html`disabled`}>${label}</button>`)}</span>
+          </div>
+          ${i.status ? html`<div class="insp-detail">
+            <input type="text" class="insp-note" data-field="note" value="${i.note || ''}" placeholder="${i.status === 'ok' ? 'Note (optional)' : 'What did you find? e.g. 3/32 tread, cracked'}" ${edit && !i.decision ? '' : html`disabled`} />
+            ${i.status !== 'ok' ? html`<span class="insp-price">
+              <label>Hours <input type="number" min="0" step="0.1" data-field="hours" value="${i.hours || ''}" ${price && !i.decision ? '' : html`disabled`} /></label>
+              <label>Parts $ <input type="number" min="0" step="1" data-field="parts" value="${i.parts || ''}" ${price && !i.decision ? '' : html`disabled`} /></label>
+              <strong>${svcMoney(inspPrice(i))}</strong></span>` : ''}
+            <div class="insp-media">
+              ${(i.media || []).map(m => html`<span class="insp-thumb">${m.kind === 'photo' ? html`<a href="${m.url}" target="_blank" rel="noopener"><img src="${photoThumb(m.url, 64, 48)}" alt="" /></a>` : html`<a href="${m.url}" target="_blank" rel="noopener" class="insp-vid">🎥</a>`}
+                ${edit && !i.decision ? html`<button type="button" data-insp-remove="${m.id}" aria-label="Remove" title="Remove">✕</button>` : ''}</span>`)}
+              ${edit && !i.decision ? html`<label class="btn-secondary btn-small insp-add-media">📷 Photo / video<input type="file" accept="image/*,video/*" capture="environment" data-insp-file hidden /></label>` : ''}
+            </div>
+            ${i.decision ? html`<div class="insp-decision insp-${i.decision}">${i.decision === 'approved' ? '✓ Customer approved -- added as a job' : 'Customer declined'} · ${shortWhen(i.decidedAt)}</div>` : ''}
+          </div>` : ''}
+        </div>`)}
+    </div>`)}
+    ${edit ? html`<div class="insp-add"><input type="text" id="inspNewItem" placeholder="Add an item, e.g. Windshield chip" /><button type="button" class="btn-secondary btn-small" data-insp="add">Add</button></div>` : ''}`;
+}
+
+// Inspection changes save right away (separately from the RO's Save).
+async function inspCall(path, method, body, isForm = false) {
+  try {
+    const res = await fetch(`${API}/service/ros/${currentRO.id}/inspection${path}`, isForm ? { method, body } : { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const saved = await svcJson(res);
+    const data = saved.ro || saved;
+    currentRO.inspection = data.inspection;
+    const i = serviceROs.findIndex(r => r.id === data.id);
+    if (i >= 0) serviceROs[i] = { ...serviceROs[i], inspection: data.inspection };
+    renderInspection();
+    return saved;
+  } catch (err) { alert(err.message); return null; }
+}
+
+document.getElementById('roDetailView').addEventListener('click', async (e) => {
+  const t = e.target;
+  if (!t.closest('#roInspection')) return;
+  const act = t.closest('[data-insp]');
+  if (act && act.dataset.insp === 'start') return inspCall('', 'POST');
+  if (act && act.dataset.insp === 'add') {
+    const name = document.getElementById('inspNewItem').value.trim();
+    if (name) await inspCall('/items', 'POST', { name, section: 'Other' });
+    return;
+  }
+  if (act && act.dataset.insp === 'send') {
+    if (roDirty && !confirm('Send the inspection? (Your other unsaved changes on this RO stay unsaved.)')) return;
+    act.disabled = true;
+    const r = await inspCall('/send', 'POST');
+    if (r) {
+      const box = document.getElementById('inspLink');
+      box.hidden = false;
+      box.innerHTML = html`${r.texted ? '✓ Texted to the customer.' : r.textError ? `Couldn't text it (${r.textError}).` : 'Texting isn\'t set up -- send them this link:'}
+        <input type="text" readonly value="${r.link}" onclick="this.select()" /> <button type="button" class="btn-secondary btn-small" onclick="navigator.clipboard && navigator.clipboard.writeText(${js(r.link)})">Copy</button>`;
+    }
+    return;
+  }
+  const itemEl = t.closest('[data-item]');
+  if (!itemEl) return;
+  const pill = t.closest('[data-status]');
+  if (pill) {
+    const item = currentRO.inspection.items.find(i => i.id === itemEl.dataset.item);
+    return inspCall(`/items/${item.id}`, 'PUT', { status: item.status === pill.dataset.status ? '' : pill.dataset.status });
+  }
+  const rm = t.closest('[data-insp-remove]');
+  if (rm) return inspCall(`/items/${itemEl.dataset.item}/media/${rm.dataset.inspRemove}`, 'DELETE');
+}, true);
+
+document.getElementById('roDetailView').addEventListener('change', async (e) => {
+  const t = e.target;
+  const itemEl = t.closest && t.closest('#roInspection [data-item]');
+  if (!itemEl) return;
+  if (t.matches('[data-insp-file]') && t.files.length) {
+    for (const file of [...t.files]) {
+      const form = new FormData();
+      form.append('file', file);
+      itemEl.querySelector('.insp-add-media').textContent = 'Uploading…';
+      await inspCall(`/items/${itemEl.dataset.item}/media`, 'POST', form, true);
+    }
+    return;
+  }
+  if (t.dataset.field) {
+    const v = t.dataset.field === 'note' ? t.value : Number(t.value) || 0;
+    await inspCall(`/items/${itemEl.dataset.item}`, 'PUT', { [t.dataset.field]: v });
+  }
+}, true);
+// Typing in the inspection isn't an unsaved RO edit.
+document.getElementById('roDetailView').addEventListener('input', (e) => { if (e.target.closest && e.target.closest('#roInspection')) e.stopImmediatePropagation(); }, true);
 
 // ----- Editing -----
 
