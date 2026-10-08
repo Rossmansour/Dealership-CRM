@@ -1066,6 +1066,29 @@ app.post('/api/leads/:id/roadmap', wrap(async (req, res) => {
   res.json(saved);
 }));
 
+// @mentions: "@Full Name" (or "@First" when only one person here has that
+// first name) of anyone active at the store notifies them.
+async function findMentions(q, dealershipId, text) {
+  let rest = String(text || '');
+  if (!rest.includes('@')) return [];
+  const { rows } = await q.query('SELECT id::text AS id, name FROM users WHERE dealership_id = $1 AND active', [dealershipId]);
+  const esc = v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const found = [];
+  const take = (u, word) => {
+    const re = new RegExp(`@${esc(word)}(?![\\w'-])`, 'i');
+    if (!re.test(rest)) return;
+    rest = rest.replace(re, ' ');
+    if (!found.some(f => f.id === u.id)) found.push({ id: u.id, name: u.name });
+  };
+  // Longest names first, so "@Ann Marie Lee" isn't read as "@Ann".
+  for (const u of rows.slice().sort((a, b) => b.name.length - a.name.length)) take(u, u.name.trim());
+  for (const u of rows) {
+    const first = u.name.trim().split(/\s+/)[0];
+    if (rows.filter(o => o.name.trim().split(/\s+/)[0].toLowerCase() === first.toLowerCase()).length === 1) take(u, first);
+  }
+  return found;
+}
+
 app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   const { type, text } = req.body;
   if (!text) return res.status(400).json({ error: 'text is required' });
@@ -1080,8 +1103,20 @@ app.post('/api/leads/:id/activities', wrap(async (req, res) => {
   // A call, text, or email where they actually talked back (moves the
   // customer from Attempted to Engaged on the Sales Pipeline).
   if (['call', 'text', 'email'].includes(activity.type) && (req.body.reached === true || req.body.reached === 'true')) activity.reached = true;
+  const mentions = await findMentions(store.pool, req.dealershipId, activity.text);
+  if (mentions.length) activity.mentions = mentions;
   const found = await addLeadActivity(req, req.params.id, activity);
   if (!found) return res.status(404).json({ error: 'Lead not found' });
+  if (mentions.length) {
+    await store.tx(async q => {
+      const lead = await store.get(q, 'leads', req.dealershipId, req.params.id);
+      await alerts.notify(q, {
+        dealershipId: req.dealershipId, type: 'mentioned', userIds: mentions.map(m => m.id), actorId: req.user.id,
+        title: `${req.user.name} mentioned you on ${lead ? lead.name : 'a customer'}`, body: activity.text.slice(0, 300),
+        link: { kind: 'lead', id: req.params.id }
+      });
+    });
+  }
   // That touch finishes the customer's planned task for today.
   await store.tx(q => taskplan.completeByTouch(q, req, req.params.id, activity));
   res.status(201).json(activity);

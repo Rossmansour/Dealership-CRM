@@ -3791,6 +3791,67 @@ leadProfileModal.addEventListener('change', (e) => {
   if (input && input.files.length) { uploadAttachments(input.dataset.attach, [...input.files]); input.value = ''; }
 });
 
+// ---------- @mentions ----------
+// Typing @ in a note lists coworkers; picking one puts "@Their Name" in the
+// note, and saving it alerts them.
+function attachMentions(box) {
+  const menu = document.createElement('div');
+  menu.className = 'mention-menu';
+  menu.hidden = true;
+  box.insertAdjacentElement('afterend', menu);
+  box.parentElement.classList.add('mention-host');
+  let matches = [], pick = 0, start = -1;
+  const close = () => { menu.hidden = true; matches = []; };
+  const draw = () => {
+    menu.innerHTML = matches.map((u, i) => html`<button type="button" class="${i === pick ? 'active' : ''}" data-mention="${i}">
+      <span class="msg-avatar">${initials(u.name)}</span><span>${u.name}<small>${u.roleLabel || ''}</small></span></button>`).join('');
+    menu.hidden = !matches.length;
+    // Floats over everything, just under the box.
+    const r = box.getBoundingClientRect();
+    menu.style.left = `${r.left + 8}px`;
+    menu.style.top = `${r.bottom + 4}px`;
+  };
+  const choose = (u) => {
+    const caret = box.selectionStart;
+    box.value = `${box.value.slice(0, start)}@${u.name} ${box.value.slice(caret)}`;
+    const at = start + u.name.length + 2;
+    box.setSelectionRange(at, at);
+    box.focus();
+    close();
+  };
+  box.addEventListener('input', () => {
+    const before = box.value.slice(0, box.selectionStart);
+    const m = before.match(/(^|\s)@([^\s@]{0,20}(?: [^\s@]{0,20})?)$/);
+    if (!m) return close();
+    start = before.length - m[2].length - 1;
+    const q = m[2].toLowerCase();
+    matches = staffList.filter(u => u.id !== (currentUser && currentUser.id) &&
+      (u.name.toLowerCase().startsWith(q) || u.name.toLowerCase().split(/\s+/).some(w => w.startsWith(q)))).slice(0, 6);
+    pick = 0;
+    draw();
+  });
+  box.addEventListener('keydown', (e) => {
+    if (menu.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); pick = (pick + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length; draw(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(matches[pick]); }
+    else if (e.key === 'Escape') close();
+  });
+  box.addEventListener('blur', () => setTimeout(close, 150));
+  menu.addEventListener('mousedown', (e) => {
+    const b = e.target.closest('[data-mention]');
+    if (b) { e.preventDefault(); choose(matches[Number(b.dataset.mention)]); }
+  });
+}
+
+// A logged note with the people it mentions highlighted.
+function withMentions(a) {
+  const names = (a.mentions || []).map(m => m.name).sort((x, y) => y.length - x.length);
+  if (!names.length) return a.text;
+  const esc = v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(@(?:${names.map(esc).join('|')}|${names.map(n => esc(n.split(/\s+/)[0])).join('|')}))(?![\\w'-])`, 'gi');
+  return String(a.text).split(re).map((part, i) => i % 2 ? html`<span class="mention">${part}</span>` : html`${part}`);
+}
+
 function renderComposer() {
   document.querySelectorAll('#cpComposerTabs button').forEach(b => b.classList.toggle('active', b.dataset.kind === cpComposerKind));
   const el = document.getElementById('cpComposer');
@@ -3828,7 +3889,7 @@ function renderComposer() {
       <button type="button" class="link-btn cp-log-instead" onclick="cpLogVideoInstead = true; renderComposer()">Sent it another way? Log it instead</button>`;
   } else {
     const prompts = {
-      note: 'Type a note about this customer...',
+      note: 'Type a note about this customer... (type @ to notify a coworker)',
       call: 'How did the call go? e.g. Left voicemail about financing',
       email: 'What did you email them? (logged here -- sending email from the CRM comes later)',
       video: 'What was the video? e.g. Walkaround of the Tacoma, sent by text (recording in the CRM comes later)'
@@ -3840,6 +3901,7 @@ function renderComposer() {
         <span class="cp-composer-status" id="cpNoteStatus"></span>
         <button type="button" class="btn-primary btn-small" id="cpNoteSave">${{ note: 'Save Note', call: 'Log Call', email: 'Log Email', video: 'Log Video Sent' }[kind]}</button>
       </div>`;
+    attachMentions(document.getElementById('cpNoteText'));
     document.getElementById('cpNoteSave').onclick = async () => {
       const text = document.getElementById('cpNoteText').value.trim();
       if (!text) return document.getElementById('cpNoteText').focus();
@@ -4073,7 +4135,7 @@ function renderHistory() {
           <span><strong>${ACTIVITY_LABELS[a.type] || 'Note'}</strong>${a.reached ? html` <span class="activity-reached">✓ ${a.type === 'call' ? 'talked' : 'replied'}</span>` : ''}${a.by ? ` · ${a.by.name}` : ''} ·${new Date(a.date).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
           ${canDelete ? html`<button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>` : ''}
         </div>
-        <div class="activity-text">${a.text}</div>
+        <div class="activity-text">${withMentions(a)}</div>
         ${a.recording ? html`<div class="call-recording">
           <audio controls preload="none" src="${API}/leads/${lead.id}/calls/${a.id}/recording"></audio>
           <span class="audit-note">${a.recording.sides === 'employee' ? 'Recording · your side only' : 'Recording'}</span>
