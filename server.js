@@ -226,6 +226,7 @@ app.use('/api', dashboard.router);
 app.use('/api', service.router);
 app.use('/api', parts.router);
 app.use('/api', require('./accounting-api').router); // Accounting Domus
+app.use('/api', require('./insight').router); // Insight Domus
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));

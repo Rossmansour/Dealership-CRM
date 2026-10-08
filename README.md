@@ -17,7 +17,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 
 ## Features
 
-DealerDomus is made of modules, each named as its own product so stores can buy the whole thing or just the pieces they need: **CRM Domus** (customers and leads), **Desk Domus** (deals, desking, F&I), **Inventory Domus** (inventory, appraisals, market pricing), **Recon Domus** (reconditioning, in its own browser tab), **Service Domus**, **Parts Domus**, and **Accounting Domus**. They all share one login and one set of data.
+DealerDomus is made of modules, each named as its own product so stores can buy the whole thing or just the pieces they need: **CRM Domus** (customers and leads), **Desk Domus** (deals, desking, F&I), **Inventory Domus** (inventory, appraisals, market pricing), **Recon Domus** (reconditioning, in its own browser tab), **Service Domus**, **Parts Domus**, **Accounting Domus**, and **Insight Domus**. They all share one login and one set of data.
 
 **Inventory Management**
 - Add, edit, and delete vehicles (make, model, year, VIN, mileage, cost, price)
@@ -184,6 +184,23 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Reorder list**: parts at or below their reorder point, with how many to order
 - **Dashboard → Service & Parts**: parts gross now includes counter sales
 - Techs can look parts up but don't see cost
+
+**Insight Domus** (left sidebar → Insight; admins, GM, sales managers, F&I)
+- Live from the deals, cars, and repair orders -- no overnight pull. Every screen takes a date range (this month by default; quick picks for last month, 30/90 days, this year), prints, and exports CSV
+- **Sales Summary**:
+  - Retail units, new and used, total gross, and front / back / total per vehicle
+  - Each compared to the period before and the same dates last year, with this month's pace and goal
+  - A table split into final and not final, with incentives, chargebacks, and products per deal
+  - The sales log of every deal
+- **Leaderboard**: salespeople (split deals count as shares), sales managers, and F&I managers, with gross, per vehicle, products per deal, leads, and close rate
+- **F&I & Lenders**: back gross and products per deal, penetration for each product (service contract, GAP, maintenance, aftermarket, credit insurance) overall and by F&I manager, and the lender report (deals, amount financed, average APR and term, reserve)
+- **Inventory Analysis**:
+  - Stock list oldest first. Cost and margin show only for roles that manage inventory
+  - Aging buckets, turn, and days of supply
+  - Model pacing: in stock vs sold in 30 / 90 days, which shows what to order and what to stop buying
+  - Wholesale results and cars with open repair orders
+- **Marketing**: sales by ZIP code, by customer age range (from credit applications; birthdates never leave the server), and by lead source, plus leads in and close rate by source
+- **Gross Trend**: the last 12 months against the monthly goals, and year to date
 
 **Accounting Domus** (left sidebar → Accounting; admins, the GM to read, and the new **Office / Accounting** role)
 - **A real general ledger**: a full dealership chart of accounts (cash, contracts in transit, receivables, vehicle and parts inventory, floor plan, payables, sales and cost of sales by department, expenses) that the store can rename and add to. Every entry balances, and nothing is deleted: mistakes are reversed
