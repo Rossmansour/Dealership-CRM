@@ -73,32 +73,8 @@
     <button type="button" class="nav-icon" data-view="partsorders" data-module="parts" title="Special Orders &amp; Reorder" aria-label="Special Orders and Reorder">
       <svg viewBox="0 0 24 24"><path d="M3 5h2l2.2 10.5h10.3L19.5 8H7"/><circle cx="9" cy="19" r="1.5"/><circle cx="16.5" cy="19" r="1.5"/></svg>
     </button>
-    <button type="button" class="nav-icon" data-view="insightstore" data-module="insight" title="Store Summary" aria-label="Store Summary">
-      <svg viewBox="0 0 24 24"><path d="M3.5 9.5L12 4l8.5 5.5"/><path d="M5.5 9v11h13V9"/><path d="M9.5 20v-6h5v6"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightsales" data-module="insight" title="Sales Summary" aria-label="Sales Summary">
+    <button type="button" class="nav-icon" data-view="insight" data-module="insight" title="Insight Domus (opens in a new tab)" aria-label="Insight Domus, opens in a new tab">
       <svg viewBox="0 0 24 24"><path d="M4 20V10M9.5 20V5M15 20v-7M20.5 20V8"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightleaders" data-module="insight" title="Leaderboard" aria-label="Leaderboard">
-      <svg viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20.5h7M10 17h4v3.5h-4z"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightfi" data-module="insight" title="F&amp;I &amp; Lenders" aria-label="F&amp;I and Lenders">
-      <svg viewBox="0 0 24 24"><path d="M5 20V9l7-5 7 5v11z"/><path d="M9 20v-6h6v6"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightinventory" data-module="insight" title="Inventory Analysis" aria-label="Inventory Analysis">
-      <svg viewBox="0 0 24 24"><path d="M4 16.5v-4.2L6.3 7a2 2 0 0 1 1.8-1.2h7.8A2 2 0 0 1 17.7 7L20 12.3v4.2"/><path d="M3 12.5h18v4H3z"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightmarketing" data-module="insight" title="Marketing" aria-label="Marketing">
-      <svg viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightfixed" data-module="insight" title="Service &amp; Parts" aria-label="Service and Parts">
-      <svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insightexpenses" data-module="insight" title="Expenses &amp; Cash" aria-label="Expenses and Cash">
-      <svg viewBox="0 0 24 24"><path d="M3.5 7h17v11h-17z"/><circle cx="12" cy="12.5" r="2.5"/><path d="M6.5 10v5M17.5 10v5"/></svg>
-    </button>
-    <button type="button" class="nav-icon" data-view="insighttrend" data-module="insight" title="Gross Trend" aria-label="Gross Trend">
-      <svg viewBox="0 0 24 24"><path d="M3.5 17l5.5-5.5 4 4 7.5-8"/><path d="M15 7.5h5.5V13"/></svg>
     </button>
     <button type="button" class="nav-icon" data-view="accounting" data-module="accounting" title="Accounting Overview" aria-label="Accounting Overview">
       <svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>
@@ -837,15 +813,6 @@
       <div class="ac-tools" id="acTools"></div>
     </div>
     <div id="acBody"></div>
-  </section>
-
-  <!-- Insight Domus -->
-  <section id="insightPanel" class="tab-panel">
-    <div class="ac-head">
-      <div><h1 id="inTitle">Insight</h1><div class="audit-note" id="inSub"></div></div>
-      <div class="ac-tools" id="inTools"></div>
-    </div>
-    <div id="inBody"></div>
   </section>
 
   <!-- Accounting Domus: one dialog shared by its screens -->
@@ -1861,6 +1828,5 @@
 <script src="dupes-ui.js"></script>
 <script src="messages-ui.js"></script>
 <script src="accounting-ui.js"></script>
-<script src="insight-ui.js"></script>
 </body>
 </html>

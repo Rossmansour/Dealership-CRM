@@ -18,6 +18,11 @@
 //                month will land, and fixed absorption
 //   fixed        service & parts: ROs, hours, effective labor rate, tech
 //                productivity, advisors, parts by sale type, open RO aging
+//   heartbeat    today, live: ups, visits, appointments set and shown, deals
+//                sold, and each salesperson's calls / texts / emails
+//   people       each salesperson's month against the goals a manager sets
+//                for them, with pace, and a one-page review
+//   parts        parts inventory: value, turns, what isn't moving, top sellers
 //   expenses     key expenses by account: 6-month and 3-month averages, this
 //                month, last year; and cash: what's owed to the store and how
 //                old it is, unbooked deals, deposits, we-owes, titles
@@ -149,7 +154,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // Sales reports are for sales and F&I management; the whole-store numbers
 // for the GM; service & parts for fixed ops; expenses and cash for whoever
 // can read the books.
-const PERMISSION = { store: 'viewDashboardStore', fixed: 'viewDashboardFixed', expenses: 'viewAccounting' };
+const PERMISSION = { store: 'viewDashboardStore', fixed: 'viewDashboardFixed', parts: 'viewDashboardFixed', expenses: 'viewAccounting' };
 router.use('/insight/:report', (req, res, next) => auth.requirePermission(PERMISSION[req.params.report] || 'viewAllReports')(req, res, next));
 
 router.get('/insight/sales', wrap(async (req, res) => {
@@ -530,6 +535,179 @@ router.get('/insight/expenses', wrap(async (req, res) => {
   const titlesOpen = data.deals.filter(d => SOLD.includes(d.status) && !((d.titleTracking || {}).dmvSubmitted)).length;
   res.json({ month, months: monthsBack.slice(0, 3).reverse(), lines, totals: { mtd: round2(lines.reduce((s, l) => s + l.mtd, 0)), avg3: round2(lines.reduce((s, l) => s + l.avg3, 0)), lastYear: round2(lines.reduce((s, l) => s + l.lastYear, 0)) },
     schedules, oldestCit, unbooked, titlesOpen });
+}));
+
+// ---------- Heartbeat: today ----------
+
+const SALES_FLOOR = ['salesperson', 'bdc', 'sales_manager'];
+router.get('/insight/heartbeat', wrap(async (req, res) => {
+  const data = await loadAll(req.dealershipId);
+  const tasks = await store.list(store.pool, 'tasks', req.dealershipId);
+  const day = isDay(req.query.date) ? req.query.date : today(data.tz);
+  const r = { start: dayStart(day, data.tz), end: dayStart(addDays(day, 1), data.tz) };
+  const at = iso => (iso ? new Date(iso).getTime() : NaN);
+  const people = new Map();
+  const person = id => {
+    const k = String(id || '');
+    if (!people.has(k)) {
+      const u = data.staff.get(k);
+      people.set(k, { id: k, name: u ? u.name : 'Unassigned', role: u ? u.role : '', ups: 0, calls: 0, texts: 0, emails: 0, visits: 0, apptsDue: 0, shown: 0, sold: 0, talked: 0 });
+    }
+    return people.get(k);
+  };
+  for (const u of data.staff.values()) if (u.active && SALES_FLOOR.includes(u.role)) person(u.id);
+  const ups = data.leads.filter(l => inRange(at(l.dateAdded), r));
+  const bySource = {};
+  for (const l of ups) { person(l.sales1Id).ups++; bySource[l.source || 'other'] = (bySource[l.source || 'other'] || 0) + 1; }
+  let calls = 0, texts = 0, emails = 0, visits = 0;
+  for (const l of data.leads) for (const a of l.activities || []) {
+    if (!inRange(at(a.date), r) || a.direction === 'in' && !a.reached) continue;
+    const x = a.by && a.by.id ? person(a.by.id) : null;
+    if (a.type === 'call') { calls++; if (x) x.calls++; } else if (a.type === 'text' && a.direction !== 'in') { texts++; if (x) x.texts++; } else if (a.type === 'email') { emails++; if (x) x.emails++; } else if (a.type === 'visit') { visits++; if (x) x.visits++; }
+    if (a.reached && x) x.talked++;
+  }
+  const appts = tasks.filter(t => t.type === 'appointment' && inRange(at(t.dueAt), r));
+  for (const t of appts) { const x = person(t.assignedTo && t.assignedTo.id); x.apptsDue++; if (t.status === 'done') x.shown++; }
+  const soldToday = data.sold.filter(s => inRange(s.soldAt, r));
+  for (const s of soldToday) for (const id of s.salespeople) person(id).sold += 1 / s.salespeople.length;
+  // The month so far, for context.
+  const month = summarize(data, { start: dayStart(`${day.slice(0, 7)}-01`, data.tz), end: r.end });
+  const nowMs = Date.now();
+  res.json({
+    date: day, ups: ups.length, bySource, visits, calls, texts, emails,
+    appointments: { due: appts.length, shown: appts.filter(t => t.status === 'done').length, cancelled: appts.filter(t => t.status === 'cancelled').length,
+      waiting: appts.filter(t => t.status === 'open' && at(t.dueAt) > nowMs).length, missed: appts.filter(t => t.status === 'open' && at(t.dueAt) <= nowMs).length },
+    sold: soldToday.length, soldGross: round2(soldToday.reduce((t, s) => t + s.front + s.back + s.incentives, 0)),
+    working: data.deals.filter(d => d.status === 'working').length,
+    month: { units: month.total.units, gross: month.total.gross },
+    people: [...people.values()].map(x => ({ ...x, sold: round2(x.sold) })).sort((a, b) => b.sold - a.sold || b.ups - a.ups || a.name.localeCompare(b.name)),
+    upcoming: appts.filter(t => t.status === 'open').sort((a, b) => at(a.dueAt) - at(b.dueAt)).map(t => ({ id: t.id, time: t.dueAt, customer: t.leadName || '', title: t.title || '', with: t.assignedTo ? t.assignedTo.name : '' }))
+  });
+}));
+
+// ---------- People: goals and reviews ----------
+
+router.get('/insight/people', wrap(async (req, res) => {
+  const data = await loadAll(req.dealershipId);
+  const tasks = await store.list(store.pool, 'tasks', req.dealershipId);
+  const t = today(data.tz);
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : t.slice(0, 7);
+  const [from, to] = dashboard.monthRange(month, data.tz);
+  const r = { start: from, end: to };
+  const days = dashboard.openDays(month, hours.cleanStoreHours(data.settings.storeHours));
+  const factor = month === t.slice(0, 7) && days.elapsed ? days.total / days.elapsed : 1;
+  const goals = ((data.settings.salesGoals || {})[month]) || {};
+  const at = iso => (iso ? new Date(iso).getTime() : NaN);
+  const rows = new Map();
+  const row = id => {
+    const k = String(id);
+    if (!rows.has(k)) {
+      const u = data.staff.get(k);
+      rows.set(k, { id: k, name: u ? u.name : 'Former employee', role: u ? u.role : '', units: 0, new: 0, used: 0, gross: 0, front: 0, back: 0, products: 0,
+        leads: 0, leadsSold: 0, calls: 0, texts: 0, emails: 0, visits: 0, apptsSet: 0, apptsShown: 0, goal: goals[k] || null });
+    }
+    return rows.get(k);
+  };
+  for (const u of data.staff.values()) if (u.active && ['salesperson', 'bdc'].includes(u.role)) row(u.id);
+  for (const s of data.sold) {
+    if (!inRange(s.soldAt, r)) continue;
+    const share = 1 / (s.salespeople.length || 1);
+    for (const id of s.salespeople) {
+      const x = row(id);
+      x.units += share; x[s.type] += share; x.front += s.front * share; x.back += s.back * share; x.gross += (s.front + s.back + s.incentives) * share; x.products += s.productCount * share;
+    }
+  }
+  for (const l of data.leads) {
+    if (l.sales1Id && inRange(at(l.dateAdded), r)) { const x = row(l.sales1Id); x.leads++; if (data.sold.some(s => s.leadId === l.id)) x.leadsSold++; }
+    for (const a of l.activities || []) {
+      if (!a.by || !a.by.id || !inRange(at(a.date), r) || !rows.has(String(a.by.id))) continue;
+      const x = rows.get(String(a.by.id));
+      if (a.type === 'call') x.calls++; else if (a.type === 'text' && a.direction !== 'in') x.texts++; else if (a.type === 'email') x.emails++; else if (a.type === 'visit') x.visits++;
+    }
+  }
+  for (const tk of tasks) {
+    if (tk.type !== 'appointment' || !tk.assignedTo || !rows.has(String(tk.assignedTo.id)) || !inRange(at(tk.dueAt), r)) continue;
+    const x = rows.get(String(tk.assignedTo.id));
+    x.apptsSet++; if (tk.status === 'done') x.apptsShown++;
+  }
+  const out = [...rows.values()].map(x => {
+    const units = round2(x.units), gross = round2(x.gross);
+    const goalUnits = x.goal && x.goal.units !== undefined ? n(x.goal.units) : null, goalGross = x.goal && x.goal.gross !== undefined ? n(x.goal.gross) : null;
+    return {
+      ...x, units, new: round2(x.new), used: round2(x.used), gross, front: round2(x.front), back: round2(x.back),
+      pvr: units ? round2(gross / units) : null, productsPerDeal: units ? round2(x.products / units) : null,
+      closeRate: x.leads ? round2(x.leadsSold / x.leads * 100) : null, showRate: x.apptsSet ? round2(x.apptsShown / x.apptsSet * 100) : null,
+      pace: { units: round2(units * factor), gross: round2(gross * factor) },
+      goal: { units: goalUnits, gross: goalGross },
+      toGoal: { units: goalUnits ? round2(units / goalUnits * 100) : null, gross: goalGross ? round2(gross / goalGross * 100) : null }
+    };
+  }).sort((a, b) => b.units - a.units || a.name.localeCompare(b.name));
+  res.json({ month, pace: { elapsed: days.elapsed, total: days.total }, canSetGoals: auth.can(req.user, 'manageRotation'), people: out });
+}));
+
+// Managers set each salesperson's goals for a month.
+router.put('/insight/goals', auth.requirePermission('manageRotation'), wrap(async (req, res) => {
+  const b = req.body || {};
+  if (!/^\d{4}-\d{2}$/.test(b.month || '')) return res.status(400).json({ error: 'Pick the month.' });
+  const saved = await store.tx(async q => {
+    const { rows } = await q.query('SELECT settings FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
+    const settings = rows[0].settings || {};
+    const all = { ...(settings.salesGoals || {}) };
+    const month = { ...(all[b.month] || {}) };
+    const { rows: staff } = await q.query('SELECT id::text AS id FROM users WHERE dealership_id = $1', [req.dealershipId]);
+    const ids = new Set(staff.map(u => u.id));
+    for (const [id, g] of Object.entries(b.goals || {})) {
+      if (!ids.has(String(id))) continue;
+      const units = g && g.units !== '' && g.units !== null && g.units !== undefined ? Math.max(0, n(g.units)) : undefined;
+      const gross = g && g.gross !== '' && g.gross !== null && g.gross !== undefined ? Math.max(0, round2(String(g.gross).replace(/[$,\s]/g, ''))) : undefined;
+      if (units === undefined && gross === undefined) delete month[id];
+      else month[id] = { ...(units !== undefined ? { units } : {}), ...(gross !== undefined ? { gross } : {}) };
+    }
+    all[b.month] = month;
+    await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, salesGoals: all }]);
+    await require('./audit').record(q, req, { action: 'update', entityType: 'settings', entityId: `goals-${b.month}`, label: `Sales goals ${b.month}`, details: `${Object.keys(b.goals || {}).length} people` });
+    return month;
+  });
+  res.json(saved);
+}));
+
+// ---------- Parts inventory ----------
+
+router.get('/insight/parts', wrap(async (req, res) => {
+  const [parts, moves] = await Promise.all([store.list(store.pool, 'parts', req.dealershipId), store.list(store.pool, 'part_moves', req.dealershipId)]);
+  const now = Date.now();
+  const live = parts.filter(p => !p.inactive);
+  const value = p => Math.max(0, n(p.onHand)) * n(p.cost);
+  // What went out (used on ROs or sold) in the last year and 90 days.
+  const out = new Map();
+  for (const m of moves) {
+    if (!['ro', 'ticket'].includes(m.type)) continue;
+    const ago = (now - new Date(m.at).getTime()) / DAY;
+    if (ago > 365) continue;
+    if (!out.has(m.partId)) out.set(m.partId, { qty365: 0, cost365: 0, qty90: 0 });
+    const x = out.get(m.partId);
+    x.qty365 += Math.abs(n(m.qty)); x.cost365 += Math.abs(n(m.qty)) * n(m.cost); if (ago <= 90) x.qty90 += Math.abs(n(m.qty));
+  }
+  const lastOut = new Map();
+  for (const m of moves) if (['ro', 'ticket'].includes(m.type)) { const t = new Date(m.at).getTime(); if (!lastOut.has(m.partId) || t > lastOut.get(m.partId)) lastOut.set(m.partId, t); }
+  const rows = live.map(p => {
+    const o = out.get(p.id) || { qty365: 0, cost365: 0, qty90: 0 };
+    const last = lastOut.get(p.id) || (p.lastSoldAt ? new Date(p.lastSoldAt).getTime() : null);
+    return { id: p.id, number: p.number, description: p.description || '', bin: p.bin || '', onHand: n(p.onHand), cost: n(p.cost), value: round2(value(p)),
+      sold365: round2(o.qty365), sold90: round2(o.qty90), costSold365: round2(o.cost365), daysSinceSale: last ? Math.floor((now - last) / DAY) : null,
+      monthsSupply: o.qty90 ? round2(n(p.onHand) / (o.qty90 / 3)) : null };
+  });
+  const stockValue = round2(rows.reduce((t, x) => t + x.value, 0));
+  const costSold = round2(rows.reduce((t, x) => t + x.costSold365, 0));
+  const idle = days => rows.filter(x => x.onHand > 0 && (x.daysSinceSale === null || x.daysSinceSale > days));
+  const sum = list => round2(list.reduce((t, x) => t + x.value, 0));
+  res.json({
+    skus: rows.length, onHandSkus: rows.filter(x => x.onHand > 0).length, value: stockValue, costSold365: costSold, turns: stockValue ? round2(costSold / stockValue) : null,
+    idle: [[90, 'No sale in 90+ days'], [180, 'No sale in 180+ days'], [365, 'No sale in a year']].map(([d, label]) => ({ days: d, label, skus: idle(d).length, value: sum(idle(d)) })),
+    oldest: idle(180).sort((a, b) => b.value - a.value).slice(0, 25),
+    topSellers: rows.filter(x => x.sold90).sort((a, b) => b.sold90 - a.sold90).slice(0, 15),
+    overstock: rows.filter(x => x.monthsSupply !== null && x.monthsSupply > 6).sort((a, b) => b.value - a.value).slice(0, 15)
+  });
 }));
 
 module.exports = { router, ageBand };

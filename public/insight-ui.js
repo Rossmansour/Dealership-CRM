@@ -47,7 +47,7 @@ async function openInsightView(view) {
   ins.view = view;
   inBody().innerHTML = html`<p class="audit-note">Loading…</p>`;
   try {
-    await ({ insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
+    await ({ insightheartbeat: inHeartbeat, insightpeople: inPeople, insightparts: inParts, insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
   } catch (err) { inBody().innerHTML = html`<p class="ac-error">${err.message}</p>`; }
 }
 
@@ -338,6 +338,103 @@ async function inExpenses() {
     </div>`;
 }
 
+// ---------- Heartbeat: today ----------
+
+ins.day = '';
+async function inHeartbeat() {
+  const b = await inGet(`/insight/heartbeat${ins.day ? `?date=${ins.day}` : ''}`);
+  const isToday = b.date === inDay(0);
+  inHead('Heartbeat', `${isToday ? 'Today' : new Date(`${b.date}T12:00`).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}, live. ${b.month.units} sold this month · ${inMoney(b.month.gross)} gross.`, {
+    range: false, extra: html`<input type="date" id="inDayPick" value="${b.date}" /><button type="button" class="btn-secondary" data-in-refresh>↻ Refresh</button>`
+  });
+  ins.last = { name: `heartbeat-${b.date}`, rows: [['Person', 'Ups', 'Calls', 'Texts', 'Emails', 'Talked with', 'Visits', 'Appts due', 'Shown', 'Sold'],
+    ...b.people.map(p => [p.name, p.ups, p.calls, p.texts, p.emails, p.talked, p.visits, p.apptsDue, p.shown, p.sold])] };
+  const card = (label, value, sub) => html`<div class="ac-card"><span class="ac-card-label">${label}</span><span class="ac-card-value">${value}</span>${sub ? html`<span class="ac-card-sub">${sub}</span>` : ''}</div>`;
+  const label = s => (typeof formatSource === 'function' ? formatSource(s) : s);
+  const maxSold = Math.max(0, ...b.people.map(p => p.sold));
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small">
+      ${card('Ups', b.ups, Object.entries(b.bySource).map(([k, v]) => `${label(k)} ${v}`).join(' · ') || 'New customers today')}
+      ${card('Showroom visits', b.visits)}
+      ${card('Appointments', `${b.appointments.shown} / ${b.appointments.due}`, `shown · ${b.appointments.waiting} still coming${b.appointments.missed ? ` · ${b.appointments.missed} missed` : ''}`)}
+      ${card('Sold', b.sold, b.sold ? `${inMoney(b.soldGross)} gross` : '')}
+      ${card('Calls · texts · emails', `${b.calls} · ${b.texts} · ${b.emails}`)}
+      ${card('Deals working', b.working)}
+    </div>
+    <div>
+      <div class="ac-box in-scroll"><div class="ca-section-title">The floor</div>
+        <table class="data-table ac-table"><thead><tr><th>Person</th><th class="num">Ups</th><th class="num">Calls</th><th class="num">Texts</th><th class="num">Emails</th><th class="num">Talked</th><th class="num">Visits</th><th class="num">Appts</th><th>Sold</th></tr></thead><tbody>
+          ${b.people.map(p => html`<tr><td><strong>${p.name}</strong></td><td class="num">${p.ups}</td><td class="num">${p.calls}</td><td class="num">${p.texts}</td><td class="num">${p.emails}</td><td class="num">${p.talked}</td><td class="num">${p.visits}</td>
+            <td class="num">${p.apptsDue ? `${p.shown}/${p.apptsDue}` : '--'}</td><td class="in-bar-cell"><span class="in-bar-num">${inNum(p.sold)}</span>${inBar(p.sold, maxSold, `${inNum(p.sold)} sold`)}</td></tr>`)}</tbody></table></div>
+      <div class="ac-box"><div class="ca-section-title">Appointments still coming</div>
+        ${b.upcoming.length ? html`<table class="data-table ac-table"><tbody>${b.upcoming.map(a => html`<tr><td><strong>${new Date(a.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong></td><td>${a.customer}<div class="audit-note">${a.title}</div></td><td>${a.with}</td></tr>`)}</tbody></table>`
+          : html`<p class="audit-note">No more appointments ${isToday ? 'today' : 'that day'}.</p>`}</div>
+    </div>`;
+}
+
+// ---------- People: goals and reviews ----------
+
+async function inPeople() {
+  const p = await inGet(`/insight/people${ins.month ? `?month=${ins.month}` : ''}`);
+  inHead('People & Goals', `${p.month} · ${p.pace.elapsed} of ${p.pace.total} open days gone. Split deals count as shares.`, {
+    range: false, extra: html`${inMonthPicker()}${p.canSetGoals ? html`<button type="button" class="btn-primary" data-in-goals>Set goals</button>` : ''}`
+  });
+  ins.people = p;
+  ins.last = { name: `people-${p.month}`, rows: [['Person', 'Units', 'Goal units', '% to goal', 'Paced units', 'Gross', 'Goal gross', 'Per vehicle', 'Products / deal', 'Leads', 'Close %', 'Calls', 'Texts', 'Emails', 'Visits', 'Appts set', 'Shown'],
+    ...p.people.map(x => [x.name, x.units, x.goal.units ?? '', x.toGoal.units ?? '', x.pace.units, x.gross, x.goal.gross ?? '', x.pvr ?? '', x.productsPerDeal ?? '', x.leads, x.closeRate ?? '', x.calls, x.texts, x.emails, x.visits, x.apptsSet, x.apptsShown])] };
+  const meter = (v, goal, money) => (goal ? html`<div class="in-goalmeter" title="${money ? inMoney(v) : inNum(v)} of ${money ? inMoney(goal) : inNum(goal)}"><span style="width:${Math.min(100, Math.max(0, Math.round(v / goal * 100)))}%"></span></div>` : '');
+  inBody().innerHTML = html`<div class="in-people">${p.people.length ? p.people.map(x => html`<div class="ac-box in-person">
+      <div class="in-person-head"><span class="msg-avatar">${x.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('')}</span><div><strong>${x.name}</strong><div class="audit-note">${x.role === 'bdc' ? 'BDC' : 'Sales'}</div></div></div>
+      <div class="in-person-goal"><span>Units</span><strong>${inNum(x.units)}${x.goal.units ? html` <span class="audit-note">of ${x.goal.units}</span>` : ''}</strong></div>
+      ${meter(x.units, x.goal.units)}
+      <div class="in-person-goal"><span>Gross</span><strong>${inMoney(x.gross)}${x.goal.gross ? html` <span class="audit-note">of ${inMoney(x.goal.gross)}</span>` : ''}</strong></div>
+      ${meter(x.gross, x.goal.gross, true)}
+      <div class="in-person-grid">
+        <span>Pace</span><strong>${inNum(x.pace.units)} units</strong>
+        <span>Per vehicle</span><strong>${inMoney(x.pvr)}</strong>
+        <span>Products / deal</span><strong>${inNum(x.productsPerDeal)}</strong>
+        <span>Leads · close</span><strong>${x.leads} · ${inPct(x.closeRate)}</strong>
+        <span>Appts set · shown</span><strong>${x.apptsSet} · ${x.apptsShown}${x.showRate !== null ? ` (${inPct(x.showRate)})` : ''}</strong>
+        <span>Calls · texts · emails</span><strong>${x.calls} · ${x.texts} · ${x.emails}</strong>
+        <span>Visits logged</span><strong>${x.visits}</strong>
+      </div></div>`) : html`<p class="audit-note">No salespeople or BDC agents yet.</p>`}</div>`;
+}
+
+function inGoalsForm() {
+  const p = ins.people;
+  const box = document.getElementById('inModal');
+  box.querySelector('.modal-content').innerHTML = String(html`<h2>Goals for ${p.month}</h2>
+    <form id="inGoalsForm"><table class="data-table ac-table"><thead><tr><th>Person</th><th>Units</th><th>Gross</th></tr></thead><tbody>
+      ${p.people.map(x => html`<tr><td>${x.name}</td><td><input type="number" min="0" step="0.5" name="u-${x.id}" value="${x.goal.units ?? ''}" class="ac-input-num" /></td><td><input type="number" min="0" step="100" name="g-${x.id}" value="${x.goal.gross ?? ''}" class="ac-input-num" /></td></tr>`)}</tbody></table>
+      <div class="modal-actions"><button type="button" class="btn-secondary" data-in-close>Cancel</button><button type="submit" class="btn-primary">Save goals</button></div></form>`);
+  box.classList.add('active');
+}
+
+// ---------- Parts inventory ----------
+
+async function inParts() {
+  const p = await inGet('/insight/parts');
+  inHead('Parts Inventory', 'What the shelf is worth, how fast it turns, and what isn\'t moving.', { range: false });
+  ins.last = { name: 'parts-not-moving', rows: [['Part #', 'Description', 'Bin', 'On hand', 'Value', 'Days since sale'], ...p.oldest.map(x => [x.number, x.description, x.bin, x.onHand, x.value, x.daysSinceSale ?? 'never'])] };
+  const maxIdle = Math.max(0, ...p.idle.map(i => i.value));
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small">
+      <div class="ac-card"><span class="ac-card-label">Stock value</span><span class="ac-card-value">${inMoney(p.value)}</span><span class="ac-card-sub">${p.onHandSkus} of ${p.skus} parts on hand</span></div>
+      <div class="ac-card"><span class="ac-card-label">Turns</span><span class="ac-card-value">${inNum(p.turns)}×</span><span class="ac-card-sub">A year of cost sold ÷ stock value</span></div>
+      <div class="ac-card"><span class="ac-card-label">Cost sold, 12 months</span><span class="ac-card-value">${inMoney(p.costSold365)}</span></div>
+    </div>
+    <div class="ac-box"><div class="ca-section-title">Not moving</div>
+      ${p.idle.map(i => html`<div class="in-pen"><span>${i.label}</span>${inBar(i.value, maxIdle, inMoney(i.value))}<strong>${i.skus} parts · ${inMoney(i.value)}</strong></div>`)}</div>
+    <div class="ac-grid2">
+      <div class="ac-box"><div class="ca-section-title">Most value sitting (no sale in 180+ days)</div>
+        ${p.oldest.length ? html`<table class="data-table ac-table"><thead><tr><th>Part</th><th class="num">On hand</th><th class="num">Value</th><th class="num">Last sale</th></tr></thead><tbody>
+          ${p.oldest.map(x => html`<tr><td><strong>${x.number}</strong><div class="audit-note">${x.description}${x.bin ? ` · ${x.bin}` : ''}</div></td><td class="num">${inNum(x.onHand)}</td><td class="num">${inMoney(x.value)}</td><td class="num">${x.daysSinceSale === null ? 'never' : `${x.daysSinceSale}d`}</td></tr>`)}</tbody></table>` : html`<p class="audit-note">Everything on the shelf has sold in the last 180 days.</p>`}</div>
+      <div class="ac-box"><div class="ca-section-title">Top sellers, last 90 days</div>
+        ${p.topSellers.length ? html`<table class="data-table ac-table"><thead><tr><th>Part</th><th class="num">Sold</th><th class="num">On hand</th><th class="num">Months supply</th></tr></thead><tbody>
+          ${p.topSellers.map(x => html`<tr><td><strong>${x.number}</strong><div class="audit-note">${x.description}</div></td><td class="num">${inNum(x.sold90)}</td><td class="num">${inNum(x.onHand)}</td><td class="num ${x.monthsSupply !== null && x.monthsSupply < 0.5 ? 'ac-late' : ''}">${inNum(x.monthsSupply)}</td></tr>`)}</tbody></table>` : html`<p class="audit-note">Nothing sold in the last 90 days.</p>`}</div>
+    </div>
+    ${p.overstock.length ? html`<div class="ac-box"><div class="ca-section-title">Overstocked (over 6 months of supply)</div><table class="data-table ac-table"><thead><tr><th>Part</th><th class="num">On hand</th><th class="num">Sold 90 days</th><th class="num">Months supply</th><th class="num">Value</th></tr></thead><tbody>
+      ${p.overstock.map(x => html`<tr><td><strong>${x.number}</strong> ${x.description}</td><td class="num">${inNum(x.onHand)}</td><td class="num">${inNum(x.sold90)}</td><td class="num">${inNum(x.monthsSupply)}</td><td class="num">${inMoney(x.value)}</td></tr>`)}</tbody></table></div>` : ''}`;
+}
+
 // ---------- Events ----------
 
 const inRoot = document.getElementById('insightPanel');
@@ -346,6 +443,7 @@ inRoot.addEventListener('change', (e) => {
   if (t.id === 'inFrom' || t.id === 'inTo') { ins.from = document.getElementById('inFrom').value; ins.to = document.getElementById('inTo').value; return openInsightView(ins.view); }
   if (t.id === 'inInvType') { ins.invType = t.value; return openInsightView(ins.view); }
   if (t.id === 'inMonth') { ins.month = t.value; return openInsightView(ins.view); }
+  if (t.id === 'inDayPick') { ins.day = t.value; return openInsightView(ins.view); }
   if (t.id === 'inPreset' && t.value) {
     const today = inDay(0), y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
     if (t.value === 'mtd') { ins.from = `${today.slice(0, 7)}-01`; ins.to = today; }
@@ -360,6 +458,8 @@ inRoot.addEventListener('change', (e) => {
   }
 });
 inRoot.addEventListener('click', (e) => {
+  if (e.target.closest('[data-in-refresh]')) return openInsightView(ins.view);
+  if (e.target.closest('[data-in-goals]')) return inGoalsForm();
   const tab = e.target.closest('[data-in-leader]');
   if (tab) { ins.leaderTab = tab.dataset.inLeader; return openInsightView('insightleaders'); }
   if (e.target.closest('[data-in-csv]') && ins.last) {
@@ -371,4 +471,19 @@ inRoot.addEventListener('click', (e) => {
   }
 });
 
-if (VIEW_PANELS[currentView] === 'insightPanel') openInsightView(currentView);
+
+
+// Goals dialog.
+document.getElementById('inModal').addEventListener('click', (e) => {
+  if (e.target.id === 'inModal' || e.target.closest('[data-in-close]')) document.getElementById('inModal').classList.remove('active');
+});
+document.getElementById('inModal').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'inGoalsForm') return;
+  e.preventDefault();
+  const f = e.target;
+  const goals = Object.fromEntries(ins.people.people.map(x => [x.id, { units: f.elements[`u-${x.id}`].value, gross: f.elements[`g-${x.id}`].value }]));
+  const res = await fetch(`${API}/insight/goals`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month: ins.people.month, goals }) });
+  if (!res.ok) { alert((await res.json().catch(() => ({}))).error || 'Could not save.'); return; }
+  document.getElementById('inModal').classList.remove('active');
+  openInsightView('insightpeople');
+});

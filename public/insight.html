@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Insight Domus</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="style.css" />
+<script>
+  if (localStorage.getItem('theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+</script>
+</head>
+<body class="rc-body in-app">
+
+<header class="rc-top">
+  <a class="rc-brand" href="/" title="Back to DealerDomus">
+    <img src="logo.svg" alt="" width="40" height="23" />
+    <span>DealerDomus</span>
+  </a>
+  <span class="rc-app-name">Insight <span class="rc-domus">Domus</span></span>
+  <div class="rc-top-right">
+    <select id="inJump" class="in-jump" aria-label="Go to a report"></select>
+    <span class="rc-user" id="inUser"></span>
+  </div>
+</header>
+
+<div class="in-shell">
+  <nav class="in-nav" id="inNav" aria-label="Reports"></nav>
+  <main class="in-main">
+    <section id="insightPanel">
+      <div class="ac-head">
+        <div><h1 id="inTitle">Insight</h1><div class="audit-note" id="inSub"></div></div>
+        <div class="ac-tools" id="inTools"></div>
+      </div>
+      <div id="inBody"></div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="inModal"><div class="modal-content modal-wide"></div></div>
+
+<script src="insight-app.js"></script>
+<script src="insight-ui.js"></script>
+<script>startInsightApp();</script>
+</body>
+</html>
