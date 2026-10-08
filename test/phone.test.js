@@ -1,7 +1,8 @@
 // Tests for two-way texting: each employee's own number (texts go out from
 // it), customers texting back (matched by phone, or a new customer for an
 // unknown number) landing in the Conversation and Messages with an alert,
-// STOP/START, and only requests really signed by Twilio being accepted.
+// STOP/START, only requests really signed by Twilio being accepted, and
+// calls: forwarding to the employee's cell, click-to-call, and call logging.
 //
 // Run with:  TEST_DATABASE_URL=postgres://... npm test
 // WARNING: wipes every table in the TEST_DATABASE_URL database.
@@ -22,11 +23,12 @@ const twilio = require('twilio');
 const TOKEN = 'test-twilio-auth-token';
 let base, admin, sales, manager, lead;
 const sent = [];
+const calls = [];
 const as = (user, method, path, body) => h.api(method, path, body, user.cookie);
 
 // Posts to the webhook the way Twilio does, signed (or not).
-async function inbound(params, { sign = true } = {}) {
-  const url = `${base}/twilio/sms`;
+async function inbound(params, { sign = true, path = '/twilio/sms' } = {}) {
+  const url = path.startsWith('http') ? path : `${base}${path}`;
   const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
   if (sign) headers['X-Twilio-Signature'] = twilio.getExpectedTwilioSignature(TOKEN, url, params);
   const res = await fetch(url, { method: 'POST', headers, body: new URLSearchParams(params).toString() });
@@ -36,7 +38,10 @@ async function inbound(params, { sign = true } = {}) {
 before(async () => {
   base = await h.startServer();
   phone.setWebhookToken(TOKEN);
-  setSmsClient({ messages: { create: async m => { sent.push(m); return { sid: `SM${sent.length}`, status: 'queued' }; } } }, '+16025550000');
+  setSmsClient({
+    messages: { create: async m => { sent.push(m); return { sid: `SM${sent.length}`, status: 'queued' }; } },
+    calls: { create: async c => { calls.push(c); return { sid: `CA${calls.length}` }; } }
+  }, '+16025550000');
   admin = await h.createUser('admin');
   manager = await h.createUser('sales_manager');
   sales = await h.createUser('salesperson');
@@ -108,4 +113,67 @@ test('STOP and START', async () => {
   assert.match(r.body.error, /texted STOP/);
   await inbound({ From: '+16025552020', To: '+16025550001', Body: 'start' });
   assert.strictEqual((await as(sales, 'POST', `/leads/${lead.id}/send-text`, { text: 'Welcome back' })).status, 201);
+});
+
+// ---------- Calls ----------
+
+const voice = (params, path = '/twilio/voice') => inbound(params, { path });
+// The URL Twilio is told to come back to, out of the TwiML.
+const actionOf = xml => xml.match(/action="([^"]+)"/)[1].replace(/&amp;/g, '&');
+const leadById = async id => (await as(sales, 'GET', '/leads')).body.find(x => x.id === id);
+
+test("a customer calling an employee's number rings their cell, and the call is logged with its length", async () => {
+  const r = await voice({ From: '+16025552020', To: '+16025550001', CallSid: 'CAin1' });
+  assert.strictEqual(r.status, 200);
+  assert.match(r.text, /<Dial callerId="\+16025552020"[^>]*><Number>\+14805550002<\/Number><\/Dial>/, "rings the cell, showing the customer's number");
+  assert.strictEqual((await leadById(lead.id)).activities[0].status, 'ringing');
+
+  const done = await inbound({ DialCallStatus: 'completed', DialCallDuration: '75' }, { path: actionOf(r.text) });
+  assert.strictEqual(done.status, 200);
+  const call = (await leadById(lead.id)).activities[0];
+  assert.deepStrictEqual([call.type, call.direction, call.text, call.reached, call.seconds], ['call', 'in', 'Incoming call · 1m 15s', true, 75]);
+  // Twilio retrying the same callback changes nothing.
+  await inbound({ DialCallStatus: 'no-answer' }, { path: actionOf(r.text) });
+  assert.strictEqual((await leadById(lead.id)).activities[0].text, 'Incoming call · 1m 15s');
+});
+
+test('a missed call alerts whoever has the customer; unknown callers become customers', async () => {
+  const r = await voice({ From: '+16025552020', To: '+16025550001' });
+  const done = await inbound({ DialCallStatus: 'no-answer', DialCallDuration: '0' }, { path: actionOf(r.text) });
+  assert.match(done.text, /<Say>Sorry we missed you/);
+  assert.strictEqual((await leadById(lead.id)).activities[0].text, 'Missed call');
+  assert.ok((await as(sales, 'GET', '/alerts')).body.some(a => a.type === 'missed_call' && /Missed call from Lena Brooks/.test(a.title)));
+
+  await voice({ From: '+14805557700', To: '+16025550001' });
+  const l = (await as(sales, 'GET', '/leads')).body.find(x => x.phone === '+14805557700');
+  assert.match(l.name, /Call from \(480\) 555-7700/);
+  assert.strictEqual(String(l.sales1Id), String(sales.id));
+
+  // The store's line has nobody's cell to ring: missed, straight away.
+  const store = await voice({ From: '+14805557711', To: '+16025550000' });
+  assert.match(store.text, /<Redirect>.*DialCallStatus=no-answer<\/Redirect>/);
+  assert.strictEqual((await voice({ From: '+14805557711', To: '+16025550000' })).status, 200);
+  assert.strictEqual((await inbound({ From: '+1', To: '+1' }, { path: '/twilio/voice', sign: false })).status, 403, 'signed only');
+});
+
+test("Call on a customer page rings my cell, then connects me from my business number", async () => {
+  assert.strictEqual((await as(manager, 'POST', `/leads/${lead.id}/call`)).status, 400, 'needs a cell on file');
+  const r = await as(sales, 'POST', `/leads/${lead.id}/call`);
+  assert.strictEqual(r.status, 201);
+  assert.match(r.body.message, /\(480\) 555-0002\) is ringing/);
+  const c = calls.at(-1);
+  assert.deepStrictEqual([c.to, c.from], ['+14805550002', '+16025550001']);
+
+  // They pick up: Twilio asks what to do, and we dial the customer.
+  const connect = await inbound({ CallStatus: 'in-progress' }, { path: c.url });
+  assert.match(connect.text, /Connecting you to Lena Brooks/);
+  assert.match(connect.text, /<Dial callerId="\+16025550001"[^>]*><Number>\(602\) 555-2020<\/Number>/);
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '30' }, { path: actionOf(connect.text) });
+  const call = (await leadById(lead.id)).activities[0];
+  assert.deepStrictEqual([call.direction, call.text, call.reached, String(call.by.id)], ['out', 'Call · 30s', true, String(sales.id)]);
+
+  // They don't pick up their own phone: nothing happened.
+  await as(sales, 'POST', `/leads/${lead.id}/call`);
+  await inbound({ CallStatus: 'no-answer' }, { path: calls.at(-1).statusCallback });
+  assert.match((await leadById(lead.id)).activities[0].text, /you didn't pick up/);
 });

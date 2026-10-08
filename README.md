@@ -330,6 +330,7 @@ Each module is being built out one at a time -- CRM and Sales & F&I are the most
 - When a customer texts back, the reply lands on that customer's Conversation, counts as reaching them, and sends a "Customer texted you back" alert. Replies are matched by phone number; a number the CRM doesn't know becomes a new customer for the employee whose number was texted
 - A **Messages** screen works like a phone's messages app: every conversation, unread counts, photos and videos, and new texts show up on their own. Managers can switch to Everyone's
 - STOP opts a customer out (nobody can text them until they text START)
+- **Calls:** a customer calling an employee's number rings that employee's cell. **Call** on a customer page rings your cell first, then connects you, and the customer sees your business number, never your personal one. Every call lands in the customer's history with how long it lasted and finishes the day's planned call. Missed calls send a "Missed call" alert, and the customer hears "Sorry we missed you"
 - **Install it on a phone:** open the CRM in Safari or Chrome and choose "Add to Home Screen." It opens full-screen like an app, with a Messages shortcut
 
 **Leads Pipeline (Kanban board)**
@@ -532,7 +533,10 @@ The "Send Text" feature on a lead's profile needs a Twilio account to actually s
    ```
 3. Restart the server.
 4. **To receive replies:** in the Twilio console, open each phone number (the store's and each employee's) and set "A message comes in" to Webhook, `https://<your-app>/twilio/sms`, HTTP POST. Only requests signed with your Twilio auth token are accepted.
-5. Put each employee's Twilio number in Admin → Users → Direct number.
+5. **For calls:** on the same numbers, set "A call comes in" to Webhook, `https://<your-app>/twilio/voice`, HTTP POST.
+6. Put each employee's Twilio number in Admin → Users → Direct number, and their cell phone (calls ring it).
+
+Calls aren't recorded. Recording would need a "this call may be recorded" message first, because many states require both sides to agree.
 
 **Trial account limitations** (not bugs): Twilio trial accounts can only text phone numbers you've manually verified in the Twilio console first, and every message gets a "Sent from your Twilio trial account" prefix. Both go away once you upgrade to a paid account.
 

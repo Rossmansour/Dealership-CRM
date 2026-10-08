@@ -227,7 +227,7 @@ app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
 app.use('/api', taskplan.router());
-app.use('/api', phone.router());
+app.use('/api', phone.router({ twilio: () => twilioClient, storeNumber: () => smsFrom, publicBase: req => publicBase(req) }));
 app.use('/api', inspection.router({
   mediaUpload,
   publicBase: req => publicBase(req),

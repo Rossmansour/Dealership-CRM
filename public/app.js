@@ -3297,6 +3297,44 @@ async function cpLogActivity(type, text, extra = {}) {
   return res.ok;
 }
 
+// "Call": the CRM rings my cell, then connects me to the customer from my
+// business number. The call shows up in their history when it ends.
+let cpCallTimer = null;
+async function cpPlaceCall(btn) {
+  const status = document.getElementById('cpCallStatus');
+  btn.disabled = true;
+  status.hidden = false;
+  status.className = 'cp-call-status';
+  status.textContent = 'Calling…';
+  try {
+    const res = await fetch(`${API}/leads/${currentProfileLeadId}/call`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not place the call.');
+    status.textContent = data.message;
+    // Watch for the call to end, then show it in their history.
+    clearInterval(cpCallTimer);
+    const started = Date.now();
+    cpCallTimer = setInterval(async () => {
+      await cpRefresh();
+      const call = (cpLead() || { activities: [] }).activities.find(a => a.id === data.activity.id);
+      if (!call || call.status === 'done' || Date.now() - started > 30 * 60 * 1000 || !leadProfileModal.classList.contains('active')) {
+        clearInterval(cpCallTimer);
+        const s = document.getElementById('cpCallStatus');
+        if (call && call.status === 'done') { s.textContent = call.text; setTimeout(() => { s.hidden = true; }, 8000); } else s.hidden = true;
+      } else if (call.status === 'dialing') document.getElementById('cpCallStatus').textContent = call.text;
+    }, 4000);
+  } catch (err) {
+    status.className = 'cp-call-status error';
+    status.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cp-call]');
+  if (btn) cpPlaceCall(btn);
+});
+
 // Reloads everything (lists behind the page stay current) and redraws.
 async function cpRefresh() {
   await Promise.all([loadAll(), cpFetchTasks()]);
@@ -3369,7 +3407,7 @@ function renderCpHeader(lead) {
   dupBtn.textContent = inDupBucket(lead) ? 'Not a duplicate' : 'Mark duplicate';
   dupBtn.title = inDupBucket(lead) ? 'Take this customer out of Duplicate Leads' : 'This customer is already in the CRM';
   document.getElementById('cpHeaderContact').innerHTML = html`
-    ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a>` : html`<span class="muted">No phone</span>`}
+    ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a><button type="button" class="cp-call-btn" data-cp-call title="Rings your cell, then connects you -- they see your business number">Call</button>` : html`<span class="muted">No phone</span>`}
     ${lead.email ? html`<a href="mailto:${lead.email}">✉️ ${lead.email}</a>` : html`<span class="muted">No email</span>`}
     <span class="muted">${formatSource(lead.source)}</span>`;
   const car = cars.find(c => c.id === lead.carId) || cars.find(c => c.id === (lead.wishList || [])[0]);
