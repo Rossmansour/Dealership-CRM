@@ -536,7 +536,12 @@ The "Send Text" feature on a lead's profile needs a Twilio account to actually s
 5. **For calls:** on the same numbers, set "A call comes in" to Webhook, `https://<your-app>/twilio/voice`, HTTP POST.
 6. Put each employee's Twilio number in Admin → Users → Direct number, and their cell phone (calls ring it).
 
-Calls aren't recorded. Recording would need a "this call may be recorded" message first, because many states require both sides to agree.
+**Call recording and AI summaries** (Admin → Phone & Recording):
+- Incoming calls are recorded, both sides, after the caller hears a notice ("This call may be recorded..."). Many states (California, Florida, Washington, and others) require telling everyone on the call, so keep the notice on
+- Outgoing calls record only the employee's side. The customer's voice is never recorded
+- Recordings stay at Twilio and play right in the customer's history
+- **AI summaries of incoming calls** (off until turned on): the AI listens to the recording, and the summary is saved on the call and emailed to the people you pick, plus the employee who took it. Summaries never repeat SSNs, birthdays, license, card, or bank numbers. Needs `GEMINI_API_KEY`
+- **Email isn't live yet.** Until `RESEND_API_KEY` and `EMAIL_FROM` are set (from [resend.com](https://resend.com), with your domain verified), summaries are saved on the call and marked "not emailed"
 
 **Trial account limitations** (not bugs): Twilio trial accounts can only text phone numbers you've manually verified in the Twilio console first, and every message gets a "Sent from your Twilio trial account" prefix. Both go away once you upgrade to a paid account.
 

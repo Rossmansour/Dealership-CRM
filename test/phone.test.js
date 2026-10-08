@@ -19,6 +19,7 @@ const h = require('./helpers');
 const { setSmsClient } = require('../server');
 const phone = require('../phone');
 const twilio = require('twilio');
+const mailer = require('../mailer');
 
 const TOKEN = 'test-twilio-auth-token';
 let base, admin, sales, manager, lead;
@@ -176,4 +177,76 @@ test("Call on a customer page rings my cell, then connects me from my business n
   await as(sales, 'POST', `/leads/${lead.id}/call`);
   await inbound({ CallStatus: 'no-answer' }, { path: calls.at(-1).statusCallback });
   assert.match((await leadById(lead.id)).activities[0].text, /you didn't pick up/);
+});
+
+// ---------- Recording and AI call summaries ----------
+
+test('incoming calls are recorded (after the notice); outgoing record only the employee', async () => {
+  const r = await voice({ From: '+16025552020', To: '+16025550001' });
+  assert.match(r.text, /<Say>This call may be recorded for quality and training.<\/Say><Dial[^>]* record="record-from-answer-dual"/);
+  assert.match(r.text, /recordingStatusCallback="[^"]*\/twilio\/voice\/recording/);
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '40' }, { path: actionOf(r.text) });
+  const recUrl = r.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&');
+  await inbound({ RecordingStatus: 'completed', RecordingSid: 'RE1', RecordingUrl: 'https://api.twilio.com/2010-04-01/Accounts/AC1/Recordings/RE1', RecordingDuration: '40' }, { path: recUrl });
+  const call = (await leadById(lead.id)).activities[0];
+  assert.deepStrictEqual([call.text, call.recording.sid, call.recording.sides], ['Incoming call · 40s', 'RE1', 'both']);
+  assert.ok(!call.summary, 'summaries are off until the store turns them on');
+
+  phone.use({ recordingAudio: async () => Buffer.from('fake-mp3') });
+  const play = await fetch(`${base}/api/leads/${lead.id}/calls/${call.id}/recording`, { headers: { Cookie: sales.cookie } });
+  assert.deepStrictEqual([play.status, play.headers.get('content-type'), await play.text()], [200, 'audio/mpeg', 'fake-mp3']);
+
+  await as(sales, 'POST', `/leads/${lead.id}/call`);
+  const c = calls.at(-1);
+  assert.deepStrictEqual([c.record, c.recordingTrack], [true, 'inbound'], "only what comes from the employee's phone");
+
+  // Turned off: no notice, no recording.
+  assert.strictEqual((await as(sales, 'PUT', '/phone-settings', { recordInbound: false })).status, 403);
+  await as(admin, 'PUT', '/phone-settings', { recordInbound: false, recordOutbound: false });
+  assert.doesNotMatch((await voice({ From: '+16025552020', To: '+16025550001' })).text, /record|Say/);
+  await as(sales, 'POST', `/leads/${lead.id}/call`);
+  assert.ok(!calls.at(-1).record);
+  await as(admin, 'PUT', '/phone-settings', { recordInbound: true, recordOutbound: true });
+});
+
+test('AI summary of an incoming call is saved and emailed', async () => {
+  const mails = [];
+  mailer.setTransport(async m => { mails.push(m); return { sent: true }; });
+  let heard = null;
+  phone.use({ aiReady: () => true, recordingAudio: async () => Buffer.from('audio'), summarizeAudio: async (audio, type, prompt) => { heard = { audio: audio.toString(), type, prompt }; return '- Lena wants to test drive the Tacoma Saturday at 11.'; } });
+  const s = (await as(admin, 'PUT', '/phone-settings', { summaries: true, summaryEmails: 'gm@store.com, BAD, sm@store.com' })).body;
+  assert.deepStrictEqual(s.summaryEmails, ['gm@store.com', 'sm@store.com']);
+
+  const r = await voice({ From: '+16025552020', To: '+16025550001' });
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '95' }, { path: actionOf(r.text) });
+  await inbound({ RecordingSid: 'RE2', RecordingUrl: 'https://api.twilio.com/x/RE2', RecordingDuration: '95' }, { path: r.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&') });
+  await phone.pendingSummary();
+
+  assert.strictEqual(heard.type, 'audio/mpeg');
+  assert.match(heard.prompt, /\[withheld\]/, 'never repeats SSNs and the like');
+  const call = (await leadById(lead.id)).activities[0];
+  assert.match(call.summary.text, /test drive the Tacoma/);
+  assert.strictEqual(call.summary.emailed, true);
+  assert.strictEqual(mails.length, 1);
+  assert.deepStrictEqual(mails[0].to.slice(0, 2), ['gm@store.com', 'sm@store.com']);
+  assert.ok(mails[0].to.includes(sales.email), 'and the employee who took it');
+  assert.match(mails[0].subject, /Call summary: Lena Brooks · \(602\) 555-2020 · 1m 35s/);
+
+  // Outgoing calls aren't summarized.
+  await as(sales, 'POST', `/leads/${lead.id}/call`);
+  await inbound({ RecordingSid: 'RE3', RecordingUrl: 'https://api.twilio.com/x/RE3', RecordingDuration: '20' }, { path: calls.at(-1).recordingStatusCallback });
+  await phone.pendingSummary();
+  assert.strictEqual(mails.length, 1);
+
+  // Email not set up: the summary is still kept, marked not sent.
+  mailer.setTransport(null);
+  const before = { key: process.env.RESEND_API_KEY }; delete process.env.RESEND_API_KEY;
+  const r2 = await voice({ From: '+16025552020', To: '+16025550001' });
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '10' }, { path: actionOf(r2.text) });
+  await inbound({ RecordingSid: 'RE4', RecordingUrl: 'https://api.twilio.com/x/RE4', RecordingDuration: '10' }, { path: r2.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&') });
+  await phone.pendingSummary();
+  const c2 = (await leadById(lead.id)).activities[0];
+  assert.deepStrictEqual([!!c2.summary.text, c2.summary.emailed], [true, false]);
+  assert.match(c2.summary.emailNote, /isn't set up yet/);
+  if (before.key) process.env.RESEND_API_KEY = before.key;
 });

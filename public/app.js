@@ -90,6 +90,7 @@ function applyPermissionsToUI() {
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminDemoBtn').style.display = userCan('manageUsers') ? '' : 'none';
+  document.getElementById('adminPhoneBtn').style.display = userCan('editSettings') ? '' : 'none';
 }
 
 // Demo data: a sample store (staff, cars, customers, deals, ROs, parts) to
@@ -4072,6 +4073,15 @@ function renderHistory() {
           ${canDelete ? html`<button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>` : ''}
         </div>
         <div class="activity-text">${a.text}</div>
+        ${a.recording ? html`<div class="call-recording">
+          <audio controls preload="none" src="${API}/leads/${lead.id}/calls/${a.id}/recording"></audio>
+          <span class="audit-note">${a.recording.sides === 'employee' ? 'Recording · your side only' : 'Recording'}</span>
+        </div>` : ''}
+        ${a.summary ? html`<div class="call-summary">
+          <div class="call-summary-title">✨ AI call summary</div>
+          <div class="call-summary-text">${a.summary.text}</div>
+          <div class="audit-note">${a.summary.emailed ? `Emailed to ${a.summary.emailedTo.join(', ')}` : `Not emailed: ${a.summary.emailNote || ''}`}</div>
+        </div>` : ''}
       </div>
     </div>`).join('') : html`<div class="cp-empty">Nothing logged yet.</div>`;
 }
@@ -5665,6 +5675,42 @@ function renderStoreHours(h) {
     </tr>`;
   }).join('');
 }
+
+// ---------- Phone & Recording (Admin) ----------
+document.getElementById('adminPhoneBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  const res = await fetch(`${API}/phone-settings`);
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById('phRecordIn').checked = s.recordInbound;
+  document.getElementById('phNotice').value = s.notice;
+  document.getElementById('phRecordOut').checked = s.recordOutbound;
+  document.getElementById('phSummaries').checked = s.summaries;
+  document.getElementById('phEmails').value = s.summaryEmails.join(', ');
+  document.getElementById('phEmailEmployee').checked = s.emailEmployee;
+  document.getElementById('phStatus').innerHTML = html`
+    <div>${s.aiConnected ? '✅ AI connected' : '⚪ AI not connected (needs GEMINI_API_KEY) -- summaries wait until it is'}</div>
+    <div>${s.emailReady ? '✅ Email ready' : "⚪ Email isn't set up yet -- summaries are saved on the call but not emailed"}</div>`;
+  document.getElementById('phMsg').textContent = '';
+  document.getElementById('phoneSettingsModal').classList.add('active');
+});
+document.getElementById('phCloseBtn').addEventListener('click', () => document.getElementById('phoneSettingsModal').classList.remove('active'));
+document.getElementById('phoneSettingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('phMsg');
+  const res = await fetch(`${API}/phone-settings`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recordInbound: document.getElementById('phRecordIn').checked, notice: document.getElementById('phNotice').value,
+      recordOutbound: document.getElementById('phRecordOut').checked, summaries: document.getElementById('phSummaries').checked,
+      summaryEmails: document.getElementById('phEmails').value, emailEmployee: document.getElementById('phEmailEmployee').checked
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.textContent = data.error || 'Could not save.'; return; }
+  document.getElementById('phEmails').value = data.summaryEmails.join(', ');
+  msg.textContent = 'Saved.';
+});
 
 document.getElementById('adminRotationBtn').addEventListener('click', async () => {
   adminMenuModal.classList.remove('active');

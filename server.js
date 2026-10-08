@@ -3199,6 +3199,33 @@ async function callAI(systemInstruction, history, userMessage) {
 // AI task planning uses the same AI.
 taskplan.useAI(callAI, () => !!GEMINI_API_KEY);
 
+// Call summaries: the AI listens to the recording itself.
+async function callAIAudio(audio, mimeType, prompt) {
+  if (!GEMINI_API_KEY) throw new Error('AI is not configured.');
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: audio.toString('base64') } }, { text: prompt }] }] })
+  });
+  if (!response.ok) throw new Error(`Gemini API error (${response.status}): ${await response.text()}`);
+  const text = (await response.json()).candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini returned an empty response.');
+  return text;
+}
+phone.use({
+  summarizeAudio: callAIAudio,
+  aiReady: () => !!GEMINI_API_KEY,
+  // Twilio keeps recordings behind the account's sign-in.
+  recordingAudio: async (url) => {
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) throw new Error('Twilio is not set up.');
+    // The account's sign-in only ever goes to Twilio.
+    if (!/^https:\/\/api\.twilio\.com\//.test(url)) throw new Error('Not a Twilio recording.');
+    const res = await fetch(`${url}.mp3`, { headers: { Authorization: `Basic ${Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64')}` } });
+    if (!res.ok) throw new Error(`Could not get the recording (${res.status}).`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+});
+
 // Strip sensitive fields before anything gets sent to a third-party AI
 // provider. The AI doesn't need a real SSN to answer "how many leads are
 // in negotiation" or draft a follow-up text -- so it never sees one.

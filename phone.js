@@ -16,6 +16,15 @@
 // who sees the employee's business number -- never their personal one.
 // Every call is logged on the customer with how long it lasted; missed ones
 // alert whoever has the customer.
+//
+// Recording (Admin -> Phone & Recording): incoming calls are recorded, both
+// sides, after the caller hears a "this call may be recorded" notice.
+// Outgoing calls record only the employee's side -- the customer's voice
+// never is. Recordings stay at Twilio and play through the CRM.
+//
+// AI summaries of incoming calls (off until turned on): when a recording is
+// ready, the AI listens to it, the summary is saved on the call and emailed
+// to whoever the store picked (mailer.js; email isn't live yet).
 
 const crypto = require('crypto');
 const express = require('express');
@@ -24,6 +33,7 @@ const auth = require('./auth');
 const audit = require('./audit');
 const alerts = require('./alerts');
 const taskplan = require('./taskplan');
+const mailer = require('./mailer');
 const { twiml: { VoiceResponse } } = require('twilio');
 
 const STOP_WORDS = ['stop', 'stopall', 'unsubscribe', 'cancel', 'end', 'quit'];
@@ -31,6 +41,36 @@ const START_WORDS = ['start', 'unstop', 'yes'];
 const last10 = p => String(p || '').replace(/\D/g, '').slice(-10);
 const pretty = p => String(p || '').replace(/^\+1(\d{3})(\d{3})(\d{4})$/, '($1) $2-$3');
 const duration = sec => { sec = Number(sec) || 0; return sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`; };
+
+ // ---------- Store settings ----------
+
+const DEFAULT_NOTICE = 'This call may be recorded for quality and training.';
+function settingsFrom(s) {
+  const p = (s && s.phone) || {};
+  const emails = (Array.isArray(p.summaryEmails) ? p.summaryEmails : String(p.summaryEmails || '').split(/[\s,;]+/))
+    .map(e => String(e).trim().toLowerCase()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)).slice(0, 20);
+  return {
+    recordInbound: p.recordInbound !== false,
+    notice: String(p.notice || DEFAULT_NOTICE).slice(0, 300),
+    recordOutbound: p.recordOutbound !== false,
+    summaries: p.summaries === true,
+    summaryEmails: [...new Set(emails)],
+    emailEmployee: p.emailEmployee !== false
+  };
+}
+async function settingsOf(dealershipId) {
+  const d = await store.getDealership(store.pool, dealershipId);
+  return settingsFrom(d && d.settings);
+}
+
+// What the server plugs in: playing recordings back (Twilio keeps them) and
+// the AI that summarizes one.
+const hooks = {
+  recordingAudio: async () => { throw new Error('Twilio is not set up.'); },
+  summarizeAudio: null,          // (audio Buffer, mimeType, prompt) -> text
+  aiReady: () => false
+};
+function use(fns) { Object.assign(hooks, fns); }
 
 let webhookToken = () => process.env.TWILIO_AUTH_TOKEN || '';
 function setWebhookToken(token) { webhookToken = () => token; }
@@ -76,13 +116,54 @@ async function customerFor(q, deps, who, user, from, how) {
 }
 
 // Changes one logged call on a customer once Twilio says how it went.
-async function updateCall(q, dealershipId, leadId, activityId, change) {
+async function updateCall(q, dealershipId, leadId, activityId, change, { evenIfDone = false } = {}) {
   const lead = await store.get(q, 'leads', dealershipId, leadId, { forUpdate: true });
   const call = lead && (lead.activities || []).find(a => a.id === activityId);
-  if (!call || call.status === 'done') return null;
+  if (!call || (call.status === 'done' && !evenIfDone)) return null;
   Object.assign(call, change(call));
   await store.save(q, 'leads', dealershipId, lead.id, lead);
   return { lead, call };
+}
+
+// The AI listens to an incoming call's recording; the summary goes on the
+// call and out by email. Never repeats card, bank, SSN, or license numbers.
+let pending = Promise.resolve();
+async function summarizeCall(dealershipId, leadId, activityId) {
+  const cfg = await settingsOf(dealershipId);
+  if (!cfg.summaries || !hooks.summarizeAudio || !hooks.aiReady()) return null;
+  const lead = await store.get(store.pool, 'leads', dealershipId, leadId);
+  const call = lead && (lead.activities || []).find(x => x.id === activityId);
+  if (!call || !call.recording || call.summary) return null;
+  const audio = await hooks.recordingAudio(call.recording.url);
+  if (audio.length > 18 * 1024 * 1024) return null; // too long to send in one go
+  const taker = call.by && call.by.id ? call.by.name : 'the store';
+  const prompt = [
+    `This is a recorded phone call to a car dealership. ${lead.name} called ${taker}.`,
+    'Summarize it for the salesperson and manager in plain words:',
+    '- Who called and why (in 1-2 sentences)',
+    '- Vehicle(s) they asked about, trade-in, budget or payment, timing -- only what was actually said',
+    '- What was promised, and the next step',
+    'Short bullet points, no more than 120 words. If the recording has no conversation (voicemail, silence), say so.',
+    'Never include Social Security numbers, dates of birth, driver\'s license numbers, or card or bank account numbers -- write [withheld] instead.'
+  ].join('\n');
+  const text = String(await hooks.summarizeAudio(audio, 'audio/mpeg', prompt)).trim().slice(0, 4000);
+
+  // Who gets it: the store's list, and the employee who took the call.
+  const to = [...cfg.summaryEmails];
+  if (cfg.emailEmployee && call.by && call.by.id) {
+    const { rows } = await store.pool.query('SELECT email FROM users WHERE id = $1 AND active', [call.by.id]);
+    if (rows[0] && rows[0].email) to.push(rows[0].email);
+  }
+  const when = new Date(call.date).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const email = to.length ? await mailer.send({
+    to, subject: `Call summary: ${lead.name} · ${pretty(call.from)}${call.seconds ? ` · ${duration(call.seconds)}` : ''}`,
+    text: `${lead.name} called ${taker} on ${when}${call.seconds ? ` (${duration(call.seconds)})` : ''}.\n\n${text}\n\n-- DealerDomus`
+  }).catch(err => ({ sent: false, reason: err.message })) : { sent: false, reason: 'Nobody picked to email it to.' };
+
+  await store.tx(q => updateCall(q, dealershipId, leadId, activityId, () => ({
+    summary: { text, at: new Date().toISOString(), emailedTo: [...new Set(to)], emailed: !!email.sent, ...(email.sent ? {} : { emailNote: email.reason }) }
+  }), { evenIfDone: true }));
+  return text;
 }
 
 // deps: { createLead(q, who, fields), publicBase(req) }
@@ -159,10 +240,18 @@ function publicRouter(deps) {
       await store.save(q, 'leads', dealershipId, lead.id, { ...lead, activities: [activity, ...(lead.activities || [])] });
       return lead;
     });
-    const done = back(req, '/twilio/voice/done', { d: dealershipId, l: lead.id, a: activity.id });
+    const ids = { d: dealershipId, l: lead.id, a: activity.id };
+    const done = back(req, '/twilio/voice/done', ids);
     if (user && user.cell_phone) {
+      const cfg = await settingsOf(dealershipId);
+      const dial = { callerId: from, timeout: 25, action: done };
+      if (cfg.recordInbound) {
+        // Many states need everyone on the call told first.
+        vr.say(cfg.notice);
+        Object.assign(dial, { record: 'record-from-answer-dual', recordingStatusCallback: back(req, '/twilio/voice/recording', ids), recordingStatusCallbackEvent: 'completed' });
+      }
       // Their cell shows the customer's number, like any forwarded call.
-      vr.dial({ callerId: from, timeout: 25, action: done }).number(user.cell_phone);
+      vr.dial(dial).number(user.cell_phone);
     } else {
       // Nobody to ring (the store line, or no cell on file): it's missed.
       vr.redirect(`${done}&DialCallStatus=no-answer`);
@@ -219,6 +308,21 @@ function publicRouter(deps) {
     voice(res, vr);
   }));
 
+  // A recording is ready: keep it on the call, then (incoming calls, if the
+  // store turned it on) have the AI summarize it and email the summary.
+  r.post('/twilio/voice/recording', form, signed, wrap(async (req, res) => {
+    const { d, l, a } = req.query;
+    const b = req.body || {};
+    if (String(b.RecordingStatus || 'completed') !== 'completed' || !b.RecordingUrl) return res.status(204).send();
+    const out = await store.tx(q => updateCall(q, String(d), String(l), String(a), call => ({
+      recording: { sid: String(b.RecordingSid || ''), url: String(b.RecordingUrl), seconds: Number(b.RecordingDuration) || 0, sides: call.direction === 'in' ? 'both' : 'employee' }
+    }), { evenIfDone: true }));
+    res.status(204).send();
+    if (out && out.call.direction === 'in') {
+      pending = summarizeCall(String(d), out.lead.id, out.call.id).catch(err => console.error('Call summary failed:', err.message));
+    }
+  }));
+
   // The employee never picked up their own cell for a "Call": nothing happened.
   r.post('/twilio/voice/leg', form, signed, wrap(async (req, res) => {
     const { d, l, a } = req.query;
@@ -261,10 +365,13 @@ function router(deps = {}) {
     });
     const ids = new URLSearchParams({ d: req.dealershipId, l: lead.id, a: activity.id });
     const base = deps.publicBase(req);
+    const cfg = await settingsOf(req.dealershipId);
     try {
       const call = await client.calls.create({
         to: cell, from, url: `${base}/twilio/voice/connect?${ids}`,
-        statusCallback: `${base}/twilio/voice/leg?${ids}`, statusCallbackEvent: ['completed']
+        statusCallback: `${base}/twilio/voice/leg?${ids}`, statusCallbackEvent: ['completed'],
+        // Only the employee's side: what comes in from their phone.
+        ...(cfg.recordOutbound ? { record: true, recordingTrack: 'inbound', recordingStatusCallback: `${base}/twilio/voice/recording?${ids}`, recordingStatusCallbackEvent: ['completed'] } : {})
       });
       await store.tx(q => updateCall(q, req.dealershipId, lead.id, activity.id, () => ({ sid: call.sid })));
     } catch (err) {
@@ -297,6 +404,39 @@ function router(deps = {}) {
     res.json({ conversations: out.slice(0, 300), myNumber: req.user.direct_number || '', unread: out.filter(c => c.unread).length });
   }));
 
+  // Phone & recording settings (Admin).
+  r.get('/phone-settings', wrap(async (req, res) => {
+    res.json({ ...(await settingsOf(req.dealershipId)), aiConnected: !!(hooks.summarizeAudio && hooks.aiReady()), emailReady: mailer.ready() });
+  }));
+  r.put('/phone-settings', auth.requirePermission('editSettings'), wrap(async (req, res) => {
+    const saved = await store.tx(async q => {
+      const { rows } = await q.query('SELECT settings FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
+      const settings = rows[0].settings || {};
+      const before = settingsFrom(settings);
+      const b = req.body || {};
+      const bool = v => v === true || v === 'true';
+      const next = settingsFrom({ phone: {
+        ...before,
+        ...Object.fromEntries(['recordInbound', 'recordOutbound', 'summaries', 'emailEmployee'].filter(k => k in b).map(k => [k, bool(b[k])])),
+        ...('notice' in b ? { notice: String(b.notice).trim() || DEFAULT_NOTICE } : {}),
+        ...('summaryEmails' in b ? { summaryEmails: b.summaryEmails } : {})
+      } });
+      await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, phone: next }]);
+      await audit.updated(q, req, 'settings', { ...before, id: 'phone' }, { ...next, id: 'phone' }, 'Phone & recording');
+      return next;
+    });
+    res.json(saved);
+  }));
+
+  // Plays a call's recording (Twilio keeps it; the CRM signs in for you).
+  r.get('/leads/:id/calls/:activityId/recording', wrap(async (req, res) => {
+    const lead = await store.get(store.pool, 'leads', req.dealershipId, req.params.id);
+    const call = lead && (lead.activities || []).find(a => a.id === req.params.activityId && a.type === 'call');
+    if (!call || !call.recording) return res.status(404).json({ error: 'No recording for that call.' });
+    const audio = await hooks.recordingAudio(call.recording.url);
+    res.set({ 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, max-age=3600' }).send(audio);
+  }));
+
   // Opening a conversation reads it.
   r.post('/leads/:id/texts/read', wrap(async (req, res) => {
     await store.tx(async q => {
@@ -309,4 +449,4 @@ function router(deps = {}) {
   return r;
 }
 
-module.exports = { publicRouter, router, setWebhookToken, ownerOf };
+module.exports = { publicRouter, router, setWebhookToken, ownerOf, use, settingsFrom, summarizeCall, pendingSummary: () => pending };

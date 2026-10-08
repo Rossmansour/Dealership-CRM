@@ -1327,6 +1327,7 @@
       <button type="button" class="btn-secondary admin-menu-item" id="adminUsersBtn">👤 Users &amp; Roles</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminAuditLogBtn">📜 Audit Log</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminIntegrationsBtn">🔌 Integrations (Key Machine)</button>
+      <button type="button" class="btn-secondary admin-menu-item" id="adminPhoneBtn">📞 Phone &amp; Recording</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminRotationBtn">🔄 Round Robin &amp; Store Hours</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminFeeDefaultsBtn">⚙️ Fee Defaults</button>
       <button type="button" class="btn-secondary admin-menu-item" id="adminTaxRatesBtn">🗺️ Taxes &amp; Fees</button>
@@ -1335,6 +1336,39 @@
     <div class="modal-actions">
       <button type="button" class="btn-secondary" id="closeAdminMenuBtn">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- Phone & Recording (admins only) -->
+<div class="modal" id="phoneSettingsModal">
+  <div class="modal-content">
+    <h2>Phone &amp; Recording</h2>
+    <form id="phoneSettingsForm" class="phone-settings">
+      <div class="ca-section-title">Incoming calls</div>
+      <label class="ph-check"><input type="checkbox" id="phRecordIn" /> Record incoming calls (both sides)</label>
+      <label>What callers hear first
+        <input type="text" id="phNotice" maxlength="300" />
+      </label>
+      <p class="send-text-hint">Many states (California, Florida, Washington, and others) require telling everyone on the call before recording. Keep a notice on.</p>
+
+      <div class="ca-section-title">Outgoing calls</div>
+      <label class="ph-check"><input type="checkbox" id="phRecordOut" /> Record outgoing calls -- the employee's side only</label>
+      <p class="send-text-hint">Only what the employee says is recorded; the customer's voice never is.</p>
+
+      <div class="ca-section-title">AI summaries of incoming calls</div>
+      <label class="ph-check"><input type="checkbox" id="phSummaries" /> Summarize each recorded incoming call and email it</label>
+      <label>Email summaries to
+        <input type="text" id="phEmails" placeholder="gm@yourstore.com, salesmanager@yourstore.com" />
+      </label>
+      <label class="ph-check"><input type="checkbox" id="phEmailEmployee" /> Also email the employee who took the call</label>
+      <div class="ph-status audit-note" id="phStatus"></div>
+
+      <div class="modal-actions">
+        <span class="audit-note" id="phMsg" role="status"></span>
+        <button type="button" class="btn-secondary" id="phCloseBtn">Close</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
   </div>
 </div>
 
