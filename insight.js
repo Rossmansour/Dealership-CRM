@@ -20,6 +20,7 @@
 //                productivity, advisors, parts by sale type, open RO aging
 //   heartbeat    today, live: ups, visits, appointments set and shown, deals
 //                sold, and each salesperson's calls / texts / emails
+//   trades       trade-in % for the store and each salesperson, by source
 //   people       each salesperson's month against the goals a manager sets
 //                for them, with pace, and a one-page review
 //   parts        parts inventory: value, turns, what isn't moving, top sellers
@@ -84,6 +85,7 @@ async function loadAll(dealershipId) {
       apr: n(d.apr), term: n(d.termMonths), financed: d.dealType === 'cash' ? 0 : n(d.amountFinanced),
       products, productCount: Object.values(products).filter(Boolean).length,
       productProfit: productProfit(d),
+      hasTrade: !!d.hasTrade || (Array.isArray(d.trades) && d.trades.length > 0), sourceGroup: sourceGroup(lead.source),
       front: round2(g.front), back: round2(g.finance), incentives: round2(g.incentives), reserve: round2(d.reserve),
       chargeback: -Math.abs(n(d.chargebackAmount)), chargebackAt: d.chargebackDate ? new Date(d.chargebackDate).getTime() : null,
       vehicle: carName(car), stockNumber: car ? car.stockNumber || '' : '', model: car ? modelKey(car) : 'Unknown',
@@ -110,6 +112,15 @@ function productProfit(d) {
   const leftCost = Math.max(0, n(d.fiProductCost) - itemizedCost);
   const loosePremium = loose.reduce((t, [k]) => t + premium[k], 0);
   return Object.fromEntries(PRODUCTS.map(([k]) => [k, round2(itemized[k] !== null ? itemized[k] : premium[k] - (loosePremium ? leftCost * premium[k] / loosePremium : 0))]));
+}
+
+// Lead sources grouped the way the floor talks about them.
+const SOURCE_GROUPS = [['internet', 'Internet'], ['walkin', 'Walk-in'], ['phone', 'Phone up'], ['other', 'Other']];
+function sourceGroup(src) {
+  if (src === 'walk-in') return 'walkin';
+  if (src === 'phone') return 'phone';
+  if (['website', 'autotrader', 'cargurus', 'facebook', 'internet', 'email', 'chat'].includes(src)) return 'internet';
+  return 'other';
 }
 
 // An age range from a birthdate, as of the sale -- the birthdate itself stays here.
@@ -648,6 +659,35 @@ router.get('/insight/heartbeat', wrap(async (req, res) => {
     month: { units: month.total.units, gross: month.total.gross },
     people: [...people.values()].map(x => ({ ...x, sold: round2(x.sold) })).sort((a, b) => b.sold - a.sold || b.ups - a.ups || a.name.localeCompare(b.name)),
     upcoming: appts.filter(t => t.status === 'open').sort((a, b) => at(a.dueAt) - at(b.dueAt)).map(t => ({ id: t.id, time: t.dueAt, customer: t.leadName || '', title: t.title || '', with: t.assignedTo ? t.assignedTo.name : '' }))
+  });
+}));
+
+// Trade-ins: the share of deals with a trade, for the store and each
+// salesperson, overall and by where the customer came from (internet,
+// walk-in, phone up). Split deals count as shares, like the leaderboard.
+router.get('/insight/trades', wrap(async (req, res) => {
+  const data = await loadAll(req.dealershipId);
+  const r = range(req, data.tz);
+  const type = ['new', 'used'].includes(req.query.type) ? req.query.type : '';
+  const deals = data.sold.filter(s => (!type || s.type === type) && inRange(s.soldAt, r));
+  const blank = () => Object.fromEntries([['all'], ...SOURCE_GROUPS].map(([k]) => [k, { deals: 0, trades: 0 }]));
+  const add = (b, s, share) => { for (const k of ['all', s.sourceGroup]) { b[k].deals += share; if (s.hasTrade) b[k].trades += share; } };
+  const finish = b => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, { deals: round2(v.deals), trades: round2(v.trades), pct: v.deals ? round2(v.trades / v.deals * 100) : null }]));
+  const storeB = blank();
+  const people = new Map();
+  for (const s of deals) {
+    add(storeB, s, 1);
+    const ids = s.salespeople.length ? s.salespeople : [''];
+    for (const id of ids) {
+      if (!people.has(id)) people.set(id, blank());
+      add(people.get(id), s, 1 / ids.length);
+    }
+  }
+  const name = id => (id ? (data.staff.get(String(id)) || {}).name || 'Former employee' : 'No salesperson on the deal');
+  res.json({
+    from: r.from, to: r.to, type, groups: SOURCE_GROUPS.map(([key, label]) => ({ key, label })), store: finish(storeB),
+    people: [...people.entries()].map(([id, b]) => ({ id, name: name(id), ...finish(b) })).sort((a, b) => b.all.deals - a.all.deals || a.name.localeCompare(b.name)),
+    deals: deals.sort((a, b) => b.soldAt - a.soldAt).map(s => ({ id: s.id, dealNumber: s.dealNumber, customer: s.customer, vehicle: s.vehicle, type: s.type, source: s.source, group: s.sourceGroup, trade: s.hasTrade, salespeople: s.salespeople.map(name) }))
   });
 }));
 

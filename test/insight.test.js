@@ -18,9 +18,9 @@ let admin, manager, fi, sales, sales2;
 const as = (user, method, path, body) => h.api(method, path, body, user.cookie);
 const ok = async p => { const r = await p; assert.ok([200, 201].includes(r.status), `${r.status} ${JSON.stringify(r.body)}`); return r.body; };
 
-async function sell({ make, model, cost, price, type = 'used', zip, dob, lender, products = {}, employees, reserve = 0 }) {
+async function sell({ make, model, cost, price, type = 'used', zip, dob, lender, products = {}, employees, reserve = 0, source = 'website' }) {
   const car = await ok(as(admin, 'POST', '/cars', { make, model, year: 2022, cost, price, stockType: type, stockNumber: `${make[0]}${Math.floor(Math.random() * 1e6)}` }));
-  const lead = await ok(as(admin, 'POST', '/leads', { name: `${make} Buyer ${Math.random().toString(36).slice(2, 6)}`, source: 'website', address: { zip } }));
+  const lead = await ok(as(admin, 'POST', '/leads', { name: `${make} Buyer ${Math.random().toString(36).slice(2, 6)}`, source, address: { zip } }));
   const deal = await ok(as(admin, 'POST', '/deals', { carId: car.id, leadId: lead.id }));
   if (dob) await ok(as(admin, 'PUT', `/deals/${deal.id}/credit-app`, { applicant: { firstName: 'A', lastName: 'B', dob, zip } }));
   await ok(as(admin, 'PUT', `/deals/${deal.id}`, { vehiclePrice: price, docFee: 0, dealType: lender ? 'retail' : 'cash', lender: lender || '', apr: 6, termMonths: 72, reserve, employees, ...products }));
@@ -212,4 +212,18 @@ test('parts inventory: value, turns, what is not moving', async () => {
   const r = (await as(svc, 'GET', '/insight/parts')).body;
   assert.ok(r.value >= 50);
   assert.ok(r.idle[0].skus >= 1, 'never sold: not moving');
+});
+
+test('trade-ins: % of deals with a trade, for the store and each salesperson, by source', async () => {
+  await sell({ make: 'Ford', model: 'Escape', cost: 15000, price: 17000, source: 'walk-in', products: { trades: [{ make: 'Kia', model: 'Soul', allowance: 4000 }] }, employees: { sales1: sales.id } });
+  await sell({ make: 'Ford', model: 'Focus', cost: 9000, price: 10000, source: 'phone', employees: { sales1: sales2.id } });
+  assert.strictEqual((await as(sales, 'GET', '/insight/trades')).status, 403);
+  const t = (await as(manager, 'GET', '/insight/trades')).body;
+  assert.deepStrictEqual([t.store.all.deals, t.store.all.trades, t.store.all.pct], [5, 1, 20]);
+  assert.deepStrictEqual([t.store.internet.pct, t.store.walkin.pct, t.store.phone.pct, t.store.other.pct], [0, 100, 0, null]);
+  const one = t.people.find(p => p.id === String(sales.id));
+  assert.deepStrictEqual([one.all.deals, one.all.trades, one.all.pct], [2.5, 1, 40], 'the split deal counts half');
+  assert.strictEqual(one.walkin.pct, 100);
+  assert.strictEqual(t.deals.filter(d => d.trade).length, 1);
+  assert.strictEqual((await as(manager, 'GET', '/insight/trades?type=new')).body.store.all.deals, 1);
 });

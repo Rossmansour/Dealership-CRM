@@ -47,7 +47,7 @@ async function openInsightView(view) {
   ins.view = view;
   inBody().innerHTML = html`<p class="audit-note">Loading…</p>`;
   try {
-    await ({ insightheartbeat: inHeartbeat, insightpeople: inPeople, insightparts: inParts, insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
+    await ({ insightheartbeat: inHeartbeat, insightpeople: inPeople, insighttrades: inTrades, insightparts: inParts, insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
   } catch (err) { inBody().innerHTML = html`<p class="ac-error">${err.message}</p>`; }
 }
 
@@ -209,6 +209,36 @@ function inFiLenders(f) {
         <td class="num">${inMoney(l.avgFinanced)}</td><td class="num">${inPct(l.avgApr)}</td><td class="num">${l.avgTerm} mo</td><td class="num">${inMoney(l.reserve)}</td><td class="num">${inMoney(l.reservePerDeal)}</td></tr>`)
         : html`<tr><td colspan="8" class="audit-note">No financed deals in this range.</td></tr>`}</tbody></table></div>
     <p class="audit-note">${f.deals - f.cash} financed · ${f.cash} cash · ${inMoney(f.reserve)} reserve.</p>`;
+}
+
+// ---------- Trade-ins ----------
+
+async function inTrades() {
+  const qs = new URLSearchParams(Object.entries({ from: ins.from, to: ins.to, type: ins.tradeType || '' }).filter(([, v]) => v));
+  const t = await inGet(`/insight/trades?${qs}`);
+  inHead('Trade-ins', 'Share of sold deals with a trade. Split deals count as shares.', {
+    extra: html`<select id="inTradeType"><option value="">New &amp; used</option><option value="new" ${t.type === 'new' ? html`selected` : ''}>New</option><option value="used" ${t.type === 'used' ? html`selected` : ''}>Used</option></select>`
+  });
+  const cols = [{ key: 'all', label: 'All deals' }, ...t.groups];
+  ins.last = { name: `trade-ins-${t.from}-${t.to}`, rows: [['Salesperson', ...cols.flatMap(c => [`${c.label} deals`, `${c.label} trades`, `${c.label} trade %`])],
+    ['Store', ...cols.flatMap(c => [t.store[c.key].deals, t.store[c.key].trades, t.store[c.key].pct ?? ''])],
+    ...t.people.map(p => [p.name, ...cols.flatMap(c => [p[c.key].deals, p[c.key].trades, p[c.key].pct ?? ''])])] };
+  const cell = v => html`<td class="num">${v.deals ? html`<strong>${inPct(v.pct)}</strong><div class="audit-note">${inNum(v.trades)} of ${inNum(v.deals)}</div>` : html`<span class="audit-note">--</span>`}</td>`;
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small">
+      ${cols.map(c => html`<div class="ac-card"><span class="ac-card-label">${c.key === 'all' ? 'Store trade %' : c.label}</span><span class="ac-card-value">${inPct(t.store[c.key].pct)}</span>
+        <span class="ac-card-sub">${inNum(t.store[c.key].trades)} trades on ${inNum(t.store[c.key].deals)} deals</span></div>`)}
+    </div>
+    <div class="ac-box in-scroll"><div class="ca-section-title">By salesperson</div>
+      <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Salesperson</th>${cols.map(c => html`<th class="num">${c.label}</th>`)}</tr></thead><tbody>
+        <tr class="in-fi-total"><td><strong>Store</strong></td>${cols.map(c => cell(t.store[c.key]))}</tr>
+        ${t.people.length ? t.people.map(p => html`<tr><td><strong>${p.name}</strong></td>${cols.map(c => cell(p[c.key]))}</tr>`)
+          : html`<tr><td colspan="${cols.length + 1}" class="audit-note">No deals in this range.</td></tr>`}</tbody></table></div>
+      <p class="audit-note">Internet = website, Autotrader, CarGurus, Facebook. Other = referral and anything else.</p></div>
+    <div class="ac-box in-scroll"><div class="ca-section-title">Deals</div>
+      <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Deal</th><th>Customer</th><th>Vehicle</th><th>Source</th><th>Salesperson</th><th>Trade</th></tr></thead><tbody>
+        ${t.deals.length ? t.deals.map(d => html`<tr><td><a href="/#deal=${d.id}" target="dealerdomus-main">Deal ${d.dealNumber || '--'}</a></td><td>${d.customer}</td><td>${d.vehicle}<div class="audit-note">${d.type === 'new' ? 'New' : 'Used'}</div></td>
+          <td>${formatSource(d.source)}</td><td>${d.salespeople.join(', ') || '--'}</td><td>${d.trade ? html`<strong>Yes</strong>` : 'No'}</td></tr>`)
+          : html`<tr><td colspan="6" class="audit-note">No deals in this range.</td></tr>`}</tbody></table></div></div>`;
 }
 
 // ---------- Inventory ----------
@@ -511,6 +541,7 @@ inRoot.addEventListener('change', (e) => {
   if (t.id === 'inFrom' || t.id === 'inTo') { ins.from = document.getElementById('inFrom').value; ins.to = document.getElementById('inTo').value; return openInsightView(ins.view); }
   if (t.id === 'inInvType') { ins.invType = t.value; return openInsightView(ins.view); }
   if (t.id === 'inFiType') { ins.fiType = t.value; return openInsightView(ins.view); }
+  if (t.id === 'inTradeType') { ins.tradeType = t.value; return openInsightView(ins.view); }
   if (t.id === 'inMonth') { ins.month = t.value; return openInsightView(ins.view); }
   if (t.id === 'inDayPick') { ins.day = t.value; return openInsightView(ins.view); }
   if (t.id === 'inPreset' && t.value) {
