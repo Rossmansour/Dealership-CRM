@@ -196,7 +196,11 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Heartbeat** (today, or any day you pick): ups by source, calls / texts / emails, showroom visits, appointments shown vs due, sold today and deals working, a row per person on the floor, and the appointments still coming
 - **People & Goals**: one card per salesperson and BDC rep with units, gross, per vehicle, products, close rate, activity, appointments set and shown, and pace against their own monthly goal. Managers set the goals right there
 - **Leaderboard**: salespeople (split deals count as shares), sales managers, and F&I managers, with gross, per vehicle, products per deal, leads, and close rate
-- **F&I & Lenders**: back gross and products per deal, penetration for each product (service contract, GAP, maintenance, aftermarket, credit insurance) overall and by F&I manager, and the lender report (deals, amount financed, average APR and term, reserve)
+- **F&I Summary**:
+  - Tiles: back gross (not final, final, actual, where the month will land, against the same dates last year), back per deal (with products-only), products per deal against the store's target (a manager sets it; 100% = one product per deal), and chargebacks
+  - One table five ways: gross, per deal, penetration, $ per product sold, and counts -- for the department and each F&I manager, who open to their deals (each links to the deal)
+  - What each product made: price less cost line by line when the deal has product lines, otherwise the deal's product cost shared by premium
+  - New / used filter, a search box, and the lender report (deals, amount financed, average APR and term, reserve)
 - **Inventory Analysis**:
   - Stock list oldest first. Cost and margin show only for roles that manage inventory
   - Aging buckets, turn, and days of supply

@@ -83,6 +83,7 @@ async function loadAll(dealershipId) {
       lender: d.dealType === 'cash' ? '' : String(d.lender || '').trim(), dealType: d.dealType || 'retail',
       apr: n(d.apr), term: n(d.termMonths), financed: d.dealType === 'cash' ? 0 : n(d.amountFinanced),
       products, productCount: Object.values(products).filter(Boolean).length,
+      productProfit: productProfit(d),
       front: round2(g.front), back: round2(g.finance), incentives: round2(g.incentives), reserve: round2(d.reserve),
       chargeback: -Math.abs(n(d.chargebackAmount)), chargebackAt: d.chargebackDate ? new Date(d.chargebackDate).getTime() : null,
       vehicle: carName(car), stockNumber: car ? car.stockNumber || '' : '', model: car ? modelKey(car) : 'Unknown',
@@ -90,6 +91,25 @@ async function loadAll(dealershipId) {
     });
   }
   return { deals, cars, leads, ros, tickets, settings, tz, sold, staff, carById };
+}
+
+// What the store made on each F&I product on a deal. With itemized product
+// lines, each line's price less its cost; otherwise the premium less a share
+// of the deal's product cost (shared by premium).
+function productProfit(d) {
+  const lines = (list, pick) => (Array.isArray(list) ? list.filter(pick).reduce((t, x) => t + n(x.premium ?? x.price) - n(x.cost), 0) : null);
+  const ci = d.creditInsurance && typeof d.creditInsurance === 'object' ? [d.creditInsurance.life, d.creditInsurance.ah, d.creditInsurance.iui].filter(Boolean) : null;
+  const itemized = {
+    service: lines(d.warranties, w => w && w.kind !== 'maintenance'), maintenance: lines(d.warranties, w => w && w.kind === 'maintenance'),
+    gap: d.gap && typeof d.gap === 'object' ? n(d.gap.premium) - n(d.gap.cost) : (d.gap === null ? 0 : null),
+    creditIns: ci ? lines(ci, () => true) : (d.creditInsurance === null ? 0 : null), aftermarket: lines(d.aftermarkets, () => true)
+  };
+  const premium = Object.fromEntries(PRODUCTS.map(([k, f]) => [k, n(d[f])]));
+  const loose = PRODUCTS.filter(([k]) => itemized[k] === null);
+  const itemizedCost = PRODUCTS.filter(([k]) => itemized[k] !== null).reduce((t, [k]) => t + premium[k] - itemized[k], 0);
+  const leftCost = Math.max(0, n(d.fiProductCost) - itemizedCost);
+  const loosePremium = loose.reduce((t, [k]) => t + premium[k], 0);
+  return Object.fromEntries(PRODUCTS.map(([k]) => [k, round2(itemized[k] !== null ? itemized[k] : premium[k] - (loosePremium ? leftCost * premium[k] / loosePremium : 0))]));
 }
 
 // An age range from a birthdate, as of the sale -- the birthdate itself stays here.
@@ -220,7 +240,9 @@ router.get('/insight/leaderboard', wrap(async (req, res) => {
 router.get('/insight/fi', wrap(async (req, res) => {
   const data = await loadAll(req.dealershipId);
   const r = range(req, data.tz);
-  const deals = data.sold.filter(s => inRange(s.soldAt, r));
+  const type = ['new', 'used'].includes(req.query.type) ? req.query.type : '';
+  const ofType = s => !type || s.type === type;
+  const deals = data.sold.filter(s => ofType(s) && inRange(s.soldAt, r));
   const pen = list => Object.fromEntries(PRODUCTS.map(([k]) => [k, list.length ? round2(list.filter(s => s.products[k]).length / list.length * 100) : null]));
   const sumOf = (list, f) => round2(list.reduce((t, s) => t + n(s[f]), 0));
   const byFi = new Map();
@@ -245,7 +267,51 @@ router.get('/insight/fi', wrap(async (req, res) => {
     avgFinanced: round2(sumOf(list, 'financed') / list.length), avgApr: round2(list.reduce((t, s) => t + s.apr, 0) / list.length), avgTerm: Math.round(list.reduce((t, s) => t + s.term, 0) / list.length),
     reservePerDeal: round2(sumOf(list, 'reserve') / list.length)
   })).sort((a, b) => b.deals - a.deals);
+  // The summary: back gross and per deal, final vs not, against the same
+  // dates last year and (this month) where it's headed; products per deal
+  // against the store's target; chargebacks that came back in the range.
+  const lastYear = { start: dayStart(addYears(r.from, -1), data.tz), end: dayStart(addDays(addYears(r.to, -1), 1), data.tz) };
+  const lyDeals = data.sold.filter(s => ofType(s) && inRange(s.soldAt, lastYear));
+  const productTotal = list => round2(list.reduce((t, s) => t + PRODUCTS.reduce((u, [k]) => u + s.productProfit[k], 0), 0));
+  const per = (v, list) => (list.length ? round2(v / list.length) : null);
+  const t = today(data.tz);
+  let paceFactor = null;
+  if (r.from === `${t.slice(0, 7)}-01` && r.to === t) {
+    const days = dashboard.openDays(t.slice(0, 7), hours.cleanStoreHours(data.settings.storeHours));
+    paceFactor = days.elapsed ? days.total / days.elapsed : null;
+  }
+  const finals = deals.filter(s => s.final), notFinals = deals.filter(s => !s.final);
+  const back = sumOf(deals, 'back'), lyBack = sumOf(lyDeals, 'back');
+  const productCount = list => list.reduce((x, s) => x + s.productCount, 0);
+  const target = data.settings.fiTargets && data.settings.fiTargets.penetration !== undefined ? n(data.settings.fiTargets.penetration) : 100;
+  const summary = {
+    gross: { notFinal: sumOf(notFinals, 'back'), final: sumOf(finals, 'back'), actual: back, pace: paceFactor ? round2(back * paceFactor) : null, lastYear: lyDeals.length ? lyBack : null },
+    pvr: { notFinal: per(sumOf(notFinals, 'back'), notFinals), final: per(sumOf(finals, 'back'), finals), actual: per(back, deals), product: per(productTotal(deals), deals), lastYear: per(lyBack, lyDeals) },
+    penetration: { current: deals.length ? round2(productCount(deals) / deals.length * 100) : null, lastYear: lyDeals.length ? round2(productCount(lyDeals) / lyDeals.length * 100) : null, target },
+    chargebacks: round2(data.sold.filter(s => ofType(s) && s.chargeback && inRange(s.chargebackAt || s.soldAt, r)).reduce((x, s) => x + s.chargeback, 0))
+  };
+  // Each F&I manager's deals, with what each product made.
+  const dealRow = s => ({
+    id: s.id, dealNumber: s.dealNumber, stockNumber: s.stockNumber, customer: s.customer, type: s.type, final: s.final, vehicle: s.vehicle,
+    front: round2(s.front + s.incentives), reserve: s.reserve, profit: s.productProfit, sold: s.products,
+    product: round2(PRODUCTS.reduce((u, [k]) => u + s.productProfit[k], 0)), back: s.back, total: round2(s.front + s.incentives + s.back)
+  });
+  const rollup = list => {
+    const rows = list.map(dealRow);
+    const add = f => round2(rows.reduce((x, d) => x + n(d[f]), 0));
+    return {
+      deals: rows.length, front: add('front'), reserve: add('reserve'), product: add('product'), back: add('back'), total: add('total'),
+      reserveCount: list.filter(s => s.reserve > 0).length,
+      profit: Object.fromEntries(PRODUCTS.map(([k]) => [k, round2(rows.reduce((x, d) => x + d.profit[k], 0))])),
+      counts: Object.fromEntries(PRODUCTS.map(([k]) => [k, list.filter(s => s.products[k]).length])),
+      productCount: productCount(list), list: rows.sort((a, b) => String(a.dealNumber).localeCompare(String(b.dealNumber), undefined, { numeric: true }))
+    };
+  };
+  const team = [...byFi.entries()].map(([id, list]) => ({ id, name: id ? (data.staff.get(String(id)) || {}).name || 'Former employee' : 'No F&I manager on the deal', ...rollup(list) }))
+    .sort((a, b) => b.back - a.back);
   res.json({
+    type, summary, team, totals: rollup(deals),
+    canSetTarget: auth.can(req.user, 'manageRotation'),
     from: r.from, to: r.to, deals: deals.length, cash: deals.filter(s => !s.lender).length,
     back: sumOf(deals, 'back'), reserve: sumOf(deals, 'reserve'), backPerDeal: deals.length ? round2(sumOf(deals, 'back') / deals.length) : null,
     productsPerDeal: deals.length ? round2(deals.reduce((t, s) => t + s.productCount, 0) / deals.length) : null,
@@ -583,6 +649,19 @@ router.get('/insight/heartbeat', wrap(async (req, res) => {
     people: [...people.values()].map(x => ({ ...x, sold: round2(x.sold) })).sort((a, b) => b.sold - a.sold || b.ups - a.ups || a.name.localeCompare(b.name)),
     upcoming: appts.filter(t => t.status === 'open').sort((a, b) => at(a.dueAt) - at(b.dueAt)).map(t => ({ id: t.id, time: t.dueAt, customer: t.leadName || '', title: t.title || '', with: t.assignedTo ? t.assignedTo.name : '' }))
   });
+}));
+
+// The store's target for F&I products per deal (100% = one per deal).
+router.put('/insight/fi-target', auth.requirePermission('manageRotation'), wrap(async (req, res) => {
+  const v = Number(req.body && req.body.penetration);
+  if (!Number.isFinite(v) || v < 0 || v > 1000) return res.status(400).json({ error: 'Enter a target from 0 to 1000%.' });
+  await store.tx(async (q) => {
+    const { rows } = await q.query('SELECT settings FROM dealerships WHERE id = $1 FOR UPDATE', [req.dealershipId]);
+    const settings = (rows[0] && rows[0].settings) || {};
+    await q.query('UPDATE dealerships SET settings = $2 WHERE id = $1', [req.dealershipId, { ...settings, fiTargets: { ...(settings.fiTargets || {}), penetration: round2(v) } }]);
+    await require('./audit').record(q, req, { action: 'update', entityType: 'settings', entityId: 'fi-target', label: 'F&I product target', details: `${round2(v)}%` });
+  });
+  res.json({ penetration: round2(v) });
 }));
 
 // ---------- People: goals and reviews ----------

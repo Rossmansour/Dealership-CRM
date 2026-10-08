@@ -6249,13 +6249,18 @@ async function init() {
   if (providersRes.ok) providerList = await providersRes.json();
   if (staffRes.ok) staffList = await staffRes.json();
   if (settingsRes.ok) appSettings = await settingsRes.json();
-  loadAll();
+  const loaded = loadAll();
   startAlertPolling();
+  // Links from Insight: /#deal=<id> opens that deal.
+  const hashDeal = new URLSearchParams(location.hash.slice(1)).get('deal');
+  if (hashDeal) { history.replaceState(null, '', '/'); loaded.then(() => openDealWorkspace(hashDeal)); }
   // Links from the Recon tab: /#ro=<id> opens that repair order.
   const hashRo = new URLSearchParams(location.hash.slice(1)).get('ro');
   if (hashRo && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(hashRo); }
 }
 window.addEventListener('hashchange', () => {
+  const dealId = new URLSearchParams(location.hash.slice(1)).get('deal');
+  if (dealId && currentUser) { history.replaceState(null, '', '/'); openDealWorkspace(dealId); return; }
   const id = new URLSearchParams(location.hash.slice(1)).get('ro');
   if (id && currentUser && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(id); }
 });
