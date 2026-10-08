@@ -467,6 +467,9 @@ router.post('/service/ros/:id/close', allow('writeRepairOrders'), wrap(async (re
     await linkCar(q, req.dealershipId, ro.carId, ro.id, false);
     const saved = await store.save(q, 'repair_orders', req.dealershipId, ro.id, ro);
     await audit.updated(q, req, 'repair_order', before, saved, 'Closed');
+    // Into the books: the sale, what it cost, and recon onto the car.
+    const roCar = ro.carId ? await store.get(q, 'cars', req.dealershipId, ro.carId) : null;
+    await require('./postings').roClosed(q, req, saved, roCar);
     return { ro: saved, settings, pays };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });

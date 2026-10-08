@@ -364,6 +364,23 @@ function fixedReport(data, key) {
   };
 }
 
+// Expenses the GM didn't type in come from the books (Accounting Domus),
+// by department, once anything is posted to an expense account that month.
+async function expensesFromBooks(dealershipId, key, report) {
+  if (!report || !report.plan) return;
+  const { rows } = await store.pool.query(
+    `SELECT a.dept, sum(l.amount) AS amt FROM journal_lines l JOIN gl_accounts a ON a.dealership_id = l.dealership_id AND a.number = l.account
+     WHERE l.dealership_id = $1 AND a.type = 'expense' AND l.posted_on >= $2::date AND l.posted_on < ($2::date + interval '1 month') GROUP BY a.dept`,
+    [dealershipId, `${key}-01`]);
+  if (!rows.length) return;
+  const byDept = Object.fromEntries(rows.map(r => [r.dept, Math.round(Number(r.amt) * 100) / 100]));
+  const fromBooks = { newVariable: byDept.new || 0, usedVariable: (byDept.used || 0) + (byDept.fi || 0), service: byDept.service || 0, parts: byDept.parts || 0, general: byDept[''] || 0 };
+  report.plan.expensesFromBooks = {};
+  for (const [f, v] of Object.entries(fromBooks)) {
+    if (report.plan.expenses[f] === null || report.plan.expenses[f] === undefined) { report.plan.expenses[f] = v; report.plan.expensesFromBooks[f] = true; }
+  }
+}
+
 // ---------- Routes ----------
 const router = express.Router();
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -376,9 +393,10 @@ router.get('/dashboard/:tab', wrap(async (req, res) => {
   if (!auth.can(req.user, perm)) return res.status(403).json({ error: "Your role doesn't allow this. Ask an admin if you need access." });
   const data = await loadData(req.dealershipId);
   const key = MONTH.test(req.query.month || '') ? req.query.month : currentMonth(data.storeHours.timezone);
-  if (req.params.tab === 'variable') return res.json(variableReport(data, key, req.query.chargebacks !== '0'));
-  if (req.params.tab === 'store') return res.json(storeReport(data, key));
-  res.json(fixedReport(data, key));
+  const report = req.params.tab === 'variable' ? variableReport(data, key, req.query.chargebacks !== '0')
+    : req.params.tab === 'store' ? storeReport(data, key) : fixedReport(data, key);
+  await expensesFromBooks(req.dealershipId, key, report);
+  res.json(report);
 }));
 
 // Monthly goals (forecast) and expenses. Variable goals: sales managers /

@@ -46,7 +46,17 @@ test('load, use, and remove demo data', async () => {
   const open = (await as(admin, 'GET', '/service/ros?status=open')).body;
   assert.ok(open.some(r => r.carId), 'there is recon in progress');
 
+  // The demo cars and parts are on the books, and its deals wait to be booked.
+  const books = (await as(admin, 'GET', '/accounting/overview')).body;
+  assert.ok(books.inventory.used > 0 && books.inventory.parts > 0, 'demo inventory is on the books');
+  assert.ok(books.unbooked.count > 0, 'demo deals wait in Book Deals');
+  const toBook = (await as(admin, 'GET', '/accounting/unbooked')).body.deals[0];
+  assert.strictEqual((await as(admin, 'POST', `/accounting/deals/${toBook.id}/book`)).status, 201);
+
   const removed = await as(admin, 'DELETE', '/demo');
+  assert.ok(removed.body.journalEntries >= 2, 'its entries in the books go too');
+  const after = (await as(admin, 'GET', '/accounting/overview')).body;
+  assert.deepStrictEqual([after.inventory.used, after.inventory.parts, after.cit.total], [0, 0, 0]);
   assert.strictEqual(removed.status, 200);
   assert.strictEqual(removed.body.staff, 12);
   const leftLeads = (await as(admin, 'GET', '/leads')).body;

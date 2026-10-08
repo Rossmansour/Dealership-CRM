@@ -390,6 +390,9 @@ async function finishItem(q, req, unit, item, actualIn) {
         reconHistory: [...(car.reconHistory || []), { source: 'recon', description: item.description, vendor: item.vendor, amount: actual, date: item.doneAt }] };
       await store.save(q, 'cars', req.dealershipId, car.id, next);
       await audit.updated(q, req, 'car', car, next, `Recon: ${item.description}`);
+      // Owed to whoever did the work.
+      const vendor = String(item.vendor || 'Recon vendor');
+      await require('./postings').carCost(q, req, next, actual, { offsetKey: 'ap', offsetControl: vendor.toUpperCase().slice(0, 40), offsetName: vendor, memo: `Recon: ${item.description}` });
     }
     item.costPosted = true;
   }
