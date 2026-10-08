@@ -105,3 +105,49 @@ test('marketing: ZIP codes and age ranges -- never the birthdate', async () => {
   assert.strictEqual(t.months.length, 12);
   assert.strictEqual(t.months.at(-1).units, 3);
 });
+
+test('store summary: gross by department, expenses from the books, net, absorption -- GM only', async () => {
+  assert.strictEqual((await as(manager, 'GET', '/insight/store')).status, 403, 'whole-store net is for the GM');
+  const today = new Date().toISOString().slice(0, 10);
+  // Rent and a sales commission go on the books this month.
+  await ok(as(admin, 'POST', '/accounting/entries', { date: today, memo: 'Rent', lines: [{ account: '6500', debit: 5000 }, { account: '1000', credit: 5000 }] }));
+  await ok(as(admin, 'POST', '/accounting/entries', { date: today, memo: 'Ads', lines: [{ account: '6210', debit: 1000 }, { account: '1000', credit: 1000 }] }));
+  const s = (await as(admin, 'GET', '/insight/store')).body;
+  assert.strictEqual(s.expensesFrom, 'books');
+  const used = s.rows.find(r => r.key === 'used'), admin_ = s.rows.find(r => r.key === '');
+  assert.strictEqual(used.gross, (34000 - 30000) + (30000 - 28000));
+  assert.strictEqual(used.expenses, 1000);
+  assert.strictEqual(used.net, used.gross - 1000);
+  assert.strictEqual(admin_.expenses, 5000);
+  assert.strictEqual(s.total.net, Math.round((s.total.gross - 6000) * 100) / 100);
+});
+
+test('service & parts: ROs, effective labor rate, tech productivity, open RO aging', async () => {
+  const svc = await h.createUser('service_manager');
+  const advisor = await h.createUser('service_advisor');
+  const tech = await h.createUser('technician');
+  assert.strictEqual((await as(manager, 'GET', '/insight/fixed')).status, 403);
+  const lead = await ok(as(admin, 'POST', '/leads', { name: 'Fix Ops', source: 'phone' }));
+  const ro = await ok(as(advisor, 'POST', '/service/ros', { leadId: lead.id, vehicle: { year: '2019', make: 'Ford', model: 'F-150' },
+    jobs: [{ concern: 'Brakes', payType: 'customer', hours: 2, techId: tech.id, parts: [{ description: 'Pads', qty: 1, cost: 40, price: 100 }] }] }));
+  await ok(as(advisor, 'POST', `/service/ros/${ro.id}/close`));
+  await ok(as(advisor, 'POST', '/service/ros', { leadId: lead.id, vehicle: { year: '2020', make: 'Kia', model: 'Soul' }, jobs: [{ concern: 'Noise' }] }));
+  const f = (await as(svc, 'GET', '/insight/fixed')).body;
+  assert.strictEqual(f.ros, 1);
+  const cp = f.byType.find(x => x.type === 'customer');
+  assert.deepStrictEqual([cp.hours, cp.elr], [2, 150]);
+  assert.strictEqual(f.techs.find(x => x.id === String(tech.id)).flagged, 2);
+  assert.strictEqual(f.advisors.find(x => x.id === String(advisor.id)).ros, 1);
+  assert.strictEqual(f.open.length, 1);
+  assert.strictEqual(f.open[0].days, 0);
+});
+
+test('expenses & cash: averages by account and what is owed to the store -- for whoever reads the books', async () => {
+  assert.strictEqual((await as(manager, 'GET', '/insight/expenses')).status, 403);
+  const e = (await as(admin, 'GET', '/insight/expenses')).body;
+  const rent = e.lines.find(l => l.number === '6500');
+  assert.deepStrictEqual([rent.mtd, rent.avg3, rent.vs3], [5000, 0, 5000]);
+  assert.strictEqual(e.months.length, 3);
+  assert.ok(e.schedules.some(x => x.key === 'cit'));
+  assert.ok(e.unbooked.length >= 3, 'delivered deals not booked yet');
+});

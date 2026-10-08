@@ -201,6 +201,19 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
   - Wholesale results and cars with open repair orders
 - **Marketing**: sales by ZIP code, by customer age range (from credit applications; birthdates never leave the server), and by lead source, plus leads in and close rate by source
 - **Gross Trend**: the last 12 months against the monthly goals, and year to date
+- **Store Summary** (GM and admins):
+  - The month by department: gross (live, not waiting for booking), expenses (from the books, else what the GM entered), and net
+  - Where gross, expenses and net will land at this pace
+  - Last month's and last year's net, and fixed absorption
+- **Service & Parts** (fixed ops managers):
+  - Repair orders by labor type with hours, hours per RO, effective labor rate, labor and parts gross and margin, plus counter sales by type
+  - Technician productivity (hours flagged ÷ hours clocked) and advisors (ROs, hours per RO, ELR)
+  - Open repair orders by age
+- **Expenses & Cash** (whoever can read the books):
+  - Every expense account against its 6-month and 3-month averages, the last 3 months, and the same month last year
+  - Cash: each receivable and payable schedule with totals, over-30-day amounts, and the oldest item
+  - The 10 oldest contracts in transit, the 10 oldest deals not booked, and titles not yet at the DMV
+- Each person sees only the Insight screens their role allows, and opening Insight lands on the first one they can see
 
 **Accounting Domus** (left sidebar → Accounting; admins, the GM to read, and the new **Office / Accounting** role)
 - **A real general ledger**: a full dealership chart of accounts (cash, contracts in transit, receivables, vehicle and parts inventory, floor plan, payables, sales and cost of sales by department, expenses) that the store can rename and add to. Every entry balances, and nothing is deleted: mistakes are reversed
