@@ -1484,7 +1484,7 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 
 /* Wider than the normal 1100px page: three columns need the room */
 body.wide-page main { max-width: 1400px; }
-.appraisal-layout { display: grid; grid-template-columns: 1.25fr 1fr 0.9fr; gap: 16px; align-items: start; }
+.appraisal-layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
 .appraisal-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .appraisal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .appraisal-card label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -1616,12 +1616,10 @@ body.wide-page main { max-width: 1400px; }
 
 @media (max-width: 1100px) {
   .appraisal-layout { grid-template-columns: 1fr 1fr; }
-  .appraisal-layout .appraisal-col:last-child { grid-column: span 2; }
   .ap-summary-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .appraisal-layout { grid-template-columns: 1fr; }
-  .appraisal-layout .appraisal-col:last-child { grid-column: auto; }
   .appraisal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .appraisal-grid .span-3 { grid-column: span 2; }
   .ap-summary-fields { grid-template-columns: 1fr 1fr; }
@@ -3187,3 +3185,16 @@ button.ac-card:hover { border-color: var(--blue); }
 .ap-ptm-comp.has-url { cursor: pointer; }
 .ap-ptm-comp.has-url:hover .ap-ptm-tick { opacity: 1; }
 .ap-ptm-comp.has-url:hover .ap-ptm-dot { fill: var(--blue); opacity: 1; }
+
+/* Appraisal: equipment in the top card, compact */
+.ap-summary-right { min-width: 0; }
+.ap-summary-equipment { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ap-summary-eq-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+.ap-summary-equipment .equipment-group { margin-top: 6px; }
+.ap-summary-equipment .equipment-group-name { font-size: 11px; margin-bottom: 3px; }
+.ap-summary-equipment .equipment-chips { gap: 4px; }
+.ap-summary-equipment .equipment-chip { font-size: 11px; padding: 2px 8px; border-radius: 11px; }
+.ap-options-chip { font-size: 11px; padding: 2px 8px; text-transform: none; letter-spacing: 0; }
+.ap-history-info { flex-basis: 100%; font-size: 13px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-alt); }
+.ap-history-info .audit-note { display: block; margin-top: 2px; }
+.history-chip[aria-expanded="true"] { border-style: solid; border-color: var(--blue); }

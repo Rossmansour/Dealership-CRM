@@ -421,6 +421,7 @@
             <div class="audit-note" id="apSummaryVin"></div>
           </div>
           <div class="ap-history-chips" id="apHistoryChips"></div>
+          <div class="ap-history-info" id="apHistoryInfo" hidden></div>
         </div>
         <div class="ap-summary-grid">
           <div class="ap-summary-left">
@@ -480,18 +481,22 @@
             <label class="appraisal-notes">Notes <textarea id="apNotes" rows="3" placeholder="Damage, tires, smells, keys, anything the next person should know"></textarea></label>
           </div>
           </div>
-          <div class="ap-values" id="apValues"></div>
+          <div class="ap-summary-right">
+            <div class="ap-values" id="apValues"></div>
+            <div class="ap-summary-equipment">
+              <div class="ap-summary-eq-head"><span>Equipment</span><span id="apOptionsPlug"></span></div>
+              <div id="apEquipment" class="equipment-groups"></div>
+            </div>
+          </div>
         </div>
       </div>
 
       <nav class="ap-tabs" id="apTabs" aria-label="Appraisal sections">
         <button type="button" data-target="apCardPrice">Price to market</button>
-        <button type="button" data-target="apCardEquipment">Equipment</button>
         <button type="button" data-target="apCardMarket">Market</button>
         <button type="button" data-target="apCardBooks">Books</button>
         <button type="button" data-target="apCardAuctions">Auctions</button>
         <button type="button" data-target="apCardRetail">Retail</button>
-        <button type="button" data-target="apCardHistory">History</button>
         <button type="button" data-target="apCardRecalls">Recalls</button>
         <button type="button" data-target="apCardRecon">Recon</button>
         <button type="button" data-target="apCardCalc">Calculator</button>
@@ -506,15 +511,6 @@
       </div>
 
       <div class="appraisal-layout">
-        <!-- Column 1: the vehicle -->
-        <div class="appraisal-col">
-          <div class="appraisal-card" id="apCardEquipment">
-            <div class="car-panel-title">Equipment</div>
-            <div id="apOptionsPlug"></div>
-            <div id="apEquipment" class="equipment-groups"></div>
-          </div>
-        </div>
-
         <!-- Column 2: market, values, history -->
         <div class="appraisal-col">
           <div class="appraisal-card" id="apCardMarket">
@@ -532,10 +528,6 @@
           <div class="appraisal-card" id="apCardRetail">
             <div class="car-panel-title">Retail Performance <span class="audit-note">your store's own sales</span></div>
             <div id="apRetail"></div>
-          </div>
-          <div class="appraisal-card" id="apCardHistory">
-            <div class="car-panel-title">Vehicle History &amp; Window Sticker</div>
-            <div id="apHistoryPlugs" class="plug-list"></div>
           </div>
           <div class="appraisal-card" id="apCardRecalls">
             <div class="car-panel-title">Safety Recalls</div>

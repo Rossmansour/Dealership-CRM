@@ -2217,12 +2217,13 @@ function renderProviderSlots() {
   const byCat = cat => providerList.filter(p => p.category === cat);
   const slots = cat => byCat(cat).map(p => providerSlotHtml(p)).join('');
   renderAppraisalMarket();
-  document.getElementById('apOptionsPlug').innerHTML = slots('options');
+  // Factory options: a small status tag beside the Equipment heading.
+  document.getElementById('apOptionsPlug').innerHTML = byCat('options').map(p => html`<button type="button" class="history-chip ap-options-chip" data-history="${p.key}"
+    title="${p.status === 'live' ? p.name : `${p.name}: not available yet`}">${p.name}<span>${p.status === 'live' ? '✓' : 'n/a'}</span></button>`).join('');
   document.getElementById('apBookPlugs').innerHTML = slots('book') +
     html`<button type="button" class="btn-secondary btn-small" disabled title="Not available yet -- needs the book licenses">Print Book Sheets (not available yet)</button>`;
   document.getElementById('apAuctionPlugs').innerHTML = slots('auctions') +
     pendingStats(['Above', 'Average', 'Below', 'Last 30 days', 'Last 6 months', 'Last year']);
-  document.getElementById('apHistoryPlugs').innerHTML = slots('history') + slots('sticker');
 }
 
 // ----- Market Comparables (live once market data is connected) -----
@@ -2729,10 +2730,27 @@ function renderSummaryHeader() {
   document.getElementById('apSummaryVehicle').textContent = appraisalVehicle(a);
   document.getElementById('apSummaryVin').textContent = [a.vin ? `VIN ${a.vin}` : 'No VIN yet',
     a.mileage ? `${Number(a.mileage).toLocaleString()} mi` : '', a.exteriorColor].filter(Boolean).join(' · ');
-  document.getElementById('apHistoryChips').innerHTML = providerList.filter(p => p.category === 'history').map(p => html`
-    <button type="button" class="history-chip" onclick="jumpToAppraisalCard('apCardHistory')" title="${p.status === 'live' ? p.name : `${p.name}: not available yet`}">
+  // Carfax, AutoCheck, and the window sticker: a chip each; clicking one shows what it is.
+  document.getElementById('apHistoryChips').innerHTML = providerList.filter(p => p.category === 'history' || p.category === 'sticker').map(p => html`
+    <button type="button" class="history-chip" data-history="${p.key}" aria-expanded="false" title="${p.status === 'live' ? p.name : `${p.name}: not available yet`}">
       ${p.name}<span>${p.status === 'live' ? '✓' : 'n/a'}</span></button>`).join('');
+  document.getElementById('apHistoryInfo').hidden = true;
 }
+document.getElementById('apSummaryCard').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-history]');
+  if (!chip) return;
+  const info = document.getElementById('apHistoryInfo');
+  const open = !info.hidden && info.dataset.key === chip.dataset.history;
+  document.querySelectorAll('#apSummaryCard [data-history]').forEach(c => c.setAttribute('aria-expanded', 'false'));
+  if (open) { info.hidden = true; return; }
+  const p = providerList.find(x => x.key === chip.dataset.history);
+  if (!p) return;
+  info.dataset.key = p.key;
+  info.innerHTML = html`<strong>${p.name}</strong> -- ${p.description}
+    ${p.status === 'live' ? '' : html`<span class="audit-note">Not available yet -- fills in once ${p.needs} is connected.</span>`}`;
+  info.hidden = false;
+  chip.setAttribute('aria-expanded', 'true');
+});
 
 // Every value next to the appraisal, with the difference (value - appraisal).
 function renderValues() {
