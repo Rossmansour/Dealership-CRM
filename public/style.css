@@ -2932,3 +2932,13 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .ph-status { margin-top: 8px; display: grid; gap: 4px; font-size: 13px; }
 .ph-status div { font-size: 13px; }
 .phone-settings .modal-actions #phMsg { margin-right: auto; }
+
+/* @mentions */
+.mention-host { position: relative; }
+.mention-menu { position: fixed; z-index: 2000; min-width: 240px; max-width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18); padding: 4px; }
+.mention-menu[hidden] { display: none; }
+.mention-menu button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 6px 8px; border-radius: 6px; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+.mention-menu button.active, .mention-menu button:hover { background: var(--highlight-bg); }
+.mention-menu .msg-avatar { width: 26px; height: 26px; font-size: 11px; }
+.mention-menu small { display: block; font-size: 11px; color: var(--text-muted); }
+.mention { color: var(--blue); font-weight: 600; background: var(--highlight-bg); border-radius: 4px; padding: 0 2px; }

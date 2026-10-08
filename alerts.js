@@ -23,6 +23,7 @@ const ALERT_TYPES = [
   { key: 'duplicate_found', category: 'Customers', label: 'Possible duplicate lead', description: 'A new lead looks like a customer already in the CRM and is waiting in Duplicate Leads.', audience: ['admin', 'sales_manager'] },
   { key: 'video_watched', category: 'Customers', label: 'Customer watched your video', description: 'A customer pressed play on a video texted to them from the CRM.', audience: 'assigned', priority: 'high', sound: true },
   { key: 'inspection_decided', category: 'Service', label: 'Customer answered an inspection', description: 'A customer approved or declined work from a vehicle inspection you sent.', audience: 'assigned', priority: 'high', sound: true },
+  { key: 'mentioned', category: 'Customers', label: 'Someone @mentioned you', description: 'A coworker typed @ and your name in a note on a customer.', audience: 'assigned', priority: 'high', sound: true },
   { key: 'task_assigned', category: 'Tasks & appointments', label: 'Task or appointment assigned to you', description: 'Someone else schedules a task or appointment for you.', audience: 'assigned' },
   { key: 'task_due', category: 'Tasks & appointments', label: 'Task or appointment due', description: 'One of your tasks or appointments is due now.', audience: 'assigned', priority: 'high', sound: true },
   { key: 'trade_needs_appraisal', category: 'Appraisals', label: 'Trade waiting for appraisal', description: 'Sales sent a trade over from a customer page.', audience: ['admin', 'sales_manager'] },

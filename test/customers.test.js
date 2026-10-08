@@ -166,3 +166,20 @@ test('added as a phone-up they are Engaged; as a walk-in they are at Visit', asy
   assert.deepStrictEqual([phoneUp.activities[0].type, phoneUp.activities[0].reached, phoneUp.activities[0].by.name], ['call', true, (await as(sales, 'GET', '/auth/me')).body.name]);
   assert.strictEqual(walkIn.activities[0].type, 'visit');
 });
+
+test('@mentioning a coworker in a note alerts them', async () => {
+  const name = u => h.api('GET', '/auth/me', null, u.cookie).then(r => r.body.name);
+  const [mgrName, bdcName] = [await name(manager), await name(bdc)];
+  const lead = (await as(sales, 'POST', '/leads', { name: 'Mona Mention', source: 'website' })).body;
+  const a = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'note', text: `@${mgrName} can you approve the trade? cc @${bdcName.toUpperCase()}, @nobody here` })).body;
+  assert.deepStrictEqual(a.mentions.map(m => m.name).sort(), [mgrName, bdcName].sort());
+  for (const u of [manager, bdc]) {
+    const alert = (await as(u, 'GET', '/alerts')).body.find(x => x.type === 'mentioned' && x.link.id === lead.id);
+    assert.ok(alert, 'alerted');
+    assert.match(alert.title, /mentioned you on Mona Mention/);
+  }
+  // Mentioning yourself doesn't alert you; no @, no mentions.
+  await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'note', text: `note to self @${await name(sales)}` });
+  assert.ok(!(await as(sales, 'GET', '/alerts')).body.some(x => x.type === 'mentioned'));
+  assert.ok(!(await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'note', text: 'plain note' })).body.mentions);
+});
