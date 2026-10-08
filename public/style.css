@@ -3131,3 +3131,55 @@ button.ac-card:hover { border-color: var(--blue); }
 .in-fi-bar input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text); }
 .in-fi-table td:first-child, .in-fi-table th:first-child { min-width: 220px; }
 .in-fi-table th { white-space: nowrap; }
+
+/* Appraisal: vehicle fields in the top card */
+.ap-summary-left { min-width: 0; }
+.ap-summary-vehicle-fields { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ap-summary-vehicle-fields .appraisal-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ap-summary-vehicle-fields .appraisal-grid .span-3 { grid-column: span 4; }
+
+/* Appraisal: price to market */
+#apCardPrice { margin-bottom: 12px; }
+.ap-ptm { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 22px; align-items: start; }
+.ap-ptm-calc { display: flex; flex-direction: column; gap: 8px; }
+.ap-ptm-calc label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; margin: 0; }
+.ap-ptm-calc input { width: 120px; text-align: right; font-size: 15px; font-weight: 600; }
+.ap-ptm-rank { display: flex; align-items: center; gap: 6px; font-weight: 400; }
+.ap-ptm-rank input { width: 64px; }
+.ap-ptm-line { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding-top: 6px; border-top: 1px solid var(--border); }
+.ap-ptm-line .audit-note { display: block; font-weight: 400; }
+.ap-ptm-gross strong { font-size: 16px; color: var(--green); }
+.ap-ptm-gross strong.neg { color: var(--red); }
+.ap-ptm-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.ap-ptm-facts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); }
+.ap-ptm-facts strong { color: var(--text); }
+.ap-ptm-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ap-ptm-toggle button { border: none; background: var(--surface); color: var(--text-secondary); padding: 5px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ap-ptm-toggle button.active { background: var(--blue); color: #fff; }
+.ap-ptm-viz { cursor: ew-resize; touch-action: none; border-radius: 8px; outline: none; user-select: none; }
+.ap-ptm-viz:has(svg .ap-ptm-trend) { cursor: ns-resize; }
+.ap-ptm-viz.locked { cursor: default; }
+.ap-ptm-viz:focus-visible { box-shadow: 0 0 0 2px var(--blue); }
+.ap-ptm-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.ap-ptm-tick { fill: var(--blue); opacity: 0.55; }
+.ap-ptm-avg { stroke: var(--text); stroke-width: 2; stroke-dasharray: 4 3; }
+.ap-ptm-lbl { fill: var(--text-secondary); font-size: 12px; }
+.ap-ptm-sub { font-size: 11px; fill: var(--text-muted); }
+.z-under, .z-over { fill: var(--red); opacity: 0.7; }
+.z-low, .z-high { fill: var(--amber); opacity: 0.75; }
+.z-in { fill: var(--green); opacity: 0.8; }
+.ap-ptm-pin line { stroke: var(--heading); stroke-width: 2; }
+.ap-ptm-pin circle { fill: var(--blue); stroke: var(--surface); stroke-width: 3; }
+.ap-ptm-bubble { fill: var(--heading); }
+.ap-ptm-bubble-text { fill: var(--surface); font-size: 13px; font-weight: 700; }
+.ap-ptm-graph-label { fill: var(--heading); }
+.ap-ptm-grid { stroke: var(--border); }
+.ap-ptm-trend { stroke: var(--text-secondary); stroke-width: 2; stroke-dasharray: 6 4; }
+.ap-ptm-dot { fill: var(--text-muted); opacity: 0.75; }
+.ap-ptm-priceline { stroke: var(--blue) !important; stroke-width: 1 !important; stroke-dasharray: 3 3; opacity: 0.7; }
+@media (max-width: 900px) {
+  .ap-ptm { grid-template-columns: 1fr; }
+  .ap-summary-vehicle-fields .appraisal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ap-summary-vehicle-fields .appraisal-grid .span-3 { grid-column: span 2; }
+}
+.ap-ptm-avg-lbl { font-weight: 700; fill: var(--text); }

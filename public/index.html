@@ -423,6 +423,7 @@
           <div class="ap-history-chips" id="apHistoryChips"></div>
         </div>
         <div class="ap-summary-grid">
+          <div class="ap-summary-left">
           <div class="ap-summary-fields">
             <label>Source
               <select id="apSource">
@@ -440,31 +441,7 @@
             </label>
             <label>Appraiser <select id="apAppraiser"></select></label>
           </div>
-          <div class="ap-values" id="apValues"></div>
-        </div>
-      </div>
-
-      <nav class="ap-tabs" id="apTabs" aria-label="Appraisal sections">
-        <button type="button" data-target="apCardVehicle">Vehicle</button>
-        <button type="button" data-target="apCardEquipment">Equipment</button>
-        <button type="button" data-target="apCardMarket">Market</button>
-        <button type="button" data-target="apCardBooks">Books</button>
-        <button type="button" data-target="apCardAuctions">Auctions</button>
-        <button type="button" data-target="apCardRetail">Retail</button>
-        <button type="button" data-target="apCardHistory">History</button>
-        <button type="button" data-target="apCardRecalls">Recalls</button>
-        <button type="button" data-target="apCardRecon">Recon</button>
-        <button type="button" data-target="apCardCalc">Calculator</button>
-        <button type="button" data-target="apCardOffer">Offer</button>
-        <button type="button" data-target="apOutcomeCard">Outcome</button>
-        <button type="button" class="ap-collapse-all" id="apCollapseAllBtn">Collapse all</button>
-      </nav>
-
-      <div class="appraisal-layout">
-        <!-- Column 1: the vehicle -->
-        <div class="appraisal-col">
-          <div class="appraisal-card" id="apCardVehicle">
-            <div class="car-panel-title">Vehicle</div>
+          <div class="ap-summary-vehicle-fields">
             <div class="vin-row">
               <label>VIN <input type="text" id="apVin" maxlength="20" autocomplete="off" spellcheck="false" placeholder="17 characters -- details fill in automatically" /></label>
               <button type="button" class="btn-secondary" id="apDecodeBtn">Decode VIN</button>
@@ -502,7 +479,35 @@
             </div>
             <label class="appraisal-notes">Notes <textarea id="apNotes" rows="3" placeholder="Damage, tires, smells, keys, anything the next person should know"></textarea></label>
           </div>
+          </div>
+          <div class="ap-values" id="apValues"></div>
+        </div>
+      </div>
 
+      <nav class="ap-tabs" id="apTabs" aria-label="Appraisal sections">
+        <button type="button" data-target="apCardPrice">Price to market</button>
+        <button type="button" data-target="apCardEquipment">Equipment</button>
+        <button type="button" data-target="apCardMarket">Market</button>
+        <button type="button" data-target="apCardBooks">Books</button>
+        <button type="button" data-target="apCardAuctions">Auctions</button>
+        <button type="button" data-target="apCardRetail">Retail</button>
+        <button type="button" data-target="apCardHistory">History</button>
+        <button type="button" data-target="apCardRecalls">Recalls</button>
+        <button type="button" data-target="apCardRecon">Recon</button>
+        <button type="button" data-target="apCardCalc">Calculator</button>
+        <button type="button" data-target="apCardOffer">Offer</button>
+        <button type="button" data-target="apOutcomeCard">Outcome</button>
+        <button type="button" class="ap-collapse-all" id="apCollapseAllBtn">Collapse all</button>
+      </nav>
+
+      <div class="appraisal-card" id="apCardPrice">
+        <div class="car-panel-title">Price to Market</div>
+        <div id="apPtm"></div>
+      </div>
+
+      <div class="appraisal-layout">
+        <!-- Column 1: the vehicle -->
+        <div class="appraisal-col">
           <div class="appraisal-card" id="apCardEquipment">
             <div class="car-panel-title">Equipment</div>
             <div id="apOptionsPlug"></div>
@@ -553,10 +558,10 @@
               <span>Work out:</span>
               <label><input type="radio" name="apSolveFor" value="appraisal" /> Appraisal</label>
               <label><input type="radio" name="apSolveFor" value="profit" /> Profit</label>
-              <label><input type="radio" name="apSolveFor" value="asking" /> Asking price</label>
+              <label><input type="radio" name="apSolveFor" value="asking" /> Internet price</label>
             </div>
             <div class="offer-calc">
-              <label>Asking price <input type="number" id="apTargetRetail" placeholder="What it should sell for" /></label>
+              <label>Internet price <input type="number" id="apTargetRetail" placeholder="What it should sell for" /></label>
               <div class="offer-line"><span>- Recon</span><span id="apCalcRecon">$0</span></div>
               <div class="offer-line"><span>- Pack</span><span id="apCalcPack">$0</span></div>
               <label>- Other <input type="number" id="apOtherCosts" placeholder="Transport, fees..." /></label>
