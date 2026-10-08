@@ -169,7 +169,8 @@ themeToggleBtn.addEventListener('click', () => {
 const MODULES = [
   { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
-  { key: 'insight', brand: 'Insight Domus', label: 'Insight', views: ['insightsales', 'insightleaders', 'insightfi', 'insightinventory', 'insightmarketing', 'insighttrend'], permissions: ['viewAllReports'],
+  { key: 'insight', brand: 'Insight Domus', label: 'Insight', views: ['insightstore', 'insightsales', 'insightleaders', 'insightfi', 'insightinventory', 'insightmarketing', 'insighttrend', 'insightfixed', 'insightexpenses'],
+    permissions: ['viewAllReports', 'viewDashboardStore', 'viewDashboardFixed', 'viewAccounting'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.3 15.3L20.5 20.5"/><path d="M7.5 12.5v-2M10.5 12.5v-4.5M13.5 12.5v-3"/></svg>' },
   { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'messages', 'leads', 'board', 'duplicates', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
@@ -193,7 +194,8 @@ const VIEW_PANELS = {
   reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard',
   acctbook: 'accounting', acctcashier: 'accounting', acctpayables: 'accounting', acctschedules: 'accounting', acctjournal: 'accounting',
   acctledger: 'accounting', acctstatements: 'accounting', acctbank: 'accounting', accttitles: 'accounting', acctsetup: 'accounting',
-  insightsales: 'insightPanel', insightleaders: 'insightPanel', insightfi: 'insightPanel', insightinventory: 'insightPanel', insightmarketing: 'insightPanel', insighttrend: 'insightPanel'
+  insightsales: 'insightPanel', insightleaders: 'insightPanel', insightfi: 'insightPanel', insightinventory: 'insightPanel', insightmarketing: 'insightPanel', insighttrend: 'insightPanel',
+  insightstore: 'insightPanel', insightfixed: 'insightPanel', insightexpenses: 'insightPanel'
 };
 let currentView = 'pipeline';
 
@@ -205,11 +207,16 @@ const VIEW_LABELS = {
   partsorders: 'Special Orders & Reorder', accounting: 'Overview', acctbook: 'Book Deals', acctcashier: 'Cashier',
   acctpayables: 'Payables', acctschedules: 'Schedules', acctjournal: 'Journal Entries', acctledger: 'General Ledger',
   acctstatements: 'Financial Statement', acctbank: 'Bank Reconciliation', accttitles: 'Title Tracking', acctsetup: 'Setup & Month-End',
-  insightsales: 'Sales Summary', insightleaders: 'Leaderboard', insightfi: 'F&I & Lenders', insightinventory: 'Inventory Analysis', insightmarketing: 'Marketing', insighttrend: 'Gross Trend'
+  insightsales: 'Sales Summary', insightleaders: 'Leaderboard', insightfi: 'F&I & Lenders', insightinventory: 'Inventory Analysis', insightmarketing: 'Marketing', insighttrend: 'Gross Trend',
+  insightstore: 'Store Summary', insightfixed: 'Service & Parts', insightexpenses: 'Expenses & Cash'
 };
 const openRailGroups = new Set();
 // Screens only some people use.
-const VIEW_PERMISSIONS = { pricing: 'editInventory' };
+const VIEW_PERMISSIONS = {
+  pricing: 'editInventory',
+  insightstore: 'viewDashboardStore', insightfixed: 'viewDashboardFixed', insightexpenses: 'viewAccounting',
+  insightsales: 'viewAllReports', insightleaders: 'viewAllReports', insightfi: 'viewAllReports', insightinventory: 'viewAllReports', insightmarketing: 'viewAllReports', insighttrend: 'viewAllReports'
+};
 const viewVisible = v => !VIEW_PERMISSIONS[v] || userCan(VIEW_PERMISSIONS[v]);
 
 const moduleOfView = view => MODULES.find(m => m.views.includes(view));
@@ -260,7 +267,7 @@ window.showModule = function(moduleKey) {
   const module = MODULES.find(m => m.key === moduleKey);
   if (module.views.includes('leads')) clearLeadsListFilter();
   if (module.views.includes('inventory')) clearInventoryListFilter();
-  showView(module.views[0]);
+  showView(module.views.find(viewVisible) || module.views[0]);
 };
 
 function showView(view) {
@@ -275,7 +282,7 @@ function showView(view) {
   document.querySelectorAll('.rail-module').forEach(b => b.classList.toggle('active', b.dataset.module === module.key));
   document.querySelectorAll('.rail-subitem').forEach(b => b.classList.toggle('active', b.dataset.railView === view));
   if (!openRailGroups.has(`-${module.key}`)) document.querySelectorAll(`.rail-group[data-rail-group="${module.key}"]`).forEach(g => g.classList.add('open'));
-  document.querySelectorAll('.nav-icon[data-view]').forEach(b => { b.style.display = b.dataset.module === module.key ? '' : 'none'; });
+  document.querySelectorAll('.nav-icon[data-view]').forEach(b => { b.style.display = b.dataset.module === module.key && viewVisible(b.dataset.view) ? '' : 'none'; });
   document.getElementById('currentModuleName').textContent = module.brand || module.label;
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.getElementById(VIEW_PANELS[view]).classList.add('active');

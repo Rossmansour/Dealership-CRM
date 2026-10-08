@@ -47,7 +47,7 @@ async function openInsightView(view) {
   ins.view = view;
   inBody().innerHTML = html`<p class="audit-note">Loading…</p>`;
   try {
-    await ({ insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
+    await ({ insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
   } catch (err) { inBody().innerHTML = html`<p class="ac-error">${err.message}</p>`; }
 }
 
@@ -232,6 +232,112 @@ async function inTrend() {
         <td class="num"><strong>${inMoney(x.gross)}</strong></td><td class="num">${inMoney(x.pvr)}</td><td class="num">${x.goal ? inMoney(x.goal) : '--'}</td><td class="num">${x.goal ? inDelta(x.gross, x.goal, true) : '--'}</td></tr>`)}</tbody></table></div>`;
 }
 
+// ---------- Store summary ----------
+
+ins.month = '';
+const inMonthPicker = () => html`<input type="month" id="inMonth" value="${ins.month || inDay(0).slice(0, 7)}" />`;
+async function inStore() {
+  const s = await inGet(`/insight/store${ins.month ? `?month=${ins.month}` : ''}`);
+  const fromBooks = { books: 'Expenses come from the books (Accounting Domus).', entered: 'Expenses are the ones entered on the dashboard.', none: 'No expenses yet -- post them in Accounting or enter them on the dashboard.' }[s.expensesFrom];
+  inHead('Store Summary', `${s.month}${s.current ? ` · ${s.pace.elapsed} of ${s.pace.total} open days gone` : ''} · ${fromBooks}`, { range: false, extra: inMonthPicker() });
+  const cols = s.current ? ['gross', 'grossForecast', 'expenses', 'expensesForecast', 'net', 'netForecast', 'lastMonthNet', 'lastYearNet'] : ['gross', 'expenses', 'net', 'lastMonthNet', 'lastYearNet'];
+  const heads = { gross: 'Gross', grossForecast: 'Gross forecast', expenses: 'Expenses', expensesForecast: 'Expenses forecast', net: 'Net', netForecast: 'Net forecast', lastMonthNet: 'Last month net', lastYearNet: 'Last year net' };
+  ins.last = { name: `store-summary-${s.month}`, rows: [['Department', ...cols.map(c => heads[c])], ...s.rows.map(r => [r.label, ...cols.map(c => r[c])]), ['Total', ...cols.map(c => s.total[c])]] };
+  const cell = (v, strong) => html`<td class="num ${Number(v) < 0 ? 'ac-neg' : ''}">${strong ? html`<strong>${inMoney(v)}</strong>` : inMoney(v)}</td>`;
+  inBody().innerHTML = html`<div class="ac-cards">
+      <div class="ac-card"><span class="ac-card-label">Net profit${s.current ? ' so far' : ''}</span><span class="ac-card-value ${s.total.net < 0 ? 'ac-neg' : ''}">${inMoney(s.total.net)}</span>
+        <span class="in-cmp"><span>Last month</span>${inDelta(s.total.net, s.total.lastMonthNet, true)}</span><span class="in-cmp"><span>Last year</span>${inDelta(s.total.net, s.total.lastYearNet, true)}</span></div>
+      ${s.current ? html`<div class="ac-card"><span class="ac-card-label">Net forecast</span><span class="ac-card-value ${s.total.netForecast < 0 ? 'ac-neg' : ''}">${inMoney(s.total.netForecast)}</span><span class="ac-card-sub">Where the month lands at this pace</span></div>` : ''}
+      <div class="ac-card"><span class="ac-card-label">Total gross</span><span class="ac-card-value">${inMoney(s.total.gross)}</span>${s.current ? html`<span class="ac-card-sub">Forecast ${inMoney(s.total.grossForecast)}</span>` : ''}</div>
+      <div class="ac-card"><span class="ac-card-label">Expenses</span><span class="ac-card-value">${inMoney(s.total.expenses)}</span>${s.current ? html`<span class="ac-card-sub">Forecast ${inMoney(s.total.expensesForecast)}</span>` : ''}</div>
+      <div class="ac-card"><span class="ac-card-label">Fixed absorption</span><span class="ac-card-value">${inPct(s.absorption)}</span><span class="ac-card-sub">Service + parts gross ÷ overhead</span></div>
+      <div class="ac-card"><span class="ac-card-label">Units · ROs</span><span class="ac-card-value">${s.units.new + s.units.used} · ${s.ros}</span><span class="ac-card-sub">${s.units.new} new · ${s.units.used} used</span></div>
+    </div>
+    <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Department</th>${cols.map(c => html`<th class="num">${heads[c]}</th>`)}</tr></thead><tbody>
+      ${s.rows.map(r => html`<tr><td><strong>${r.label}</strong></td>${cols.map(c => cell(r[c], c.startsWith('net')))}</tr>`)}
+      <tr class="ac-strong"><td>Total store</td>${cols.map(c => cell(s.total[c], true))}</tr></tbody></table></div>
+    <p class="audit-note">Gross is live from deals, repair orders, and counter tickets -- it doesn't wait for deals to be booked. ${s.current ? 'Expense forecast: the average of the last 3 months, or this month at its pace if higher.' : ''}</p>`;
+}
+
+// ---------- Service & parts ----------
+
+async function inFixed() {
+  const f = await inGet(`/insight/fixed?${inRangeQs()}`);
+  inHead('Service & Parts', 'Closed repair orders and counter sales in the range; open ROs as of now.');
+  ins.last = { name: `technicians-${f.from}-${f.to}`, rows: [['Technician', 'Pay', 'Jobs', 'Hours flagged', 'Hours clocked', 'Productivity %', 'Labor sold'], ...f.techs.map(t => [t.name, t.payType, t.jobs, t.flagged, t.clocked, t.productivity ?? '', t.labor])] };
+  const label = { customer: 'Customer pay', warranty: 'Warranty', internal: 'Internal', retail: 'Counter retail', wholesale: 'Wholesale', internal_: 'Internal' };
+  const maxOpen = Math.max(0, ...f.openBuckets.map(b => b.ros));
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small">
+      <div class="ac-card"><span class="ac-card-label">ROs closed</span><span class="ac-card-value">${f.ros}</span><span class="ac-card-sub">${inNum(f.hours)} hours sold</span></div>
+      <div class="ac-card"><span class="ac-card-label">Effective labor rate</span><span class="ac-card-value">${inMoney(f.elr)}</span><span class="ac-card-sub">Customer-pay labor ÷ hours</span></div>
+      <div class="ac-card"><span class="ac-card-label">CP hours per RO</span><span class="ac-card-value">${inNum(f.cpHoursPerRo)}</span></div>
+      <div class="ac-card"><span class="ac-card-label">Service gross</span><span class="ac-card-value">${inMoney(f.serviceGross)}</span><span class="ac-card-sub">${inPct(f.laborMargin)} of labor sold</span></div>
+      <div class="ac-card"><span class="ac-card-label">Parts gross</span><span class="ac-card-value">${inMoney(f.partsGross)}</span><span class="ac-card-sub">${inPct(f.partsMargin)} of parts sold</span></div>
+    </div>
+    <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Labor type</th><th class="num">ROs</th><th class="num">Hours</th><th class="num">Hours / RO</th><th class="num">Labor sold</th><th class="num">ELR</th><th class="num">Labor gross</th><th class="num">Parts sold</th><th class="num">Parts gross</th></tr></thead><tbody>
+      ${f.byType.map(x => html`<tr><td><strong>${label[x.type]}</strong></td><td class="num">${x.ros}</td><td class="num">${inNum(x.hours)}</td><td class="num">${inNum(x.hoursPerRo)}</td><td class="num">${inMoney(x.labor)}</td><td class="num">${inMoney(x.elr)}</td><td class="num">${inMoney(x.laborGross)}</td><td class="num">${inMoney(x.parts)}</td><td class="num">${inMoney(x.partsGross)}</td></tr>`)}
+      ${f.counter.map(x => html`<tr><td><strong>Counter: ${x.type === 'internal' ? 'internal' : x.type}</strong></td><td class="num">${x.tickets} tickets</td><td></td><td></td><td></td><td></td><td></td><td class="num">${inMoney(x.sale)}</td><td class="num">${inMoney(x.gross)}</td></tr>`)}
+    </tbody></table></div>
+    <div class="ac-grid2">
+      <div class="ac-box"><div class="ca-section-title">Technicians</div>
+        <table class="data-table ac-table"><thead><tr><th>Technician</th><th class="num">Flagged</th><th class="num">Clocked</th><th>Productivity</th><th class="num">Labor sold</th></tr></thead><tbody>
+          ${f.techs.length ? f.techs.map(t => html`<tr><td><strong>${t.name}</strong><div class="audit-note">${t.payType === 'flat' ? 'Flat rate' : t.payType === 'hourly' ? 'Hourly' : ''} · ${t.jobs} jobs</div></td><td class="num">${inNum(t.flagged)}</td><td class="num">${inNum(t.clocked)}</td>
+            <td class="in-bar-cell">${t.productivity === null ? '--' : html`<span class="in-bar-num">${inPct(t.productivity)}</span>${inBar(Math.min(t.productivity, 150), 150, `${inPct(t.productivity)} of clocked time flagged`)}`}</td><td class="num">${inMoney(t.labor)}</td></tr>`)
+            : html`<tr><td colspan="5" class="audit-note">No technician work in this range.</td></tr>`}</tbody></table>
+        <p class="audit-note">Productivity = hours flagged on closed ROs ÷ hours on the clock.</p></div>
+      <div class="ac-box"><div class="ca-section-title">Advisors</div>
+        <table class="data-table ac-table"><thead><tr><th>Advisor</th><th class="num">ROs</th><th class="num">CP hours / RO</th><th class="num">ELR</th><th class="num">Sold</th></tr></thead><tbody>
+          ${f.advisors.length ? f.advisors.map(a => html`<tr><td><strong>${a.name}</strong></td><td class="num">${a.ros}</td><td class="num">${inNum(a.hoursPerRo)}</td><td class="num">${inMoney(a.elr)}</td><td class="num">${inMoney(a.total)}</td></tr>`)
+            : html`<tr><td colspan="5" class="audit-note">No ROs closed in this range.</td></tr>`}</tbody></table></div>
+    </div>
+    <div class="ac-grid2">
+      <div class="ac-box"><div class="ca-section-title">Open ROs by age</div>
+        ${f.openBuckets.map(b => html`<div class="in-pen"><span>${b.label}</span>${inBar(b.ros, maxOpen, `${b.ros} ROs`)}<strong>${b.ros}</strong></div>`)}</div>
+      <div class="ac-box"><div class="ca-section-title">Oldest open ROs</div>
+        ${f.open.length ? html`<table class="data-table ac-table"><thead><tr><th>RO</th><th>Customer</th><th>Advisor</th><th class="num">Days</th><th class="num">So far</th></tr></thead><tbody>
+          ${f.open.slice(0, 12).map(o => html`<tr><td><strong>RO-${o.roNumber}</strong><div class="audit-note">${o.status.replace('_', ' ')}</div></td><td>${o.customer}<div class="audit-note">${o.vehicle}</div></td><td>${o.advisor}</td><td class="num ${o.days > 3 ? 'ac-late' : ''}">${o.days}</td><td class="num">${inMoney(o.sale)}</td></tr>`)}</tbody></table>`
+          : html`<p class="audit-note">No open ROs.</p>`}</div>
+    </div>`;
+}
+
+// ---------- Expenses & cash ----------
+
+async function inExpenses() {
+  const e = await inGet(`/insight/expenses${ins.month ? `?month=${ins.month}` : ''}`);
+  const monthLabel = k => new Date(`${k}-15T12:00`).toLocaleDateString([], { month: 'short', year: '2-digit' });
+  inHead('Expenses & Cash', `Expenses from the books for ${monthLabel(e.month)} against recent months; cash as of today.`, { range: false, extra: inMonthPicker() });
+  ins.last = { name: `expenses-${e.month}`, rows: [['Account', 'Department', '6-mo avg', ...e.months.map(monthLabel), '3-mo avg', 'This month', 'vs 3-mo avg', 'Last year', 'vs last year'],
+    ...e.lines.map(l => [`${l.number} ${l.name}`, l.deptLabel, l.avg6, ...l.last3, l.avg3, l.mtd, l.vs3, l.lastYear, l.vsLastYear])] };
+  // More spent than usual reads as a warning; the sign says which way.
+  const diff = v => (Number(v) ? html`<span class="in-delta ${v > 0 ? 'down' : 'up'}">${v > 0 ? '▲ +' : '▼ −'}${inMoney(Math.abs(v))}</span>` : html`<span class="in-delta">--</span>`);
+  let lastDept = null;
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small">
+      <div class="ac-card"><span class="ac-card-label">Expenses this month</span><span class="ac-card-value">${inMoney(e.totals.mtd)}</span></div>
+      <div class="ac-card"><span class="ac-card-label">3-month average</span><span class="ac-card-value">${inMoney(e.totals.avg3)}</span></div>
+      <div class="ac-card"><span class="ac-card-label">Same month last year</span><span class="ac-card-value">${inMoney(e.totals.lastYear)}</span></div>
+      <div class="ac-card"><span class="ac-card-label">Deals not booked</span><span class="ac-card-value">${e.unbooked.length}</span><span class="ac-card-sub">Oldest 10 below</span></div>
+      <div class="ac-card"><span class="ac-card-label">Titles not at DMV</span><span class="ac-card-value">${e.titlesOpen}</span><span class="ac-card-sub">Delivered deals</span></div>
+    </div>
+    <div class="ca-section-title">Key expenses</div>
+    <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Account</th><th class="num">6-mo avg</th>${e.months.map(m => html`<th class="num">${monthLabel(m)}</th>`)}<th class="num">3-mo avg</th><th class="num">This month</th><th class="num">vs 3-mo avg</th><th class="num">Last year</th><th class="num">vs last year</th></tr></thead><tbody>
+      ${e.lines.length ? e.lines.map(l => {
+        const head = l.dept !== lastDept ? html`<tr class="ac-sub"><td colspan="10">${l.deptLabel}</td></tr>` : '';
+        lastDept = l.dept;
+        return html`${head}<tr><td>${l.number} ${l.name}</td><td class="num">${inMoney(l.avg6)}</td>${l.last3.map(v => html`<td class="num">${inMoney(v)}</td>`)}<td class="num">${inMoney(l.avg3)}</td><td class="num"><strong>${inMoney(l.mtd)}</strong></td><td class="num">${diff(l.vs3)}</td><td class="num">${inMoney(l.lastYear)}</td><td class="num">${diff(l.vsLastYear)}</td></tr>`;
+      }) : html`<tr><td colspan="10" class="audit-note">No expenses posted in the books yet. Bills and journal entries in Accounting Domus show up here.</td></tr>`}</tbody></table></div>
+    <div class="ca-section-title">Cash: what's owed, and how old</div>
+    <div class="table-scroll"><table class="data-table ac-table"><thead><tr><th>Schedule</th><th></th><th class="num">Items</th><th class="num">Total</th><th class="num">Over 30 days</th><th class="num">Oldest</th></tr></thead><tbody>
+      ${e.schedules.map(x => html`<tr><td><strong>${x.number} ${x.name}</strong></td><td class="audit-note">${x.side}</td><td class="num">${x.items}</td><td class="num">${inMoney(x.total)}</td><td class="num ${x.over30 ? 'ac-late' : ''}">${inMoney(x.over30)}</td><td class="num ${x.oldest > 30 ? 'ac-late' : ''}">${x.items ? `${x.oldest}d` : '--'}</td></tr>`)}</tbody></table></div>
+    <div class="ac-grid2">
+      <div class="ac-box"><div class="ca-section-title">10 oldest contracts in transit</div>
+        ${e.oldestCit.length ? html`<table class="data-table ac-table"><thead><tr><th>Deal</th><th>Lender -- customer</th><th class="num">Amount</th><th class="num">Days</th></tr></thead><tbody>
+          ${e.oldestCit.map(c => html`<tr><td><strong>${c.control}</strong></td><td>${c.name}</td><td class="num">${inMoney(c.balance)}</td><td class="num ${c.age > 10 ? 'ac-late' : ''}">${c.age}</td></tr>`)}</tbody></table>` : html`<p class="audit-note">Nothing waiting on a lender.</p>`}</div>
+      <div class="ac-box"><div class="ca-section-title">10 oldest deals not booked</div>
+        ${e.unbooked.length ? html`<table class="data-table ac-table"><thead><tr><th>Deal</th><th>Customer</th><th class="num">Amount</th><th class="num">Days</th></tr></thead><tbody>
+          ${e.unbooked.map(d => html`<tr><td><strong>D-${d.dealNumber}</strong><div class="audit-note">${d.lender}</div></td><td>${d.customer}</td><td class="num">${inMoney(d.amount)}</td><td class="num ${d.days > 3 ? 'ac-late' : ''}">${d.days}</td></tr>`)}</tbody></table>` : html`<p class="audit-note">Every delivered deal is booked.</p>`}</div>
+    </div>`;
+}
+
 // ---------- Events ----------
 
 const inRoot = document.getElementById('insightPanel');
@@ -239,6 +345,7 @@ inRoot.addEventListener('change', (e) => {
   const t = e.target;
   if (t.id === 'inFrom' || t.id === 'inTo') { ins.from = document.getElementById('inFrom').value; ins.to = document.getElementById('inTo').value; return openInsightView(ins.view); }
   if (t.id === 'inInvType') { ins.invType = t.value; return openInsightView(ins.view); }
+  if (t.id === 'inMonth') { ins.month = t.value; return openInsightView(ins.view); }
   if (t.id === 'inPreset' && t.value) {
     const today = inDay(0), y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
     if (t.value === 'mtd') { ins.from = `${today.slice(0, 7)}-01`; ins.to = today; }
