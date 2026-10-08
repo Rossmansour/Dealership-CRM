@@ -59,7 +59,8 @@ function stageOf(lead, deals, openAppointments) {
   const acts = lead.activities || [];
   if (acts.some(a => a.type === 'visit')) return 'visit';
   if (acts.some(a => a.reached || a.type === 'appointment') || lead.status === 'negotiating' || openAppointments.has(lead.id)) return 'engaged';
-  if (acts.some(a => OUTREACH.includes(a.type)) || lead.status === 'contacted') return 'attempted';
+  // A missed call from them isn't us reaching out: they stay New.
+  if (acts.some(a => OUTREACH.includes(a.type) && a.direction !== 'in') || lead.status === 'contacted') return 'attempted';
   return 'new';
 }
 
@@ -316,7 +317,7 @@ async function plan(dealershipId, { userIds = null, by = PLANNER } = {}) {
       if (!stage || stage === 'delivered') continue;
       const owner = ownerOf(lead, stage, people);
       if (!owner) continue;
-      const doneToday = new Set((lead.activities || []).filter(a => dayNumber(new Date(a.date).getTime(), tz) === today).map(a => a.type));
+      const doneToday = new Set((lead.activities || []).filter(a => dayNumber(new Date(a.date).getTime(), tz) === today && (a.direction !== 'in' || a.reached)).map(a => a.type));
       for (const t of plannedToday.get(lead.id) || []) doneToday.add(t);
       const outreach = busy.has(lead.id) || confirmedLeads.has(lead.id) || doneToday.has('visit') ? [] : channelsFor(lead, doneToday);
       const needsVideo = !videoSent.has(lead.id) && !videoOpen.has(lead.id);

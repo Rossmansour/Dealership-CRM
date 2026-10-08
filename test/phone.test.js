@@ -122,13 +122,28 @@ const voice = (params, path = '/twilio/voice') => inbound(params, { path });
 // The URL Twilio is told to come back to, out of the TwiML.
 const actionOf = xml => xml.match(/action="([^"]+)"/)[1].replace(/&amp;/g, '&');
 const leadById = async id => (await as(sales, 'GET', '/leads')).body.find(x => x.id === id);
+const unamp = u => u.replace(/&amp;/g, '&');
+// Someone's phone picks up and they press 1 (or don't). `who`: whose number in the Dial.
+async function pickUp(twimlText, digits = '1', nth = 0) {
+  const screenUrl = unamp([...twimlText.matchAll(/<Number url="([^"]+)"/g)][nth][1]);
+  const screen = await inbound({ CallStatus: 'in-progress' }, { path: screenUrl });
+  const gather = unamp(screen.text.match(/<Gather[^>]* action="([^"]+)"/)[1]);
+  return { screen, accept: await inbound({ Digits: digits }, { path: gather }) };
+}
+// The whole inbound call: picked up and taken, then ends after `secs`.
+async function answered(twimlText, secs) {
+  await pickUp(twimlText);
+  return inbound({ DialCallStatus: 'completed', DialCallDuration: String(secs) }, { path: actionOf(twimlText) });
+}
 
 test("a customer calling an employee's number rings their cell, and the call is logged with its length", async () => {
   const r = await voice({ From: '+16025552020', To: '+16025550001', CallSid: 'CAin1' });
   assert.strictEqual(r.status, 200);
-  assert.match(r.text, /<Dial callerId="\+16025552020"[^>]*><Number>\+14805550002<\/Number><\/Dial>/, "rings the cell, showing the customer's number");
+  assert.match(r.text, /<Dial callerId="\+16025552020"[^>]*><Number url="[^"]*\/twilio\/voice\/screen[^"]*">\+14805550002<\/Number><\/Dial>/, "rings the cell, showing the customer's number");
   assert.strictEqual((await leadById(lead.id)).activities[0].status, 'ringing');
 
+  const { screen } = await pickUp(r.text);
+  assert.match(screen.text, /call from Lena Brooks. Press 1 to take it/);
   const done = await inbound({ DialCallStatus: 'completed', DialCallDuration: '75' }, { path: actionOf(r.text) });
   assert.strictEqual(done.status, 200);
   const call = (await leadById(lead.id)).activities[0];
@@ -150,10 +165,12 @@ test('a missed call alerts whoever has the customer; unknown callers become cust
   assert.match(l.name, /Call from \(480\) 555-7700/);
   assert.strictEqual(String(l.sales1Id), String(sales.id));
 
-  // The store's line has nobody's cell to ring: missed, straight away.
-  const store = await voice({ From: '+14805557711', To: '+16025550000' });
-  assert.match(store.text, /<Redirect>.*DialCallStatus=no-answer<\/Redirect>/);
-  assert.strictEqual((await voice({ From: '+14805557711', To: '+16025550000' })).status, 200);
+  // A voicemail picking up never presses 1: still a missed call.
+  const vm = await voice({ From: '+16025552020', To: '+16025550001' });
+  const { accept } = await pickUp(vm.text, '');
+  assert.match(accept.text, /<Hangup\/>/);
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '30' }, { path: actionOf(vm.text) });
+  assert.strictEqual((await leadById(lead.id)).activities[0].text, 'Missed call');
   assert.strictEqual((await inbound({ From: '+1', To: '+1' }, { path: '/twilio/voice', sign: false })).status, 403, 'signed only');
 });
 
@@ -185,7 +202,7 @@ test('incoming calls are recorded (after the notice); outgoing record only the e
   const r = await voice({ From: '+16025552020', To: '+16025550001' });
   assert.match(r.text, /<Say>This call may be recorded for quality and training.<\/Say><Dial[^>]* record="record-from-answer-dual"/);
   assert.match(r.text, /recordingStatusCallback="[^"]*\/twilio\/voice\/recording/);
-  await inbound({ DialCallStatus: 'completed', DialCallDuration: '40' }, { path: actionOf(r.text) });
+  await answered(r.text, 40);
   const recUrl = r.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&');
   await inbound({ RecordingStatus: 'completed', RecordingSid: 'RE1', RecordingUrl: 'https://api.twilio.com/2010-04-01/Accounts/AC1/Recordings/RE1', RecordingDuration: '40' }, { path: recUrl });
   const call = (await leadById(lead.id)).activities[0];
@@ -218,7 +235,7 @@ test('AI summary of an incoming call is saved and emailed', async () => {
   assert.deepStrictEqual(s.summaryEmails, ['gm@store.com', 'sm@store.com']);
 
   const r = await voice({ From: '+16025552020', To: '+16025550001' });
-  await inbound({ DialCallStatus: 'completed', DialCallDuration: '95' }, { path: actionOf(r.text) });
+  await answered(r.text, 95);
   await inbound({ RecordingSid: 'RE2', RecordingUrl: 'https://api.twilio.com/x/RE2', RecordingDuration: '95' }, { path: r.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&') });
   await phone.pendingSummary();
 
@@ -242,11 +259,49 @@ test('AI summary of an incoming call is saved and emailed', async () => {
   mailer.setTransport(null);
   const before = { key: process.env.RESEND_API_KEY }; delete process.env.RESEND_API_KEY;
   const r2 = await voice({ From: '+16025552020', To: '+16025550001' });
-  await inbound({ DialCallStatus: 'completed', DialCallDuration: '10' }, { path: actionOf(r2.text) });
+  await answered(r2.text, 10);
   await inbound({ RecordingSid: 'RE4', RecordingUrl: 'https://api.twilio.com/x/RE4', RecordingDuration: '10' }, { path: r2.text.match(/recordingStatusCallback="([^"]+)"/)[1].replace(/&amp;/g, '&') });
   await phone.pendingSummary();
   const c2 = (await leadById(lead.id)).activities[0];
   assert.deepStrictEqual([!!c2.summary.text, c2.summary.emailed], [true, false]);
   assert.match(c2.summary.emailNote, /isn't set up yet/);
   if (before.key) process.env.RESEND_API_KEY = before.key;
+});
+
+// ---------- Who gets the customer ----------
+
+test("the store line rings everyone taking leads; whoever takes it gets the new customer, and they're Engaged", async () => {
+  const s2 = await h.createUser('salesperson');
+  await as(admin, 'PUT', `/users/${s2.id}`, { cellPhone: '4805550003' });
+  const r = await voice({ From: '+14805556600', To: '+16025550000' });
+  const nums = [...r.text.matchAll(/<Number url="[^"]+">([^<]+)<\/Number>/g)].map(m => m[1]);
+  assert.ok(nums.includes('+14805550002') && nums.includes('+14805550003'), 'rings everyone with a cell at once');
+  const fresh = (await as(manager, 'GET', '/leads')).body.find(x => x.phone === '+14805556600');
+  assert.ok(!fresh.sales1Id, 'nobody yet -- not the round robin either');
+
+  // The second salesperson takes it.
+  const idx = nums.indexOf('+14805550003');
+  await pickUp(r.text, '1', idx);
+  await inbound({ DialCallStatus: 'completed', DialCallDuration: '120' }, { path: actionOf(r.text) });
+  const l = (await as(manager, 'GET', '/leads')).body.find(x => x.id === fresh.id);
+  assert.strictEqual(String(l.sales1Id), String(s2.id));
+  assert.match(l.activities.find(a => a.type === 'status').text, /took their call/);
+  const call = l.activities.find(a => a.type === 'call');
+  assert.deepStrictEqual([call.reached, String(call.by.id)], [true, String(s2.id)]);
+  assert.strictEqual(require('../taskplan').stageOf(l, [], new Set()), 'engaged');
+
+  // Someone who already has a salesperson keeps them.
+  const r2 = await voice({ From: '+16025552020', To: '+16025550000' });
+  await pickUp(r2.text, '1', [...r2.text.matchAll(/<Number url="[^"]+">([^<]+)<\/Number>/g)].map(m => m[1]).indexOf('+14805550003'));
+  assert.strictEqual(String((await leadById(lead.id)).sales1Id), String(sales.id));
+});
+
+test('nobody takes it: a new caller stays New, and the managers hear about it', async () => {
+  const r = await voice({ From: '+14805556611', To: '+16025550000' });
+  await inbound({ DialCallStatus: 'no-answer' }, { path: actionOf(r.text) });
+  const l = (await as(manager, 'GET', '/leads')).body.find(x => x.phone === '+14805556611');
+  assert.ok(!l.sales1Id);
+  assert.strictEqual(l.activities[0].text, 'Missed call');
+  assert.strictEqual(require('../taskplan').stageOf(l, [], new Set()), 'new', 'their missed call is not us reaching out');
+  assert.ok((await as(manager, 'GET', '/alerts')).body.some(a => a.type === 'missed_call' && a.link.id === l.id));
 });

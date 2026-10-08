@@ -18,7 +18,8 @@ const HOUR = 60 * MIN;
 const SOLD_DEAL = ['delivered', 'closed', 'finalized'];
 // What counts as reaching out to a customer (a note or a status change doesn't).
 const CONTACT_TYPES = ['call', 'text', 'email', 'visit'];
-const isContact = a => CONTACT_TYPES.includes(a.type) ||
+// Customers texting or calling in isn't us responding -- unless we picked up.
+const isContact = a => (a.direction === 'in' ? a.type === 'call' && a.reached : CONTACT_TYPES.includes(a.type)) ||
   (a.type === 'task' && a.taskStatus !== 'cancelled' && ['call', 'text', 'email'].includes(a.taskType));
 
 // Response time: from when the lead came in to the first call, text,

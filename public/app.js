@@ -1435,7 +1435,8 @@ function pipelineStageOf(lead) {
   const engaged = acts.some(a => a.reached || a.type === 'appointment') || lead.status === 'negotiating' ||
     openTasks.some(t => t.leadId === lead.id && t.type === 'appointment');
   if (engaged) return 'engaged';
-  if (acts.some(a => OUTREACH.includes(a.type)) || lead.status === 'contacted') return 'attempted';
+  // A missed call from them isn't us reaching out: they stay New.
+  if (acts.some(a => OUTREACH.includes(a.type) && a.direction !== 'in') || lead.status === 'contacted') return 'attempted';
   return 'new';
 }
 

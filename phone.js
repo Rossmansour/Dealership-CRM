@@ -11,7 +11,11 @@
 // (Twilio also answers those words itself).
 //
 // Calls: a customer calling an employee's number rings that employee's own
-// cell (Admin -> Users), showing the customer's number. "Call" on a customer
+// cell (Admin -> Users), showing the customer's number. The store's main
+// number rings everyone taking leads at once. Whoever picks up hears who's
+// calling and presses 1 to take it (so a voicemail can't "answer"); they
+// talked, so the customer is Engaged, and the customer is theirs if nobody
+// had them yet. Nobody takes it: a missed call, and a new caller stays New. "Call" on a customer
 // page rings the employee's cell first, then connects them to the customer,
 // who sees the employee's business number -- never their personal one.
 // Every call is logged on the customer with how long it lasted; missed ones
@@ -103,6 +107,7 @@ async function ownerOf(number) {
 // several), locked for the update. A number we don't know becomes a new
 // customer for the employee whose number it reached.
 async function customerFor(q, deps, who, user, from, how) {
+  // A new caller goes to whoever takes the call, not the round robin.
   const { rows } = await q.query(
     `SELECT id FROM leads WHERE dealership_id = $1 AND right(regexp_replace(coalesce(data->>'phone', ''), '\\D', '', 'g'), 10) = $2 ORDER BY seq DESC LIMIT 1`,
     [who.dealershipId, last10(from)]);
@@ -110,7 +115,7 @@ async function customerFor(q, deps, who, user, from, how) {
   const created = await deps.createLead(q, who, {
     name: `${how} from ${pretty(from)}`, phone: from, source: 'phone',
     ...(user ? { sales1Id: user.id } : {})
-  });
+  }, { roundRobin: how !== 'Call' });
   await audit.created(q, who, 'lead', created, `New customer from a ${how === 'Text' ? 'text message' : 'phone call'}`);
   return { lead: await store.get(q, 'leads', who.dealershipId, created.id, { forUpdate: true }), isNew: true };
 }
@@ -166,7 +171,20 @@ async function summarizeCall(dealershipId, leadId, activityId) {
   return text;
 }
 
-// deps: { createLead(q, who, fields), publicBase(req) }
+// Who the store's main number rings: everyone with a cell who's taking
+// leads -- just the sales round robin's members when it's on. (Up to 10.)
+async function storeLineStaff(dealershipId) {
+  const d = await store.getDealership(store.pool, dealershipId);
+  const rot = (((d && d.settings) || {}).rotations || {}).sales || {};
+  const members = rot.enabled && (rot.memberIds || []).length ? rot.memberIds.map(String) : null;
+  const { rows } = await store.pool.query(
+    `SELECT id::text AS id, name, role, cell_phone FROM users
+     WHERE dealership_id = $1 AND active AND available AND cell_phone IS NOT NULL AND role = ANY($2) ORDER BY name`,
+    [dealershipId, ['salesperson', 'bdc', 'sales_manager']]);
+  return (members ? rows.filter(u => members.includes(u.id)) : rows).slice(0, 10);
+}
+
+// deps: { createLead(q, who, fields, opts), publicBase(req) }
 function publicRouter(deps) {
   const r = express.Router();
   const twiml = res => res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
@@ -242,7 +260,8 @@ function publicRouter(deps) {
     });
     const ids = { d: dealershipId, l: lead.id, a: activity.id };
     const done = back(req, '/twilio/voice/done', ids);
-    if (user && user.cell_phone) {
+    const ring = user ? (user.cell_phone ? [user] : []) : await storeLineStaff(dealershipId);
+    if (ring.length) {
       const cfg = await settingsOf(dealershipId);
       const dial = { callerId: from, timeout: 25, action: done };
       if (cfg.recordInbound) {
@@ -250,13 +269,58 @@ function publicRouter(deps) {
         vr.say(cfg.notice);
         Object.assign(dial, { record: 'record-from-answer-dual', recordingStatusCallback: back(req, '/twilio/voice/recording', ids), recordingStatusCallbackEvent: 'completed' });
       }
-      // Their cell shows the customer's number, like any forwarded call.
-      vr.dial(dial).number(user.cell_phone);
+      // Their cells show the customer's number, like any forwarded call. All
+      // ring at once; the first to take it gets it.
+      const d = vr.dial(dial);
+      for (const p of ring) d.number({ url: back(req, '/twilio/voice/screen', { ...ids, u: p.id }) }, p.cell_phone);
     } else {
       // Nobody to ring (the store line, or no cell on file): it's missed.
       vr.redirect(`${done}&DialCallStatus=no-answer`);
     }
     voice(res, vr);
+  }));
+
+  // Someone's phone picked up: say who's calling, press 1 to take it. A
+  // voicemail never presses 1, so it never counts as answering.
+  r.post('/twilio/voice/screen', form, signed, wrap(async (req, res) => {
+    const { d, l, a, u } = req.query;
+    const vr = new VoiceResponse();
+    const [lead, dealership] = await Promise.all([store.get(store.pool, 'leads', String(d), String(l)), store.getDealership(store.pool, String(d))]);
+    const name = lead && !/^(Call|Text) from /.test(lead.name) ? lead.name : 'a new customer';
+    vr.gather({ numDigits: 1, timeout: 8, action: back(req, '/twilio/voice/accept', { d, l, a, u }) })
+      .say(`${dealership ? dealership.name : 'Store'} call from ${name}. Press 1 to take it.`);
+    vr.hangup();
+    voice(res, vr);
+  }));
+
+  // They pressed 1: the call connects, it's theirs, and the customer is
+  // theirs too if nobody had them yet.
+  r.post('/twilio/voice/accept', form, signed, wrap(async (req, res) => {
+    const { d, l, a, u } = req.query;
+    const vr = new VoiceResponse();
+    if (String((req.body || {}).Digits || '') !== '1') { vr.hangup(); return voice(res, vr); }
+    const { rows } = await store.pool.query('SELECT id::text AS id, name, role FROM users WHERE id::text = $1 AND dealership_id = $2 AND active', [String(u), String(d)]);
+    const taker = rows[0];
+    if (!taker) { vr.hangup(); return voice(res, vr); }
+    await store.tx(async q => {
+      const out = await updateCall(q, String(d), String(l), String(a), () => ({
+        answeredBy: { id: taker.id, name: taker.name }, by: { id: taker.id, name: taker.name }, status: 'talking', text: `Incoming call -- ${taker.name} took it`
+      }));
+      if (!out) return;
+      const { lead } = out;
+      const field = taker.role === 'bdc' ? 'bdc1Id' : 'sales1Id';
+      if (!lead[field]) {
+        lead[field] = taker.id;
+        lead.activities.unshift({ id: crypto.randomUUID(), type: 'status', date: new Date().toISOString(), by: { id: taker.id, name: taker.name },
+          text: `Assigned to ${taker.name} (${field === 'bdc1Id' ? 'BDC 1' : 'Sales 1'}) -- took their call` });
+        await store.save(q, 'leads', String(d), lead.id, lead);
+        await audit.record(q, { dealershipId: String(d), userId: taker.id, userName: taker.name, ip: req.ip }, {
+          action: 'update', entityType: 'lead', entityId: lead.id, label: audit.labelFor('lead', lead),
+          details: `${field === 'bdc1Id' ? 'BDC 1' : 'Sales 1'} → ${taker.name} (took their call)`
+        });
+      }
+    });
+    voice(res, vr); // empty: connects them
   }));
 
   // "Call" on a customer page rang the employee's cell and they picked up:
@@ -279,10 +343,10 @@ function publicRouter(deps) {
     const b = req.body || {};
     const status = String(req.query.DialCallStatus || b.DialCallStatus || '');
     const secs = Number(b.DialCallDuration) || 0;
-    const talked = status === 'completed' && secs > 0;
     const vr = new VoiceResponse();
+    let talked = false;
     const result = await store.tx(async q => {
-      const out = await updateCall(q, String(d), String(l), String(a), call => ({
+      const out = await updateCall(q, String(d), String(l), String(a), call => (talked = status === 'completed' && secs > 0 && (call.direction === 'out' || !!call.answeredBy), {
         status: 'done', outcome: talked ? 'answered' : status === 'busy' ? 'busy' : 'missed', seconds: secs, reached: talked,
         text: call.direction === 'in'
           ? (talked ? `Incoming call · ${duration(secs)}` : 'Missed call')
@@ -297,6 +361,11 @@ function publicRouter(deps) {
       }
       if (call.direction === 'in' && !talked) {
         const userIds = [by && by.id, lead.sales1Id, lead.bdc1Id].filter(Boolean).map(String);
+        // Nobody has this customer yet: the managers hear about it.
+        if (!userIds.length) {
+          const { rows } = await q.query(`SELECT id::text AS id FROM users WHERE dealership_id = $1 AND active AND role = ANY($2)`, [String(d), ['admin', 'general_manager', 'sales_manager']]);
+          userIds.push(...rows.map(r => r.id));
+        }
         await alerts.notify(q, {
           dealershipId: String(d), type: 'missed_call', userIds: [...new Set(userIds)], actorId: null,
           title: `Missed call from ${lead.name}`, body: pretty(call.from), link: { kind: 'lead', id: lead.id }

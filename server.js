@@ -214,7 +214,7 @@ app.post('/v/:token/played', (req, res, next) => (async () => {
 // A vehicle inspection the customer approves or declines (no sign-in).
 app.use(inspection.publicRouter());
 // Texts customers send to an employee's number or the store's (from Twilio).
-app.use(phone.publicRouter({ createLead: (q, who, fields) => createLead(q, who, fields), publicBase: req => publicBase(req) }));
+app.use(phone.publicRouter({ createLead: (q, who, fields, opts) => createLead(q, who, fields, opts), publicBase: req => publicBase(req) }));
 
 app.use('/api', auth.requireLogin);
 app.use('/api', auth.router);
@@ -818,7 +818,7 @@ async function checkLeadAssignments(q, req, fields) {
 
 // Builds and saves a new customer. Used by "Add Lead" and by appraisal
 // customer offers, so every customer gets the same fields and a number.
-async function createLead(q, req, fields) {
+async function createLead(q, req, fields, { roundRobin = true } = {}) {
   const clean = leadFields(fields);
   // A salesperson (or BDC agent) adding a customer is their Sales 1 (or
   // BDC 1) unless they pick someone else.
@@ -842,7 +842,7 @@ async function createLead(q, req, fields) {
   // Looks like a customer we already have? It waits in Duplicate Leads
   // instead of going out by round robin.
   const dupe = await duplicates.checkNew(q, req.dealershipId, lead);
-  if (!dupe.hold) await assignFromRotations(q, req, lead);
+  if (!dupe.hold && roundRobin) await assignFromRotations(q, req, lead);
   await store.insert(q, 'leads', req.dealershipId, lead);
   await alertAssignments(q, req, null, lead);
   if (dupe.original) await duplicates.alertOwners(q, req, lead, dupe.original);
