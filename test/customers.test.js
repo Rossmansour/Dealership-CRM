@@ -156,3 +156,13 @@ test('activities record who logged them', async () => {
   const note = (await as(sales, 'POST', `/leads/${lead.id}/activities`, { type: 'note', text: 'x', reached: true })).body;
   assert.strictEqual(note.reached, undefined);
 });
+
+test('added as a phone-up they are Engaged; as a walk-in they are at Visit', async () => {
+  const { stageOf } = require('../taskplan');
+  const phoneUp = (await as(sales, 'POST', '/leads', { name: 'Paula Phoneup', phone: '6025559001', source: 'phone' })).body;
+  const walkIn = (await as(sales, 'POST', '/leads', { name: 'Walter Walkin', source: 'walk-in' })).body;
+  const web = (await as(sales, 'POST', '/leads', { name: 'Wendy Web', source: 'website' })).body;
+  assert.deepStrictEqual([phoneUp, walkIn, web].map(l => stageOf(l, [], new Set())), ['engaged', 'visit', 'new']);
+  assert.deepStrictEqual([phoneUp.activities[0].type, phoneUp.activities[0].reached, phoneUp.activities[0].by.name], ['call', true, (await as(sales, 'GET', '/auth/me')).body.name]);
+  assert.strictEqual(walkIn.activities[0].type, 'visit');
+});

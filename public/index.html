@@ -904,9 +904,10 @@
           <label>ZIP <input type="text" id="leadZip" maxlength="10" inputmode="numeric" /></label>
         </div>
         <label>Source
-          <select id="leadSource">
-            <option value="walk-in">Walk-in</option>
-            <option value="phone">Phone</option>
+          <select id="leadSource" required>
+            <option value="" disabled selected>Pick one…</option>
+            <option value="walk-in" title="Goes straight to Visit">Walk-in</option>
+            <option value="phone" title="Goes straight to Engaged">Phone up</option>
             <option value="website">Website</option>
             <option value="referral">Referral</option>
             <option value="autotrader">Autotrader</option>
