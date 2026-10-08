@@ -2331,8 +2331,8 @@ function apPtmSync() {
           </div>
           <div class="ap-ptm-viz ${locked ? 'locked' : ''}" id="apPtmViz" tabindex="${locked ? '-1' : '0'}" role="slider" aria-label="Internet price" aria-valuemin="0"></div>
           <p class="audit-note">${locked ? 'This appraisal is closed.' : apPtmView === 'bar'
-            ? 'Drag the pin (or use the arrow keys) to set the internet price. Each tick is a similar car, adjusted to this car\'s miles.'
-            : 'Each dot is a similar car by miles and asking price; the dashed line is the market trend. Drag up or down to set the internet price.'}</p>
+            ? 'Drag the pin (or use the arrow keys) to set the internet price. Each tick is a similar car for sale nearby, adjusted to this car\'s miles -- click one to open its listing.'
+            : 'Each dot is a similar car for sale nearby, by miles and listed price -- click one to open its listing. The dashed line is the market trend. Drag up or down to set the internet price.'}</p>
         </div>
       </div>`
       : html`<p class="audit-note">${providerList.some(x => x.key === 'market' && x.status === 'live')
@@ -2380,7 +2380,9 @@ function apPtmBar(m, price) {
   const bubbleX = px === null ? 0 : Math.min(W - 70, Math.max(70, px));
   return html`<svg viewBox="0 0 ${W} 146" class="ap-ptm-svg" aria-hidden="true">
     ${zones.map(([a, b, cls]) => { const x1 = Math.max(L, x(m.median * a)), x2 = Math.min(W - R, x(m.median * b)); return x2 > x1 ? html`<rect class="${cls}" x="${x1}" y="92" width="${x2 - x1}" height="7" />` : ''; })}
-    ${vals.map(v => html`<rect class="ap-ptm-tick" x="${x(v) - 1.5}" y="44" width="3" height="46"><title>${apPtmFmt(v)}</title></rect>`)}
+    ${m.comps.map((c, i) => ({ c, i, v: Number(c.adjusted) || Number(c.price) || 0 })).filter(t => t.v).map(({ c, i, v }) => html`<g class="ap-ptm-comp ${c.url ? 'has-url' : ''}" data-comp="${i}">
+      <rect class="ap-ptm-hit" x="${x(v) - 5}" y="40" width="10" height="54" /><rect class="ap-ptm-tick" x="${x(v) - 1.5}" y="44" width="3" height="46" />
+      <title>${c.title || 'Similar car'} · ${Number(c.miles || 0).toLocaleString()} mi · listed ${apPtmFmt(c.price)} (${apPtmFmt(v)} at this car's miles)${c.dealer ? ` · ${c.dealer}` : ''}${c.url ? ' · click to open the listing' : ''}</title></g>`)}
     <line class="ap-ptm-avg" x1="${x(m.median)}" x2="${x(m.median)}" y1="40" y2="102" />
     <text class="ap-ptm-lbl" x="${x(vals[0])}" y="118" text-anchor="${x(vals[0]) < 120 ? 'start' : 'middle'}">Low ${apPtmFmt(vals[0])} (${(vals[0] / m.median * 100).toFixed(0)}%)</text>
     <text class="ap-ptm-lbl" x="${x(vals[vals.length - 1])}" y="118" text-anchor="${x(vals[vals.length - 1]) > W - 120 ? 'end' : 'middle'}">High ${apPtmFmt(vals[vals.length - 1])} (${(vals[vals.length - 1] / m.median * 100).toFixed(0)}%)</text>
@@ -2397,7 +2399,7 @@ function apPtmBar(m, price) {
 function apPtmGraph(m, price) {
   const W = 640, H = 260, L = 58, R = 14, T = 14, B = 34;
   const miles = Number(apVehicleNow().mileage) || 0;
-  const pts = m.comps.map(c => ({ mi: Number(c.miles) || 0, p: Number(c.price) || 0, t: c.title })).filter(c => c.p);
+  const pts = m.comps.map((c, i) => ({ i, mi: Number(c.miles) || 0, p: Number(c.price) || 0, t: c.title, url: c.url, dealer: c.dealer })).filter(c => c.p);
   const xs = [...pts.map(c => c.mi), miles], ys = [...pts.map(c => c.p), ...(price ? [price] : [])];
   const xlo = Math.max(0, Math.min(...xs) * 0.9), xhi = Math.max(...xs) * 1.05 || 1;
   const ypad = Math.max(300, (Math.max(...ys) - Math.min(...ys)) * 0.1);
@@ -2416,7 +2418,8 @@ function apPtmGraph(m, price) {
     ${yt.map(v => html`<line class="ap-ptm-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" /><text class="ap-ptm-lbl" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${apPtmShort(v)}</text>`)}
     ${xt.map(v => html`<text class="ap-ptm-lbl" x="${x(v)}" y="${H - 12}" text-anchor="middle">${Math.round(v / 1000)}k mi</text>`)}
     <line class="ap-ptm-trend" x1="${x(xlo)}" x2="${x(xhi)}" y1="${y(at(xlo))}" y2="${y(at(xhi))}" />
-    ${pts.map(c => html`<circle class="ap-ptm-dot" cx="${x(c.mi)}" cy="${y(c.p)}" r="4.5"><title>${c.t} · ${Number(c.mi).toLocaleString()} mi · ${apPtmFmt(c.p)}</title></circle>`)}
+    ${pts.map(c => html`<g class="ap-ptm-comp ${c.url ? 'has-url' : ''}" data-comp="${c.i}"><circle class="ap-ptm-hit" cx="${x(c.mi)}" cy="${y(c.p)}" r="10" /><circle class="ap-ptm-dot" cx="${x(c.mi)}" cy="${y(c.p)}" r="4.5" />
+      <title>${c.t || 'Similar car'} · ${Number(c.mi).toLocaleString()} mi · ${apPtmFmt(c.p)}${c.dealer ? ` · ${c.dealer}` : ''}${c.url ? ' · click to open the listing' : ''}</title></g>`)}
     ${price ? html`<g class="ap-ptm-pin">
       <line class="ap-ptm-priceline" x1="${L}" x2="${W - R}" y1="${y(price)}" y2="${y(price)}" />
       <circle cx="${x(miles)}" cy="${y(price)}" r="8" />
@@ -2436,9 +2439,21 @@ function apPtmFromEvent(e) {
   return Math.round(v / 50) * 50;
 }
 const apPtmEl = document.getElementById('apPtm');
+// Clicking a similar car opens its listing; pressing on one and dragging
+// still moves the price.
+let apPtmPress = null; // { url, x, y } while a press on a listing hasn't moved
 apPtmEl.addEventListener('pointerdown', (e) => {
   const viz = e.target.closest('#apPtmViz');
-  if (!viz || viz.classList.contains('locked')) return;
+  if (!viz) return;
+  const compEl = e.target.closest('[data-comp]');
+  const comp = compEl && currentAppraisal && currentAppraisal.market ? currentAppraisal.market.comps[Number(compEl.dataset.comp)] : null;
+  if (comp && comp.url) {
+    apPtmPress = { url: comp.url, x: e.clientX, y: e.clientY };
+    viz.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    return;
+  }
+  if (viz.classList.contains('locked')) return;
   apPtmDragging = true;
   viz.focus({ preventScroll: true }); // so the typed boxes follow the drag
   viz.setPointerCapture(e.pointerId);
@@ -2447,11 +2462,23 @@ apPtmEl.addEventListener('pointerdown', (e) => {
   e.preventDefault();
 });
 apPtmEl.addEventListener('pointermove', (e) => {
+  if (apPtmPress && Math.hypot(e.clientX - apPtmPress.x, e.clientY - apPtmPress.y) > 5) {
+    apPtmPress = null;
+    const viz = document.getElementById('apPtmViz');
+    if (viz.classList.contains('locked')) return;
+    apPtmDragging = true;
+    viz.focus({ preventScroll: true });
+  }
   if (!apPtmDragging) return;
   const v = apPtmFromEvent(e);
   if (v !== null && v !== apPtmPrice()) apPtmSetPrice(v);
 });
-['pointerup', 'pointercancel'].forEach(t => apPtmEl.addEventListener(t, () => { apPtmDragging = false; }));
+apPtmEl.addEventListener('pointerup', () => {
+  if (apPtmPress && /^https?:\/\//i.test(apPtmPress.url)) window.open(apPtmPress.url, '_blank', 'noopener');
+  apPtmPress = null;
+  apPtmDragging = false;
+});
+apPtmEl.addEventListener('pointercancel', () => { apPtmPress = null; apPtmDragging = false; });
 apPtmEl.addEventListener('keydown', (e) => {
   if (e.target.id !== 'apPtmViz' || e.target.classList.contains('locked')) return;
   const step = e.shiftKey ? 500 : 100;

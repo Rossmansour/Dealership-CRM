@@ -3183,3 +3183,7 @@ button.ac-card:hover { border-color: var(--blue); }
   .ap-summary-vehicle-fields .appraisal-grid .span-3 { grid-column: span 2; }
 }
 .ap-ptm-avg-lbl { font-weight: 700; fill: var(--text); }
+.ap-ptm-hit { fill: transparent; }
+.ap-ptm-comp.has-url { cursor: pointer; }
+.ap-ptm-comp.has-url:hover .ap-ptm-tick { opacity: 1; }
+.ap-ptm-comp.has-url:hover .ap-ptm-dot { fill: var(--blue); opacity: 1; }
