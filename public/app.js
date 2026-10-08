@@ -90,6 +90,7 @@ function applyPermissionsToUI() {
   document.getElementById('adminFeeDefaultsBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminTaxRatesBtn').style.display = userCan('editSettings') ? '' : 'none';
   document.getElementById('adminDemoBtn').style.display = userCan('manageUsers') ? '' : 'none';
+  document.getElementById('adminPhoneBtn').style.display = userCan('editSettings') ? '' : 'none';
 }
 
 // Demo data: a sample store (staff, cars, customers, deals, ROs, parts) to
@@ -3297,6 +3298,44 @@ async function cpLogActivity(type, text, extra = {}) {
   return res.ok;
 }
 
+// "Call": the CRM rings my cell, then connects me to the customer from my
+// business number. The call shows up in their history when it ends.
+let cpCallTimer = null;
+async function cpPlaceCall(btn) {
+  const status = document.getElementById('cpCallStatus');
+  btn.disabled = true;
+  status.hidden = false;
+  status.className = 'cp-call-status';
+  status.textContent = 'Calling…';
+  try {
+    const res = await fetch(`${API}/leads/${currentProfileLeadId}/call`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not place the call.');
+    status.textContent = data.message;
+    // Watch for the call to end, then show it in their history.
+    clearInterval(cpCallTimer);
+    const started = Date.now();
+    cpCallTimer = setInterval(async () => {
+      await cpRefresh();
+      const call = (cpLead() || { activities: [] }).activities.find(a => a.id === data.activity.id);
+      if (!call || call.status === 'done' || Date.now() - started > 30 * 60 * 1000 || !leadProfileModal.classList.contains('active')) {
+        clearInterval(cpCallTimer);
+        const s = document.getElementById('cpCallStatus');
+        if (call && call.status === 'done') { s.textContent = call.text; setTimeout(() => { s.hidden = true; }, 8000); } else s.hidden = true;
+      } else if (call.status === 'dialing') document.getElementById('cpCallStatus').textContent = call.text;
+    }, 4000);
+  } catch (err) {
+    status.className = 'cp-call-status error';
+    status.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cp-call]');
+  if (btn) cpPlaceCall(btn);
+});
+
 // Reloads everything (lists behind the page stay current) and redraws.
 async function cpRefresh() {
   await Promise.all([loadAll(), cpFetchTasks()]);
@@ -3369,7 +3408,7 @@ function renderCpHeader(lead) {
   dupBtn.textContent = inDupBucket(lead) ? 'Not a duplicate' : 'Mark duplicate';
   dupBtn.title = inDupBucket(lead) ? 'Take this customer out of Duplicate Leads' : 'This customer is already in the CRM';
   document.getElementById('cpHeaderContact').innerHTML = html`
-    ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a>` : html`<span class="muted">No phone</span>`}
+    ${lead.phone ? html`<a href="tel:${lead.phone}">📞 ${lead.phone}</a><button type="button" class="cp-call-btn" data-cp-call title="Rings your cell, then connects you -- they see your business number">Call</button>` : html`<span class="muted">No phone</span>`}
     ${lead.email ? html`<a href="mailto:${lead.email}">✉️ ${lead.email}</a>` : html`<span class="muted">No email</span>`}
     <span class="muted">${formatSource(lead.source)}</span>`;
   const car = cars.find(c => c.id === lead.carId) || cars.find(c => c.id === (lead.wishList || [])[0]);
@@ -4034,6 +4073,15 @@ function renderHistory() {
           ${canDelete ? html`<button class="activity-delete" onclick="deleteActivity(${js(lead.id)}, ${js(a.id)})">Delete</button>` : ''}
         </div>
         <div class="activity-text">${a.text}</div>
+        ${a.recording ? html`<div class="call-recording">
+          <audio controls preload="none" src="${API}/leads/${lead.id}/calls/${a.id}/recording"></audio>
+          <span class="audit-note">${a.recording.sides === 'employee' ? 'Recording · your side only' : 'Recording'}</span>
+        </div>` : ''}
+        ${a.summary ? html`<div class="call-summary">
+          <div class="call-summary-title">✨ AI call summary</div>
+          <div class="call-summary-text">${a.summary.text}</div>
+          <div class="audit-note">${a.summary.emailed ? `Emailed to ${a.summary.emailedTo.join(', ')}` : `Not emailed: ${a.summary.emailNote || ''}`}</div>
+        </div>` : ''}
       </div>
     </div>`).join('') : html`<div class="cp-empty">Nothing logged yet.</div>`;
 }
@@ -5627,6 +5675,42 @@ function renderStoreHours(h) {
     </tr>`;
   }).join('');
 }
+
+// ---------- Phone & Recording (Admin) ----------
+document.getElementById('adminPhoneBtn').addEventListener('click', async () => {
+  adminMenuModal.classList.remove('active');
+  const res = await fetch(`${API}/phone-settings`);
+  if (!res.ok) return;
+  const s = await res.json();
+  document.getElementById('phRecordIn').checked = s.recordInbound;
+  document.getElementById('phNotice').value = s.notice;
+  document.getElementById('phRecordOut').checked = s.recordOutbound;
+  document.getElementById('phSummaries').checked = s.summaries;
+  document.getElementById('phEmails').value = s.summaryEmails.join(', ');
+  document.getElementById('phEmailEmployee').checked = s.emailEmployee;
+  document.getElementById('phStatus').innerHTML = html`
+    <div>${s.aiConnected ? '✅ AI connected' : '⚪ AI not connected (needs GEMINI_API_KEY) -- summaries wait until it is'}</div>
+    <div>${s.emailReady ? '✅ Email ready' : "⚪ Email isn't set up yet -- summaries are saved on the call but not emailed"}</div>`;
+  document.getElementById('phMsg').textContent = '';
+  document.getElementById('phoneSettingsModal').classList.add('active');
+});
+document.getElementById('phCloseBtn').addEventListener('click', () => document.getElementById('phoneSettingsModal').classList.remove('active'));
+document.getElementById('phoneSettingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('phMsg');
+  const res = await fetch(`${API}/phone-settings`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recordInbound: document.getElementById('phRecordIn').checked, notice: document.getElementById('phNotice').value,
+      recordOutbound: document.getElementById('phRecordOut').checked, summaries: document.getElementById('phSummaries').checked,
+      summaryEmails: document.getElementById('phEmails').value, emailEmployee: document.getElementById('phEmailEmployee').checked
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { msg.textContent = data.error || 'Could not save.'; return; }
+  document.getElementById('phEmails').value = data.summaryEmails.join(', ');
+  msg.textContent = 'Saved.';
+});
 
 document.getElementById('adminRotationBtn').addEventListener('click', async () => {
   adminMenuModal.classList.remove('active');

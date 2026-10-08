@@ -1680,6 +1680,12 @@ body:has(#leadProfileModal.active) { overflow: hidden; }
 .cp-contact-row a { color: #fff; text-decoration: none; }
 .cp-contact-row a:hover { text-decoration: underline; }
 .cp-contact-row .muted { color: rgba(255,255,255,0.6); }
+.cp-call-btn { margin-left: -8px; padding: 1px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.12); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.cp-call-btn:hover { background: rgba(255,255,255,0.25); }
+.cp-call-btn:disabled { opacity: 0.6; cursor: wait; }
+.cp-call-status { margin-top: 6px; font-size: 13px; color: #fff; background: rgba(255,255,255,0.12); border-radius: 6px; padding: 4px 10px; display: inline-block; }
+.cp-call-status.error { background: rgba(220,38,38,0.35); }
+.cp-call-status[hidden] { display: none; }
 .cp-header-side { text-align: right; font-size: 13px; min-width: 180px; }
 .cp-side-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.6); }
 .cp-side-car { font-weight: 700; font-size: 15px; }
@@ -2911,3 +2917,18 @@ body.rc-body { margin: 0; min-height: 100vh; }
   .msg-thread-head .msg-avatar { display: none; }
   .msg-thread-head { padding: 8px 10px; gap: 8px; }
 }
+
+/* Call recordings and AI summaries in a customer's history */
+.call-recording { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.call-recording audio { height: 32px; max-width: 100%; }
+.call-summary { margin-top: 8px; padding: 8px 10px; border-left: 3px solid var(--blue); background: var(--surface-alt); border-radius: 6px; }
+.call-summary-title { font-size: 12px; font-weight: 700; color: var(--heading); margin-bottom: 4px; }
+.call-summary-text { white-space: pre-wrap; font-size: 13px; }
+
+/* Admin: Phone & Recording */
+.phone-settings label { display: block; margin-bottom: 8px; }
+.phone-settings .ph-check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.phone-settings .ph-check input { width: auto; margin: 0; }
+.ph-status { margin-top: 8px; display: grid; gap: 4px; font-size: 13px; }
+.ph-status div { font-size: 13px; }
+.phone-settings .modal-actions #phMsg { margin-right: auto; }

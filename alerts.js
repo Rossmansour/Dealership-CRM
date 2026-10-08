@@ -30,8 +30,9 @@ const ALERT_TYPES = [
   { key: 'deal_pushed', category: 'Deals & credit', label: 'Deal pushed to the DMS', description: 'Sales pushed a deal from a customer page.', audience: ['admin', 'sales_manager', 'finance'] },
   { key: 'credit_pushed', category: 'Deals & credit', label: 'Credit app pushed', description: 'Sales pushed a credit app to a deal.', audience: ['admin', 'sales_manager', 'finance'] },
   { key: 'credit_status', category: 'Deals & credit', label: 'Credit app status changed', description: 'F&I marked your customer’s credit app pending, approved, conditional, or declined.', audience: 'assigned', priority: 'high' },
-  // Not available yet: need a service connected first.
+  { key: 'missed_call', category: 'Customers', label: 'Missed call', description: 'A customer called your number (or the store\'s) and nobody picked up.', audience: 'assigned', priority: 'high', sound: true },
   { key: 'text_reply', category: 'Customers', label: 'Customer texted back', description: 'A customer texted your number (or the store\'s) -- their text is in Messages and on their page.', audience: 'assigned', priority: 'high', sound: true },
+  // Not available yet: need a service connected first.
   { key: 'internet_lead', category: 'Customers', label: 'New internet lead', description: 'Needs internet lead intake (leads from your website and listing sites).', audience: 'assigned', available: false },
   { key: 'email_opened', category: 'Customers', label: 'Customer opened your email', description: 'Needs sending email from the CRM.', audience: 'assigned', available: false }
 ];
