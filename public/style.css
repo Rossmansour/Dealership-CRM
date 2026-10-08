@@ -1372,7 +1372,8 @@ body.cannot-deleteRecords .activity-delete { display: none; }
 #dashboard .pipeline-title { margin-bottom: 16px; }
 .pipeline-filters { display: flex; gap: 12px; flex-wrap: wrap; }
 .pipeline-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
-.pipeline-filters select { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.pipeline-filters label[hidden] { display: none; }
+.pipeline-filters select, .pipeline-filters input[type="date"] { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
 
 /* A path: numbered dots joined by one line, each step's name and count
    underneath. */

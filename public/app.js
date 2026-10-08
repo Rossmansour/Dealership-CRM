@@ -1479,6 +1479,16 @@ function pipelineLeads() {
     if (period === 'week') return now - added < 7 * DAY_MS;
     if (period === 'month') return added.getFullYear() === now.getFullYear() && added.getMonth() === now.getMonth();
     if (period === '30' || period === '90') return now - added < Number(period) * DAY_MS;
+    if (period === 'yesterday') { const y = new Date(now); y.setDate(y.getDate() - 1); return added.toDateString() === y.toDateString(); }
+    if (period === 'lastmonth') { const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return added.getFullYear() === lm.getFullYear() && added.getMonth() === lm.getMonth(); }
+    if (period === 'year') return added.getFullYear() === now.getFullYear();
+    if (period === 'custom') {
+      // Whole days in the store's own calendar, both ends included.
+      const from = document.getElementById('pipelineFrom').value, to = document.getElementById('pipelineTo').value;
+      if (from && added < new Date(`${from}T00:00:00`)) return false;
+      if (to && added >= new Date(new Date(`${to}T00:00:00`).getTime() + DAY_MS)) return false;
+      return true;
+    }
     return true;
   });
 }
@@ -1703,7 +1713,18 @@ function renderRail() {
 }
 
 document.getElementById('pipelineSourceFilter').addEventListener('change', renderPipeline);
-document.getElementById('pipelinePeriodFilter').addEventListener('change', renderPipeline);
+document.getElementById('pipelinePeriodFilter').addEventListener('change', (e) => {
+  const custom = e.target.value === 'custom';
+  document.querySelectorAll('.pipeline-custom').forEach(l => { l.hidden = !custom; });
+  if (custom && !document.getElementById('pipelineFrom').value) {
+    const d = new Date(), pad = x => String(x).padStart(2, '0');
+    document.getElementById('pipelineFrom').value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+    document.getElementById('pipelineTo').value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+  renderPipeline();
+});
+document.getElementById('pipelineFrom').addEventListener('change', renderPipeline);
+document.getElementById('pipelineTo').addEventListener('change', renderPipeline);
 
 // ---------- Filtered lists ----------
 // Clicking a number (a pipeline stage, a tile, a rail badge) opens the
