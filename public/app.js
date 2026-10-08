@@ -2084,6 +2084,9 @@ async function saveAppraisal() {
   }
   const saved = await res.json();
   const vehicleChanged = ['year', 'make', 'model'].some(f => String(saved[f] ?? '') !== String((appraisals.find(x => x.id === saved.id) || {})[f] ?? ''));
+  // Keep whichever market is newer: a pull may have landed after this save read the appraisal.
+  const mine = currentAppraisal.market;
+  if (mine && (!saved.market || new Date(mine.at) > new Date(saved.market.at))) saved.market = mine;
   replaceAppraisal(saved);
   currentAppraisal = JSON.parse(JSON.stringify(saved));
   setAppraisalDirty(false);
@@ -2511,13 +2514,17 @@ async function pullAppraisalMarket({ force = false } = {}) {
     const res = await fetch(`${API}/appraisals/${a.id}/market`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(v) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not get market data.');
-    if (currentAppraisal !== a) return; // moved on to another appraisal
-    a.market = data.market;
     const listed = appraisals.find(x => x.id === a.id);
     if (listed) listed.market = data.market;
+    // Saving swaps in a fresh copy of the appraisal, so match it by id --
+    // a save while this was pulling must not throw the result away.
+    if (!currentAppraisal || currentAppraisal.id !== a.id) return; // moved on to another appraisal
+    currentAppraisal.market = data.market;
     renderAppraisalMarket();
+    // The car changed while this was pulling: pull again for what's on screen now.
+    if (apMarketKey(apVehicleNow()) !== key) apAutoMarket(0);
   } catch (err) {
-    if (currentAppraisal === a) {
+    if (currentAppraisal && currentAppraisal.id === a.id) {
       renderAppraisalMarket();
       const note = document.querySelector('#apMarketPlug .audit-note');
       if (note) note.textContent = err.message;
