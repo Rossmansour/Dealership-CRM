@@ -2228,6 +2228,7 @@ function renderProviderSlots() {
 // price, which works the offer back from it.
 let apMarketOpen = false;
 function renderAppraisalMarket() {
+  apPtmSync();
   const el = document.getElementById('apMarketPlug');
   const p = providerList.find(x => x.key === 'market');
   if (!p || p.status !== 'live') {
@@ -2247,13 +2248,13 @@ function renderAppraisalMarket() {
       ${open ? html`<button type="button" class="btn-secondary btn-small" id="apMarketBtn">${m ? '↻ Refresh' : 'Pull market'}</button>` : ''}
     </div>
     ${m ? html`<div class="pending-stats retail-stats ap-market-stats">
-        ${stat('Comparables', m.count)}${stat('Rank at asking', rank ? `${rank} of ${m.count + 1}` : '--')}
+        ${stat('Comparables', m.count)}${stat('Rank at internet price', rank ? `${rank} of ${m.count + 1}` : '--')}
         ${stat('% of market', asking && m.median ? `${(asking / m.median * 100).toFixed(1)}%` : '--')}
         ${stat('Avg days listed', m.avgDaysListed ?? '--')}${stat('Low', money(m.low))}${stat('Market', money(m.median))}${stat('High', money(m.high))}
       </div>
       ${m.suggestedRetail ? html`<div class="ap-market-suggest">Suggested retail <strong>${money(m.suggestedRetail)}</strong>
-        ${open ? html`<button type="button" class="btn-primary btn-small" id="apUseMarketBtn">Use as asking price</button>` : ''}
-        <span class="audit-note">The offer calculator works the appraisal back from it (asking − recon − pack − profit).</span></div>`
+        ${open ? html`<button type="button" class="btn-primary btn-small" id="apUseMarketBtn">Use as internet price</button>` : ''}
+        <span class="audit-note">The offer calculator works the appraisal back from it (internet price − recon − pack − profit).</span></div>`
       : html`<p class="audit-note">${m.count ? `Only ${m.count} similar car${m.count === 1 ? '' : 's'} nearby -- not enough to suggest a price.` : 'No similar cars found nearby.'}</p>`}
       ${m.comps.length ? html`<button type="button" class="link-btn" id="apCompsToggle">${apMarketOpen ? 'Hide' : 'Show'} the ${m.comps.length} similar cars</button>
         ${apMarketOpen ? html`<table class="pr-comps"><thead><tr><th>Similar car</th><th>Miles</th><th>Price</th><th>Adjusted</th><th>Days</th><th>Dealer</th></tr></thead><tbody>
@@ -2272,6 +2273,210 @@ document.getElementById('apMarketPlug').addEventListener('click', async (e) => {
     return renderAppraisalMarket();
   }
   if (e.target.closest('#apMarketBtn')) pullAppraisalMarket({ force: true });
+});
+
+// ----- Price to Market -----
+// The internet price against the same cars for sale nearby. Drag the pin on
+// the bar (or the car's dot on the graph), or type a % of market, a rank,
+// or the price itself -- they all move together, and the offer calculator
+// works the appraisal back from the internet price.
+let apPtmView = (() => { try { return localStorage.getItem('apPtmView') || 'bar'; } catch (e) { return 'bar'; } })();
+let apPtmBuiltFor = null;
+const apPtmMarket = () => {
+  const p = providerList.find(x => x.key === 'market');
+  const m = currentAppraisal && currentAppraisal.market;
+  return p && p.status === 'live' && m && m.comps && m.comps.length && m.median ? m : null;
+};
+const apPtmPrice = () => apNumber('apTargetRetail');
+const apPtmSorted = m => m.comps.map(c => Number(c.adjusted) || Number(c.price) || 0).filter(Boolean).sort((a, b) => a - b);
+const apPtmRankOf = (m, price) => apPtmSorted(m).filter(v => v < price).length + 1;
+// Moving the price: the internet price drives the calculator, so it can't
+// be the number being worked out.
+function apPtmSetPrice(price) {
+  if (!currentAppraisal || currentAppraisal.status !== 'open') return;
+  price = Math.max(0, Math.round(price));
+  const radio = document.querySelector('input[name="apSolveFor"][value="asking"]');
+  if (radio && radio.checked) document.querySelector('input[name="apSolveFor"][value="appraisal"]').checked = true;
+  document.getElementById('apTargetRetail').value = price || '';
+  setAppraisalDirty(true);
+  updateOfferCalc();
+}
+function apPtmSync() {
+  const el = document.getElementById('apPtm');
+  if (!el || !currentAppraisal) return;
+  const m = apPtmMarket();
+  const key = `${currentAppraisal.id}|${currentAppraisal.status}|${m ? `${m.at}|${apPtmView}` : 'none'}`;
+  if (apPtmBuiltFor !== key) {
+    apPtmBuiltFor = key;
+    const locked = currentAppraisal.status !== 'open';
+    el.innerHTML = m ? html`<div class="ap-ptm">
+        <div class="ap-ptm-calc">
+          <label>% of market <input type="number" id="apPtmPct" step="0.1" ${locked ? html`disabled` : ''} /></label>
+          <label>Rank <span class="ap-ptm-rank"><input type="number" id="apPtmRank" min="1" max="${m.comps.length + 1}" ${locked ? html`disabled` : ''} /> <span>of ${m.comps.length + 1}</span></span></label>
+          <label>Internet price <input type="number" id="apPtmPrice" step="50" ${locked ? html`disabled` : ''} /></label>
+          <div class="ap-ptm-line"><span>Appraisal</span><strong id="apPtmAppraisal">--</strong></div>
+          <div class="ap-ptm-line"><span>Unit cost <span class="audit-note">appraisal + recon + pack + other</span></span><strong id="apPtmCost">--</strong></div>
+          <div class="ap-ptm-line ap-ptm-gross"><span>Potential gross</span><strong id="apPtmGross">--</strong></div>
+        </div>
+        <div class="ap-ptm-main">
+          <div class="ap-ptm-top">
+            <div class="ap-ptm-facts"><span>Market avg <strong>${money(m.median)}</strong></span><span>${m.comps.length} similar cars</span>${m.avgDaysListed !== null && m.avgDaysListed !== undefined ? html`<span>${m.avgDaysListed} days listed on average</span>` : ''}</div>
+            <div class="ap-ptm-toggle" role="group" aria-label="Show as">
+              <button type="button" data-ptm-view="bar" class="${apPtmView === 'bar' ? 'active' : ''}" aria-pressed="${apPtmView === 'bar' ? 'true' : 'false'}">Bar</button>
+              <button type="button" data-ptm-view="graph" class="${apPtmView === 'graph' ? 'active' : ''}" aria-pressed="${apPtmView === 'graph' ? 'true' : 'false'}">Graph</button>
+            </div>
+          </div>
+          <div class="ap-ptm-viz ${locked ? 'locked' : ''}" id="apPtmViz" tabindex="${locked ? '-1' : '0'}" role="slider" aria-label="Internet price" aria-valuemin="0"></div>
+          <p class="audit-note">${locked ? 'This appraisal is closed.' : apPtmView === 'bar'
+            ? 'Drag the pin (or use the arrow keys) to set the internet price. Each tick is a similar car, adjusted to this car\'s miles.'
+            : 'Each dot is a similar car by miles and asking price; the dashed line is the market trend. Drag up or down to set the internet price.'}</p>
+        </div>
+      </div>`
+      : html`<p class="audit-note">${providerList.some(x => x.key === 'market' && x.status === 'live')
+          ? 'Fills in once the market is pulled (enter the year, make, and model).'
+          : 'Not available yet -- fills in once market data is connected.'}</p>`;
+  }
+  if (m) apPtmUpdate(m);
+}
+function apPtmUpdate(m) {
+  const price = apPtmPrice();
+  const total = m.comps.length + 1;
+  const setIn = (id, v) => { const i = document.getElementById(id); if (i && document.activeElement !== i) i.value = v; };
+  setIn('apPtmPct', price ? (price / m.median * 100).toFixed(1) : '');
+  setIn('apPtmRank', price ? apPtmRankOf(m, price) : '');
+  setIn('apPtmPrice', price || '');
+  const reconTotal = [...document.querySelectorAll('.recon-cost')].reduce((t, i) => t + (Number(i.value) || 0), 0);
+  const appraisal = apNumber('apOffer');
+  const cost = appraisal ? appraisal + reconTotal + (Number(appSettings.appraisalPack) || 0) + apNumber('apOtherCosts') : null;
+  document.getElementById('apPtmAppraisal').textContent = appraisal ? money(appraisal) : '--';
+  document.getElementById('apPtmCost').textContent = cost !== null ? money(cost) : '--';
+  const gross = price && cost !== null ? price - cost : null;
+  const g = document.getElementById('apPtmGross');
+  g.textContent = gross !== null ? money(gross) : '--';
+  g.classList.toggle('neg', gross !== null && gross < 0);
+  const viz = document.getElementById('apPtmViz');
+  viz.setAttribute('aria-valuenow', price || 0);
+  viz.setAttribute('aria-valuetext', price ? `${money(price)}, ${(price / m.median * 100).toFixed(1)}% of market, rank ${apPtmRankOf(m, price)} of ${total}` : 'No internet price yet');
+  viz.innerHTML = apPtmView === 'bar' ? apPtmBar(m, price) : apPtmGraph(m, price);
+}
+const apPtmFmt = v => `$${Math.round(v).toLocaleString()}`;
+const apPtmShort = v => (Math.abs(v) >= 1000 ? `$${(v / 1000).toFixed(v >= 100000 ? 0 : 1)}k` : `$${Math.round(v)}`);
+// The bar: low to high, a tick per similar car, the market average, and
+// the internet price as a pin with its % of market.
+function apPtmBar(m, price) {
+  const W = 640, L = 16, R = 16;
+  const vals = apPtmSorted(m);
+  const lo0 = Math.min(vals[0], price || Infinity), hi0 = Math.max(vals[vals.length - 1], price || 0);
+  const pad = Math.max(200, (hi0 - lo0) * 0.06);
+  const lo = lo0 - pad, hi = hi0 + pad;
+  const x = v => L + (v - lo) / (hi - lo) * (W - L - R);
+  apPtmScale = { kind: 'bar', toPrice: px => lo + (px - L) / (W - L - R) * (hi - lo), W };
+  const zones = [[0, 0.9, 'z-under'], [0.9, 0.97, 'z-low'], [0.97, 1.03, 'z-in'], [1.03, 1.1, 'z-high'], [1.1, 9, 'z-over']];
+  const pct = price ? price / m.median * 100 : null;
+  const px = price ? x(price) : null;
+  const bubbleX = px === null ? 0 : Math.min(W - 70, Math.max(70, px));
+  return html`<svg viewBox="0 0 ${W} 146" class="ap-ptm-svg" aria-hidden="true">
+    ${zones.map(([a, b, cls]) => { const x1 = Math.max(L, x(m.median * a)), x2 = Math.min(W - R, x(m.median * b)); return x2 > x1 ? html`<rect class="${cls}" x="${x1}" y="92" width="${x2 - x1}" height="7" />` : ''; })}
+    ${vals.map(v => html`<rect class="ap-ptm-tick" x="${x(v) - 1.5}" y="44" width="3" height="46"><title>${apPtmFmt(v)}</title></rect>`)}
+    <line class="ap-ptm-avg" x1="${x(m.median)}" x2="${x(m.median)}" y1="40" y2="102" />
+    <text class="ap-ptm-lbl" x="${x(vals[0])}" y="118" text-anchor="${x(vals[0]) < 120 ? 'start' : 'middle'}">Low ${apPtmFmt(vals[0])} (${(vals[0] / m.median * 100).toFixed(0)}%)</text>
+    <text class="ap-ptm-lbl" x="${x(vals[vals.length - 1])}" y="118" text-anchor="${x(vals[vals.length - 1]) > W - 120 ? 'end' : 'middle'}">High ${apPtmFmt(vals[vals.length - 1])} (${(vals[vals.length - 1] / m.median * 100).toFixed(0)}%)</text>
+    <text class="ap-ptm-lbl ap-ptm-avg-lbl" x="${Math.min(W - 70, Math.max(70, x(m.median)))}" y="138" text-anchor="middle">Market avg ${apPtmFmt(m.median)}</text>
+    ${px !== null ? html`<g class="ap-ptm-pin">
+      <line x1="${px}" x2="${px}" y1="34" y2="104" />
+      <rect class="ap-ptm-bubble" x="${bubbleX - 66}" y="4" width="132" height="26" rx="6" />
+      <text class="ap-ptm-bubble-text" x="${bubbleX}" y="22" text-anchor="middle">${apPtmFmt(price)} · ${pct.toFixed(1)}%</text>
+      <circle cx="${px}" cy="104" r="8" />
+    </g>` : html`<text class="ap-ptm-lbl" x="${W / 2}" y="22" text-anchor="middle">Click the bar to set an internet price</text>`}
+  </svg>`;
+}
+// The graph: similar cars by miles and price, the market trend, and this car.
+function apPtmGraph(m, price) {
+  const W = 640, H = 260, L = 58, R = 14, T = 14, B = 34;
+  const miles = Number(apVehicleNow().mileage) || 0;
+  const pts = m.comps.map(c => ({ mi: Number(c.miles) || 0, p: Number(c.price) || 0, t: c.title })).filter(c => c.p);
+  const xs = [...pts.map(c => c.mi), miles], ys = [...pts.map(c => c.p), ...(price ? [price] : [])];
+  const xlo = Math.max(0, Math.min(...xs) * 0.9), xhi = Math.max(...xs) * 1.05 || 1;
+  const ypad = Math.max(300, (Math.max(...ys) - Math.min(...ys)) * 0.1);
+  const ylo = Math.min(...ys) - ypad, yhi = Math.max(...ys) + ypad;
+  const x = v => L + (v - xlo) / (xhi - xlo || 1) * (W - L - R);
+  const y = v => T + (yhi - v) / (yhi - ylo) * (H - T - B);
+  apPtmScale = { kind: 'graph', toPrice: py => yhi - (py - T) / (H - T - B) * (yhi - ylo), W, H };
+  // Least-squares line of price on miles: the market trend.
+  const n = pts.length, mx = pts.reduce((t, c) => t + c.mi, 0) / n, my = pts.reduce((t, c) => t + c.p, 0) / n;
+  const sxx = pts.reduce((t, c) => t + (c.mi - mx) ** 2, 0);
+  const slope = sxx ? pts.reduce((t, c) => t + (c.mi - mx) * (c.p - my), 0) / sxx : 0;
+  const at = v => my + slope * (v - mx);
+  const yt = [0, 1, 2, 3].map(i => ylo + (yhi - ylo) * (i + 0.5) / 4);
+  const xt = [0, 1, 2, 3].map(i => xlo + (xhi - xlo) * (i + 0.5) / 4);
+  return html`<svg viewBox="0 0 ${W} ${H}" class="ap-ptm-svg" aria-hidden="true">
+    ${yt.map(v => html`<line class="ap-ptm-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" /><text class="ap-ptm-lbl" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${apPtmShort(v)}</text>`)}
+    ${xt.map(v => html`<text class="ap-ptm-lbl" x="${x(v)}" y="${H - 12}" text-anchor="middle">${Math.round(v / 1000)}k mi</text>`)}
+    <line class="ap-ptm-trend" x1="${x(xlo)}" x2="${x(xhi)}" y1="${y(at(xlo))}" y2="${y(at(xhi))}" />
+    ${pts.map(c => html`<circle class="ap-ptm-dot" cx="${x(c.mi)}" cy="${y(c.p)}" r="4.5"><title>${c.t} · ${Number(c.mi).toLocaleString()} mi · ${apPtmFmt(c.p)}</title></circle>`)}
+    ${price ? html`<g class="ap-ptm-pin">
+      <line class="ap-ptm-priceline" x1="${L}" x2="${W - R}" y1="${y(price)}" y2="${y(price)}" />
+      <circle cx="${x(miles)}" cy="${y(price)}" r="8" />
+      <text class="ap-ptm-bubble-text ap-ptm-graph-label" x="${Math.min(W - R - 4, x(miles) + 14)}" y="${y(price) - 10}" text-anchor="${x(miles) > W - 200 ? 'end' : 'start'}">This car ${apPtmFmt(price)} · ${(price / m.median * 100).toFixed(1)}%</text>
+    </g>` : ''}
+  </svg>`;
+}
+let apPtmScale = null;
+let apPtmDragging = false;
+function apPtmFromEvent(e) {
+  const svg = document.querySelector('#apPtmViz svg');
+  if (!svg || !apPtmScale) return null;
+  const r = svg.getBoundingClientRect();
+  const v = apPtmScale.kind === 'bar'
+    ? apPtmScale.toPrice((e.clientX - r.left) / r.width * apPtmScale.W)
+    : apPtmScale.toPrice((e.clientY - r.top) / r.height * apPtmScale.H);
+  return Math.round(v / 50) * 50;
+}
+const apPtmEl = document.getElementById('apPtm');
+apPtmEl.addEventListener('pointerdown', (e) => {
+  const viz = e.target.closest('#apPtmViz');
+  if (!viz || viz.classList.contains('locked')) return;
+  apPtmDragging = true;
+  viz.focus({ preventScroll: true }); // so the typed boxes follow the drag
+  viz.setPointerCapture(e.pointerId);
+  const v = apPtmFromEvent(e);
+  if (v !== null) apPtmSetPrice(v);
+  e.preventDefault();
+});
+apPtmEl.addEventListener('pointermove', (e) => {
+  if (!apPtmDragging) return;
+  const v = apPtmFromEvent(e);
+  if (v !== null && v !== apPtmPrice()) apPtmSetPrice(v);
+});
+['pointerup', 'pointercancel'].forEach(t => apPtmEl.addEventListener(t, () => { apPtmDragging = false; }));
+apPtmEl.addEventListener('keydown', (e) => {
+  if (e.target.id !== 'apPtmViz' || e.target.classList.contains('locked')) return;
+  const step = e.shiftKey ? 500 : 100;
+  const dir = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+  if (!dir) return;
+  e.preventDefault();
+  const m = apPtmMarket();
+  apPtmSetPrice((apPtmPrice() || (m ? m.median : 0)) + dir * step);
+});
+apPtmEl.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ptm-view]');
+  if (!b) return;
+  apPtmView = b.dataset.ptmView;
+  try { localStorage.setItem('apPtmView', apPtmView); } catch (err) { /* stays for this visit */ }
+  apPtmSync();
+});
+apPtmEl.addEventListener('input', (e) => {
+  const m = apPtmMarket();
+  if (!m || !['apPtmPct', 'apPtmRank', 'apPtmPrice'].includes(e.target.id)) return;
+  e.stopPropagation(); // the calculator below is updated by apPtmSetPrice
+  const v = Number(e.target.value);
+  if (!e.target.value || !Number.isFinite(v)) return;
+  if (e.target.id === 'apPtmPrice') return apPtmSetPrice(v);
+  if (e.target.id === 'apPtmPct') return apPtmSetPrice(m.median * v / 100);
+  // Rank r: just under the car now in that spot (or just over the last).
+  const s = apPtmSorted(m);
+  const r = Math.min(Math.max(1, Math.round(v)), s.length + 1);
+  apPtmSetPrice(r > s.length ? s[s.length - 1] + 100 : s[r - 1] - 1);
 });
 
 // The market is pulled on its own -- when the appraisal opens and a moment
@@ -2450,13 +2655,13 @@ function updateOfferCalc() {
   if (!locked) {
     if (solveFor === 'appraisal') {
       if (asking) document.getElementById('apOffer').value = asking - costs - profit;
-      else { document.getElementById('apOffer').value = ''; note = 'Enter the asking price to work out the appraisal.'; }
+      else { document.getElementById('apOffer').value = ''; note = 'Enter the internet price to work out the appraisal.'; }
     } else if (solveFor === 'profit') {
       if (asking && appraisal) document.getElementById('apTargetGross').value = asking - costs - appraisal;
-      else note = 'Enter the asking price and appraisal to work out the profit.';
+      else note = 'Enter the internet price and appraisal to work out the profit.';
     } else if (appraisal) {
       document.getElementById('apTargetRetail').value = appraisal + costs + profit;
-    } else note = 'Enter the appraisal to work out the asking price.';
+    } else note = 'Enter the appraisal to work out the internet price.';
   }
   const gross = apNumber('apTargetGross');
   if (!note && gross < 0) note = html`<span class="offer-over">That's a ${money(-gross)} loss.</span>`;
@@ -2500,7 +2705,7 @@ function renderValues() {
   const appraisal = apNumber('apOffer');
   const provider = key => providerList.find(p => p.key === key);
   const rows = [
-    { label: 'Asking price', value: apNumber('apTargetRetail') || null },
+    { label: 'Internet price', value: apNumber('apTargetRetail') || null },
     { label: 'Customer hopes to get', value: apNumber('apCustomerExpects') || null },
     { label: 'Payoff (owed)', value: apNumber('apPayoff') || null },
     { label: 'Your avg sale, similar cars', value: retailPerformance && retailPerformance.ready ? retailPerformance.sold.avgSalePrice : null,
@@ -2686,7 +2891,7 @@ function renderOutcome() {
       <div class="outcome-acquire">
         <label>Bought for (ACV) <input type="number" id="apAcquiredFor" value="${a.offer ?? ''}" /></label>
         <label>Stock # <input type="text" id="apStockNumber" /></label>
-        <label>Asking price <input type="number" id="apAskingPrice" value="${a.targetRetail ?? ''}" /></label>
+        <label>Internet price <input type="number" id="apAskingPrice" value="${a.targetRetail ?? ''}" /></label>
         <button type="button" class="btn-primary" id="apAcquireBtn">Acquire → add to inventory</button>
       </div>` : html`<p class="audit-note">A sales manager or admin marks it acquired.</p>`}
     <div class="outcome-lost">
@@ -2771,7 +2976,7 @@ document.getElementById('appraisalPrintBtn').addEventListener('click', () => {
       <tr class="total-row"><td>Recon total</td><td>${money(reconTotal)}</td></tr>
     </table>
     <table>
-      <tr><td>Asking price</td><td>${money(a.targetRetail)}</td></tr>
+      <tr><td>Internet price</td><td>${money(a.targetRetail)}</td></tr>
       <tr><td>Recon</td><td>${money(reconTotal)}</td></tr>
       <tr><td>Pack</td><td>${money(pack)}</td></tr>
       <tr><td>Other</td><td>${money(a.otherCosts)}</td></tr>
