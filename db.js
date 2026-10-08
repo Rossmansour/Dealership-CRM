@@ -332,6 +332,82 @@ const MIGRATIONS = [
   ALTER TABLE users ADD COLUMN direct_number text;
   ALTER TABLE users ADD COLUMN cell_phone text;
   CREATE UNIQUE INDEX users_direct_number ON users (direct_number) WHERE direct_number IS NOT NULL;
+  `,
+  `
+  -- Accounting: the store's chart of accounts and its general ledger.
+  -- Every journal entry balances (debits = credits); amounts on lines are
+  -- signed: + debit, - credit. A control number (a stock #, deal #, RO #,
+  -- vendor...) ties a line to the item it's for, which is what schedules
+  -- (contracts in transit, receivables, floor plan...) are built from.
+  CREATE TABLE gl_accounts (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    number text NOT NULL,
+    name text NOT NULL,
+    type text NOT NULL,
+    dept text NOT NULL DEFAULT '',
+    grp text NOT NULL DEFAULT '',
+    scheduled boolean NOT NULL DEFAULT false,
+    active boolean NOT NULL DEFAULT true,
+    system_key text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, number)
+  );
+  CREATE UNIQUE INDEX gl_accounts_system_key ON gl_accounts (dealership_id, system_key) WHERE system_key IS NOT NULL;
+  CREATE TABLE journal_entries (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL,
+    entry_number integer NOT NULL,
+    journal text NOT NULL,
+    posted_on date NOT NULL,
+    memo text NOT NULL DEFAULT '',
+    source_type text NOT NULL DEFAULT '',
+    source_id text NOT NULL DEFAULT '',
+    reverses text,
+    reversed_by text,
+    created_by jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id),
+    UNIQUE (dealership_id, entry_number)
+  );
+  CREATE INDEX journal_entries_source ON journal_entries (dealership_id, source_type, source_id);
+  CREATE INDEX journal_entries_date ON journal_entries (dealership_id, posted_on);
+  CREATE TABLE journal_lines (
+    dealership_id uuid NOT NULL,
+    entry_id text NOT NULL,
+    line_no integer NOT NULL,
+    account text NOT NULL,
+    amount numeric(14, 2) NOT NULL,
+    control text NOT NULL DEFAULT '',
+    control_name text NOT NULL DEFAULT '',
+    memo text NOT NULL DEFAULT '',
+    posted_on date NOT NULL,
+    cleared_in text NOT NULL DEFAULT '',
+    PRIMARY KEY (dealership_id, entry_id, line_no),
+    FOREIGN KEY (dealership_id, entry_id) REFERENCES journal_entries (dealership_id, id) ON DELETE CASCADE
+  );
+  CREATE INDEX journal_lines_account ON journal_lines (dealership_id, account, posted_on);
+  CREATE INDEX journal_lines_control ON journal_lines (dealership_id, account, control);
+  ALTER TABLE dealerships ADD COLUMN next_entry_number integer NOT NULL DEFAULT 1001;
+  ALTER TABLE dealerships ADD COLUMN next_check_number integer NOT NULL DEFAULT 10001;
+  -- Payables: vendors and their bills; bank reconciliations.
+  CREATE TABLE vendors (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE TABLE ap_bills (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
+  CREATE TABLE bank_recs (
+    dealership_id uuid NOT NULL REFERENCES dealerships(id) ON DELETE CASCADE,
+    id text NOT NULL, seq bigserial, data jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (dealership_id, id)
+  );
   `
 ];
 
@@ -390,7 +466,7 @@ async function tx(fn) {
 // plus the dealership the request is acting for.
 
 const RECORD_TABLES = new Set(['cars', 'leads', 'deals', 'tax_rates', 'appraisals', 'tasks', 'repair_orders', 'service_appointments',
-  'parts', 'part_moves', 'parts_tickets', 'special_orders', 'recon_units']);
+  'parts', 'part_moves', 'parts_tickets', 'special_orders', 'recon_units', 'vendors', 'ap_bills', 'bank_recs']);
 
 function checkTable(table) {
   if (!RECORD_TABLES.has(table)) throw new Error(`Unknown table: ${table}`);

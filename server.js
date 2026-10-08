@@ -27,6 +27,8 @@ const duplicates = require('./duplicates');
 const taskplan = require('./taskplan');
 const inspection = require('./inspection');
 const phone = require('./phone');
+const postings = require('./postings');
+const accounting = require('./accounting');
 const docs = require('./docs');
 const storeHours = require('./hours');
 const keys = require('./keys');
@@ -223,6 +225,7 @@ app.use('/api', reports.router);
 app.use('/api', dashboard.router);
 app.use('/api', service.router);
 app.use('/api', parts.router);
+app.use('/api', require('./accounting-api').router); // Accounting Domus
 app.use('/api', recon.router);
 app.use('/api', pricing.router);
 app.use('/api', duplicates.router({ assignFromRotations, alertAssignments }));
@@ -260,14 +263,15 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // the activity routes, so it (and its audit trail) can't be rewritten by
 // a general "update lead" request.
 const SERVER_MANAGED_FIELDS = {
-  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId', 'market', 'priceHistory', 'priceLocked'],
+  cars: ['id', 'photos', 'openROs', 'reconHistory', 'dateAdded', 'dateSold', 'sourceAppraisalId', 'sourceDealId', 'market', 'priceHistory', 'priceLocked', 'wholesaleBooked'],
   // Road to the Sale steps change through /roadmap; the customer number is assigned once.
   // The customer's credit app changes through /credit-app (and comes back from the DMS).
   // Duplicate Leads changes through /duplicate and /duplicates.
   // Photos and videos sent to the customer change through /media and /send-text.
   // Unread texts and texting opt-outs come from the texts themselves.
   leads: ['id', 'activities', 'dateAdded', 'customerNumber', 'roadmap', 'creditApp', 'creditAppSync', 'duplicate', 'notDuplicateOf', 'media', 'unreadTexts', 'smsOptOut'],
-  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId'],
+  // Accounting marks (booked, chargeback posted, title tracking) change through /api/accounting.
+  deals: ['id', 'dealNumber', 'creditApp', 'dateCreated', 'dateUpdated', 'deliveredAt', 'finalizedAt', 'tradeCarId', 'booked', 'chargebackPosted', 'titleTracking'],
   tax_rates: ['id'],
   // Status changes go through /acquire, /lost, and /reopen; recalls through /recalls.
   // The appraiser changes through "appraiserId"; customer offers through /customer-offer.
@@ -614,6 +618,7 @@ app.post('/api/cars', allow('editInventory'), wrap(async (req, res) => {
   await store.tx(async q => {
     await store.insert(q, 'cars', req.dealershipId, newCar);
     await audit.created(q, req, 'car', newCar);
+    await postings.carAdded(q, req, newCar); // into the books: floor plan (new) or owed to the seller (used)
     await recon.addCar(q, req, newCar); // straight into recon: used at Purchase / Trade, new at New - PDI
   });
   pricing.pullSoon(req.dealershipId, [newCar.id]); // its market, in the background
@@ -648,6 +653,7 @@ app.put('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
 
     const saved = await store.save(q, 'cars', req.dealershipId, car.id, { ...car, ...updates });
     await audit.updated(q, req, 'car', car, saved);
+    await postings.carEdited(q, req, car, saved); // cost, new/used, or stock # changes follow in the books
     // A different car (or miles) means a different market: pull it again.
     if (['year', 'make', 'model', 'trim', 'mileage', 'stockType'].some(f => String(car[f] ?? '') !== String(saved[f] ?? '')) || !car.market) req.pullMarket = true;
     return saved;
@@ -662,6 +668,7 @@ app.delete('/api/cars/:id', allow('editInventory'), wrap(async (req, res) => {
   const deleted = await store.tx(async q => {
     const removed = await store.remove(q, 'cars', req.dealershipId, req.params.id);
     if (removed) await audit.deleted(q, req, 'car', removed);
+    if (removed) await postings.carRemoved(q, req, removed);
     return removed;
   });
   if (!deleted) return res.status(404).json({ error: 'Car not found' });
@@ -2371,6 +2378,7 @@ async function stockInTrade(q, req, deal) {
   };
   await store.insert(q, 'cars', req.dealershipId, car);
   await audit.created(q, req, 'car', car, `Trade stocked in from deal D-${deal.dealNumber}`);
+  await postings.carAdded(q, req, car, 'trade', { dealNumber: deal.dealNumber });
   if (appraisal) {
     await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {
       ...appraisal, status: 'acquired', acquiredFor: acv, acquiredAt: new Date().toISOString(), carId: car.id, closedAt: new Date().toISOString()
@@ -2500,7 +2508,13 @@ app.put('/api/deals/:id', wrap(async (req, res) => {
     const saved = await store.save(q, 'deals', req.dealershipId, deal.id, { ...merged, ...calculated });
     await audit.updated(q, req, 'deal', deal, saved);
     await syncCarStatusToDeal(q, req, saved);
-    return stockInTrade(q, req, saved);
+    const withTrade = await stockInTrade(q, req, saved);
+    // Stores that book deals as soon as they're finalized.
+    if (withTrade.status === 'finalized' && !withTrade.booked && (await accounting.settingsOf(q, req.dealershipId)).autoBookFinalized) {
+      await postings.bookDeal(q, req, withTrade.id);
+      return store.get(q, 'deals', req.dealershipId, withTrade.id);
+    }
+    return withTrade;
   });
   if (!updated) return res.status(404).json({ error: 'Deal not found' });
   if (req.stockedIn) pricing.pullSoon(req.dealershipId, [req.stockedIn]);
@@ -3086,6 +3100,7 @@ app.post('/api/appraisals/:id/acquire', allow('editInventory'), wrap(async (req,
     };
     await store.insert(q, 'cars', req.dealershipId, car);
     await audit.created(q, req, 'car', car, `From appraisal A-${appraisal.appraisalNumber}`);
+    await postings.carAdded(q, req, car, 'purchase', { sellerName: appraisal.customerName || appraisal.sellerName || '' });
     await recon.addCar(q, req, car);
 
     const saved = await store.save(q, 'appraisals', req.dealershipId, appraisal.id, {

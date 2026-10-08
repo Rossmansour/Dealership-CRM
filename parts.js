@@ -50,6 +50,11 @@ async function moveStock(q, req, partId, qty, { type, cost = null, ref = '', not
     ref: text(ref, 60), note: text(note, 300),
     at: new Date().toISOString(), by: { id: req.user.id, name: req.user.name }
   });
+  // Stock in from a vendor and count corrections post to the books here;
+  // what's used on ROs and tickets posts when those close.
+  if (type === 'receive' || type === 'adjust') {
+    await require('./postings').partsMoved(q, req, part, qty, type, type === 'receive' && cost !== null ? cost : n(part.cost), ref);
+  }
   return next;
 }
 
@@ -313,6 +318,7 @@ router.post('/parts/tickets/:id/close', allow('writeParts'), wrap(async (req, re
     t.closedTotals = ticketTotals(t, settings);
     const saved = await store.save(q, 'parts_tickets', req.dealershipId, t.id, t);
     await audit.updated(q, req, 'parts_ticket', before, saved, 'Closed');
+    await require('./postings').ticketClosed(q, req, saved);
     return { ticket: saved };
   });
   if (result.error) return res.status(result.status).json({ error: result.error });

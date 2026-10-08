@@ -32,7 +32,7 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - Filter by lead source and when the customer was added
 - Tiles for Follow-Up Due, New Today, Keys Out, and Aged Inventory (60+ days); the left rail shows the same counts (plus open proposals) as badges on every screen
 - **Every number is clickable**: it opens the customer or inventory list showing exactly those records, with a "Showing: ..." chip to clear the filter
-- **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting** (placeholder for later). Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
+- **Module sidebar** on the left: **CRM**, **Sales & F&I**, **Vehicle Management**, **Service**, and **Accounting**. Hover to see names; the live counts sit below the modules. Adding a module is one entry in `MODULES` in `public/app.js`, its icons (`data-module`), and its panel
 - The icon bar across the top shows the current module's screens (CRM: Pipeline, Customers, Board, Reports, AI Assistant), plus **New Customer** and **Quick Search** on every module (customers by name, phone, or email; deals by D-number; vehicles by stock #, VIN, or year/make/model). Press `/` to jump to the search box
 
 **Market Pricing -- Vehicle Management → Market Pricing** (managers)
@@ -184,6 +184,34 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Reorder list**: parts at or below their reorder point, with how many to order
 - **Dashboard → Service & Parts**: parts gross now includes counter sales
 - Techs can look parts up but don't see cost
+
+**Accounting Domus** (left sidebar → Accounting; admins, the GM to read, and the new **Office / Accounting** role)
+- **A real general ledger**: a full dealership chart of accounts (cash, contracts in transit, receivables, vehicle and parts inventory, floor plan, payables, sales and cost of sales by department, expenses) that the store can rename and add to. Every entry balances, and nothing is deleted: mistakes are reversed
+- **Posts itself** in the same step as the work:
+  - Cars stocked in: new cars go on the floor plan, used cars are owed to the seller, trades go through trade-in clearing, and recon done by vendors adds to the car
+  - Repair orders closed: labor, parts, shop supplies and tax, plus their cost. Internal work on a car in stock goes onto the car
+  - Counter tickets, parts received from vendors, and count corrections
+- **Book Deals**: delivered deals wait in "sold, not booked". Review the entry before it posts:
+  - What it records: the sale, doc fees, F&I products, sales tax, title fees, trade at its value with over-allowance as a cost, payoff owed, rebates and incentives, deposits and down payment, the contract in transit to the lender, the car's cost, F&I cost, reserve, we-owes, commissions, and the floor plan payoff
+  - Changes: unbook it (with a reason) to change it
+  - Also here: wholesale cars, chargebacks, and deals edited after they were booked
+  - Optionally books deals automatically when F&I finalizes them
+- **Cashier**: money in (a lender funding a contract, a down payment, an RO, a deposit) and money out by check (numbered automatically) or ACH, against the open item. Pick it from the list and it fills itself in
+- **Payables**: vendors with terms, bills charged to expense accounts, partial or full payment, no duplicate invoices, voiding unpaid bills
+- **Schedules**: every item-by-item account (contracts in transit, receivables, inventory by stock #, floor plan, payoffs, F&I products owed, deposits, we-owes, commissions...) with 0-30 / 31-60 / 61-90 / 90+ aging, item detail, and CSV export
+- **Financial statement**:
+  - Income statement by department: new, used, F&I, service, parts, and the store. Shows the month, year to date, and the same periods last year
+  - Key numbers: gross per unit, F&I per unit, fixed absorption, expenses to gross
+  - Also: balance sheet, trial balance, and the general ledger with running balances
+- **Bank reconciliation**: check off what cleared until the statement balance matches
+- **Title tracking**: trade title in, payoff sent, lien released, DMV, plates, title mailed
+- **Month-end**:
+  - Close a month (it has to balance first); nothing can be dated in a closed month after that
+  - Reopen a month, with a reason
+  - Starting balances: bring cars and parts already on hand onto the books
+  - Inventory check: shows any car where the books and its cost disagree
+- **Dashboard**: expenses posted in the books fill in the GM's expenses automatically (anything typed in by hand still wins)
+- Demo data goes on the books too, and comes off when the demo is removed
 
 **Sidebar**: each module has a dropdown of its screens (hover the sidebar, click ▾). The module you're in opens by itself.
 

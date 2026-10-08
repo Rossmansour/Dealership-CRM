@@ -186,7 +186,8 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
           gapPremium: gap, servicePremium: svc });
         deals.push({
           hasTrade: false, id: uuid(), dealNumber: await store.takeNextDealNumber(q, d), leadId: lead.id, carId: car.id, status, ...calc,
-          gapPremium: gap, servicePremium: svc, fiProductCost: fiCost, reserve, incentives,
+          gapPremium: gap, servicePremium: svc, fiProductCost: fiCost, reserve, incentives, dealType: 'retail',
+          lender: ['Ally Financial', 'Chase Auto', 'Capital One Auto', 'Toyota Financial Services'][deals.length % 4],
           creditApp: defaultCreditApp(), dateCreated: at(days + 1, 15), deliveredAt: at(days, 17), finalizedAt: status === 'finalized' ? at(Math.max(0, days - 1), 12) : null, demo: true
         });
         car.status = 'sold';
@@ -407,6 +408,21 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
         await store.insert(q, 'tasks', d, { id: uuid(), type: 'call', title, leadId: lead.id, leadName: lead.name, assignedTo: by(staffSlug), dueAt: at(dueDays, 15), status: 'open', notes: '', createdAt: at(1), createdBy: by('rob'), completedAt: null, completedBy: null, outcome: '', demo: true });
       }
 
+      // The demo cars and parts go on the books too, so Accounting Domus has
+      // something to show (the sold demo deals wait in Book Deals).
+      const postings = require('./postings');
+      const bookLines = [];
+      for (const car of Object.values(carByStock)) {
+        if (!(Number(car.cost) > 0) || (car.status === 'sold' && car.soldAs !== 'wholesale' && !deals.some(x => x.carId === car.id))) continue;
+        bookLines.push({ key: `${postings.carType(car)}_inventory`, amount: Number(car.cost), control: postings.stockControl(car), controlName: postings.carName(car) },
+          { key: car.stockType === 'new' ? 'floor_plan' : 'opening', amount: -Number(car.cost), control: car.stockType === 'new' ? postings.stockControl(car) : '', controlName: car.stockType === 'new' ? postings.carName(car) : '' });
+      }
+      const partsValue = Math.round(Object.values(partByNumber).reduce((t, p) => t + Math.max(0, Number(p.onHand) || 0) * (Number(p.cost) || 0), 0) * 100) / 100;
+      if (partsValue) bookLines.push({ key: 'parts_inventory', amount: partsValue }, { key: 'opening', amount: -partsValue, memo: 'Parts on hand' });
+      // Dated before the oldest demo car came in, so the demo deals (sold
+      // weeks ago) find their cars on the books when they're booked.
+      await require('./accounting').postEntry(q, actor, { journal: 'general', date: at(120), memo: 'Demo data: cars and parts on hand', sourceType: 'demo', lines: bookLines });
+
       await audit.record(q, req, { action: 'create', entityType: 'settings', entityId: 'demo-data', label: 'Demo data', details: 'Loaded demo data' });
       return { staff: STAFF.length, cars: CARS.length, customers: LEADS.length, deals: deals.length, repairOrders: ros.length, parts: PARTS.length, appointments: appts.length };
     });
@@ -420,6 +436,13 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
       const counts = {};
       // Documents in demo deals' jackets go too.
       await q.query(`DELETE FROM deal_documents WHERE dealership_id = $1 AND deal_id IN (SELECT id FROM deals WHERE dealership_id = $1 AND data->>'demo' = 'true')`, [d]);
+      // Their entries in the books go too.
+      const demoIds = `SELECT id FROM deals WHERE dealership_id = $1 AND data->>'demo' = 'true' UNION SELECT id FROM cars WHERE dealership_id = $1 AND data->>'demo' = 'true'
+        UNION SELECT id FROM repair_orders WHERE dealership_id = $1 AND data->>'demo' = 'true' UNION SELECT id FROM parts_tickets WHERE dealership_id = $1 AND data->>'demo' = 'true'
+        UNION SELECT id FROM parts WHERE dealership_id = $1 AND data->>'demo' = 'true'`;
+      const { rowCount: entries } = await q.query(`DELETE FROM journal_entries WHERE dealership_id = $1 AND (source_type = 'demo' OR source_id IN (${demoIds}))`, [d]);
+      await q.query(`UPDATE journal_entries e SET reversed_by = NULL WHERE dealership_id = $1 AND reversed_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.dealership_id = e.dealership_id AND r.id = e.reversed_by)`, [d]);
+      counts.journalEntries = entries;
       // Demo cars that went into recon on their own (not marked demo) go too.
       await q.query(`DELETE FROM recon_units WHERE dealership_id = $1 AND data->>'carId' IN (SELECT id FROM cars WHERE dealership_id = $1 AND data->>'demo' = 'true')`, [d]);
       for (const table of DEMO_TABLES) {

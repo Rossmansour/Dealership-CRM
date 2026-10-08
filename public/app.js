@@ -181,13 +181,16 @@ const MODULES = [
     icon: '<svg viewBox="0 0 24 24"><path d="M15 3.5a5 5 0 0 0-4.6 6.9L3.8 17a1.8 1.8 0 0 0 0 2.5l.7.7a1.8 1.8 0 0 0 2.5 0l6.6-6.6a5 5 0 0 0 6.9-4.6l-3.1 3.1-2.9-.6-.6-2.9z"/></svg>' },
   { key: 'parts', brand: 'Parts Domus', label: 'Parts', views: ['parts', 'partstickets', 'partsorders'], permissions: ['viewParts'],
     icon: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>' },
-  { key: 'accounting', brand: 'Accounting Domus', label: 'Accounting', views: ['accounting'],
+  { key: 'accounting', brand: 'Accounting Domus', label: 'Accounting', permissions: ['viewAccounting'],
+    views: ['accounting', 'acctbook', 'acctcashier', 'acctpayables', 'acctschedules', 'acctjournal', 'acctledger', 'acctstatements', 'acctbank', 'accttitles', 'acctsetup'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h16v15H4z"/><path d="M4 9h16M9 9v10.5"/><path d="M12 13h5M12 16h3"/></svg>' }
 ];
 
 const VIEW_PANELS = {
   pipeline: 'pipeline', messages: 'messagesPanel', leads: 'leads', board: 'leads', duplicates: 'duplicatesPanel', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
-  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard'
+  reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard',
+  acctbook: 'accounting', acctcashier: 'accounting', acctpayables: 'accounting', acctschedules: 'accounting', acctjournal: 'accounting',
+  acctledger: 'accounting', acctstatements: 'accounting', acctbank: 'accounting', accttitles: 'accounting', acctsetup: 'accounting'
 };
 let currentView = 'pipeline';
 
@@ -196,7 +199,9 @@ const VIEW_LABELS = {
   execdash: 'Dashboard', pipeline: 'Sales Pipeline', messages: 'Messages', leads: 'Customers', board: 'Customer Board', duplicates: 'Duplicate Leads', reports: 'Reports',
   assistant: 'AI Assistant', deals: 'Deals', inventory: 'Inventory', appraisals: 'Appraisals', pricing: 'Market Pricing', service: 'Repair Orders',
   serviceappts: 'Appointments', recon: 'Recon Domus ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
-  partsorders: 'Special Orders & Reorder', accounting: 'Accounting'
+  partsorders: 'Special Orders & Reorder', accounting: 'Overview', acctbook: 'Book Deals', acctcashier: 'Cashier',
+  acctpayables: 'Payables', acctschedules: 'Schedules', acctjournal: 'Journal Entries', acctledger: 'General Ledger',
+  acctstatements: 'Financial Statement', acctbank: 'Bank Reconciliation', accttitles: 'Title Tracking', acctsetup: 'Setup & Month-End'
 };
 const openRailGroups = new Set();
 // Screens only some people use.
@@ -286,6 +291,7 @@ function showView(view) {
   if (view === 'partsorders') openOrdersView();
   if (view === 'pricing') openPricingView();
   if (view === 'duplicates') openDuplicatesView();
+  if (typeof openAccountingView === 'function' && VIEW_PANELS[view] === 'accounting') openAccountingView(view);
   // (messages-ui.js loads after this file; it opens Messages itself if the app starts there.)
   if (typeof openMessagesView === 'function') { if (view === 'messages') openMessagesView(); else stopMessagesPolling(); }
   window.scrollTo(0, 0);
@@ -5875,6 +5881,7 @@ const ROLE_OPTIONS = [
   ['service_advisor', 'Service Advisor'],
   ['technician', 'Technician'],
   ['parts_manager', 'Parts Manager'],
+  ['accounting', 'Office / Accounting'],
   ['general_manager', 'General Manager'],
   ['admin', 'Admin']
 ];

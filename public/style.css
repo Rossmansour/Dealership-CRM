@@ -2942,3 +2942,86 @@ body.rc-body { margin: 0; min-height: 100vh; }
 .mention-menu .msg-avatar { width: 26px; height: 26px; font-size: 11px; }
 .mention-menu small { display: block; font-size: 11px; color: var(--text-muted); }
 .mention { color: var(--blue); font-weight: 600; background: var(--highlight-bg); border-radius: 4px; padding: 0 2px; }
+
+/* ---------- Accounting Domus ---------- */
+.ac-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.ac-head h1 { margin: 0; font-size: 24px; color: var(--heading); }
+.ac-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ac-tools .btn-primary { margin-left: 0; }
+.ac-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.ac-cards-small { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.ac-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; font: inherit; color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+button.ac-card { cursor: pointer; }
+button.ac-card:hover { border-color: var(--blue); }
+.ac-card.warn { border-color: var(--amber); }
+.ac-card-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+.ac-card-value { font-size: 22px; font-weight: 700; color: var(--heading); }
+.ac-card-sub { font-size: 12px; color: var(--text-muted); }
+.ac-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-bottom: 16px; align-items: start; }
+.ac-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.ac-grid2 > .ac-box, .ac-grid2 > div > .ac-box:last-child { margin-bottom: 0; }
+.ac-box .ca-section-title:first-child { margin-top: 0; display: flex; justify-content: space-between; align-items: baseline; }
+.ac-todo { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.ac-kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 14px; }
+.ac-kv-total { border-top: 2px solid var(--border); margin-top: 4px; padding-top: 8px; font-size: 15px; }
+.ac-kv-head { font-weight: 600; color: var(--heading); }
+.ac-kv-line { padding: 3px 0 3px 12px; font-size: 13px; color: var(--text-secondary); }
+.ac-bs-group { margin-bottom: 6px; }
+.ac-link { color: var(--blue); text-decoration: none; cursor: pointer; }
+.ac-link:hover { text-decoration: underline; }
+.ac-small { font-size: 12px; font-weight: 500; }
+.ac-table td.num, .ac-table th.num { text-align: right; white-space: nowrap; }
+.ac-table tfoot td { border-top: 2px solid var(--border); background: var(--surface-alt); }
+.ac-click tbody tr { cursor: pointer; }
+.ac-click tbody tr:hover td { background: var(--highlight-bg); }
+.ac-table .ac-sub td { background: var(--surface-alt); font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
+.ac-table .ac-strong td { font-weight: 700; color: var(--heading); }
+.ac-inactive td { opacity: 0.55; }
+.ac-actions { white-space: nowrap; }
+.ac-actions .btn-primary, .ac-actions .btn-secondary { margin-left: 4px; }
+.ac-neg { color: var(--red); }
+.ac-late, .ac-late * { color: var(--red) !important; }
+.ac-good { color: var(--green); font-weight: 600; }
+.ac-error { color: var(--red); }
+.ac-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--surface-alt); color: var(--text-secondary); vertical-align: middle; }
+.ac-badge-blue { background: var(--blue); color: #fff; }
+.ac-badge-warn { background: var(--amber); color: #fff; }
+.ac-tabs { margin-bottom: 12px; flex-wrap: wrap; }
+.ac-warn { background: color-mix(in srgb, var(--amber) 14%, transparent); border: 1px solid var(--amber); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 13px; display: grid; gap: 4px; }
+.ac-form label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+.ac-form input, .ac-form select, #acModalBody input:not([type="checkbox"]), #acModalBody select { width: 100%; padding: 8px 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 14px; background: var(--surface); color: var(--text); box-sizing: border-box; }
+.ac-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ac-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.ac-btn-row { display: flex; align-items: flex-end; padding-bottom: 10px; }
+.ac-check { display: flex !important; align-items: center; gap: 8px; font-size: 14px !important; color: var(--text) !important; }
+.ac-check input { width: auto !important; margin: 0 !important; }
+.ac-setting { margin-top: 14px; }
+.ac-open-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 2px 0 6px; }
+.ac-open-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; }
+.ac-open-item { display: flex; justify-content: space-between; gap: 10px; width: 100%; padding: 6px 10px; border: 0; border-bottom: 1px solid var(--border); background: none; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; }
+.ac-open-item:last-child { border-bottom: 0; }
+.ac-open-item:hover, .ac-open-item.active { background: var(--highlight-bg); }
+.ac-input, .ac-input-num, .ac-input-date, .ac-month { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text); }
+.ac-input-num { width: 110px; text-align: right; }
+.ac-month { padding: 7px 10px; font-size: 14px; }
+.ac-bill-line { display: grid; grid-template-columns: 2fr 2fr 1fr; gap: 8px; margin-bottom: 6px; }
+.ac-bill-line select, .ac-bill-line input { margin-top: 0 !important; }
+.ac-je input, .ac-je select { margin-top: 0 !important; min-width: 90px; }
+.ac-je td { padding: 6px 8px; }
+.ac-total { text-align: right; font-size: 14px; margin: 10px 0; color: var(--text-secondary); }
+.ac-total strong { color: var(--heading); }
+.ac-dept { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; }
+.ac-dept summary { padding: 12px 16px; cursor: pointer; font-size: 14px; }
+.ac-dept .table-scroll { padding: 0 12px 12px; }
+.ac-statement td:first-child { font-weight: 600; }
+.ac-flash { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 2000; background: var(--navy); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.25); max-width: 90vw; }
+.ac-flash.bad { background: var(--red); }
+.ac-flash[hidden] { display: none; }
+@media (max-width: 760px) {
+  .ac-row2, .ac-row3, .ac-bill-line { grid-template-columns: 1fr; }
+  .ac-grid2 { grid-template-columns: 1fr; }
+}
+@media print {
+  .ac-tools, .ac-tabs, #acTools { display: none !important; }
+  .ac-dept { break-inside: avoid; }
+}

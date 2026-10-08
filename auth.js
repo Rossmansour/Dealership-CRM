@@ -30,7 +30,8 @@ const ROLES = {
   service_manager: 'Service Manager',
   service_advisor: 'Service Advisor',
   technician: 'Technician',
-  parts_manager: 'Parts Manager'
+  parts_manager: 'Parts Manager',
+  accounting: 'Office / Accounting'
 };
 
 // Which roles can do the actions that aren't open to everyone. Anything
@@ -66,7 +67,11 @@ const PERMISSIONS = {
   // used-car managers approve the spending.
   viewRecon: ['admin', 'general_manager', 'sales_manager', 'service_manager', 'service_advisor', 'technician'],
   workRecon: ['admin', 'general_manager', 'sales_manager', 'service_manager', 'service_advisor', 'technician'],
-  approveRecon: ['admin', 'general_manager', 'sales_manager']
+  approveRecon: ['admin', 'general_manager', 'sales_manager'],
+  // Accounting: the office keeps the books; the GM can read them.
+  viewAccounting: ['admin', 'general_manager', 'accounting'],
+  postAccounting: ['admin', 'accounting'],             // book deals, cash, bills, journal entries
+  closeBooks: ['admin', 'accounting']                  // close a month, chart of accounts, starting balances
 };
 
 function can(user, permission) {
