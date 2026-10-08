@@ -818,7 +818,7 @@ async function checkLeadAssignments(q, req, fields) {
 
 // Builds and saves a new customer. Used by "Add Lead" and by appraisal
 // customer offers, so every customer gets the same fields and a number.
-async function createLead(q, req, fields, { roundRobin = true } = {}) {
+async function createLead(q, req, fields, { roundRobin = true, firstTouch = false } = {}) {
   const clean = leadFields(fields);
   // A salesperson (or BDC agent) adding a customer is their Sales 1 (or
   // BDC 1) unless they pick someone else.
@@ -843,6 +843,16 @@ async function createLead(q, req, fields, { roundRobin = true } = {}) {
   // instead of going out by round robin.
   const dupe = await duplicates.checkNew(q, req.dealershipId, lead);
   if (!dupe.hold && roundRobin) await assignFromRotations(q, req, lead);
+  // Added by hand as a phone-up: we're talking with them (Engaged). As a
+  // walk-in: they're here (Visit).
+  if (firstTouch && ['phone', 'walk-in'].includes(lead.source)) {
+    lead.activities = [{
+      id: crypto.randomUUID(), date: new Date().toISOString(), by: { id: req.user.id, name: req.user.name },
+      ...(lead.source === 'phone'
+        ? { type: 'call', direction: 'in', reached: true, text: 'Phone up -- talked with them when they called in' }
+        : { type: 'visit', text: 'Walk-in -- checked in at the showroom' })
+    }, ...lead.activities];
+  }
   await store.insert(q, 'leads', req.dealershipId, lead);
   await alertAssignments(q, req, null, lead);
   if (dupe.original) await duplicates.alertOwners(q, req, lead, dupe.original);
@@ -970,7 +980,7 @@ app.post('/api/leads', wrap(async (req, res) => {
   const result = await store.tx(async q => {
     const problem = await checkLeadAssignments(q, req, leadFields(req.body));
     if (problem) return { error: problem };
-    const lead = await createLead(q, req, req.body);
+    const lead = await createLead(q, req, req.body, { firstTouch: true });
     await audit.created(q, req, 'lead', lead);
     return lead;
   });
