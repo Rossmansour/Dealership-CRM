@@ -3025,3 +3025,33 @@ button.ac-card:hover { border-color: var(--blue); }
   .ac-tools, .ac-tabs, #acTools { display: none !important; }
   .ac-dept { break-inside: avoid; }
 }
+
+/* ---------- Insight Domus ---------- */
+.in-tile { gap: 3px; }
+.in-cmp { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.in-cmp strong { color: var(--text); font-weight: 600; }
+.in-delta { font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+.in-delta.up { color: var(--green); }
+.in-delta.down { color: var(--red); }
+.in-bar { display: inline-block; width: 100%; max-width: 160px; height: 8px; background: var(--surface-alt); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.in-bar > span { display: block; height: 100%; background: var(--blue); border-radius: 4px; }
+.in-bar-cell { white-space: nowrap; }
+.in-bar-cell .in-bar { width: 110px; margin-left: 8px; }
+.in-bar-num { display: inline-block; min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.in-pen { display: grid; grid-template-columns: 140px 1fr auto; align-items: center; gap: 12px; padding: 5px 0; font-size: 14px; }
+.in-pen .in-bar { max-width: none; }
+.in-rank { font-weight: 700; color: var(--text-muted); width: 28px; }
+.in-legend { font-size: 12px; font-weight: 500; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+.in-key { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-left: 8px; }
+.in-key-bar { background: var(--blue); }
+.in-key-goal { height: 2px; background: var(--text); border-radius: 0; }
+.in-chart { display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; align-items: end; height: 220px; padding-top: 8px; }
+.in-col { display: flex; flex-direction: column; height: 100%; }
+.in-col-plot { position: relative; flex: 1; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--border); }
+.in-col-bar { width: 60%; max-width: 36px; background: var(--blue); border-radius: 4px 4px 0 0; min-height: 0; }
+.in-col:hover .in-col-bar { filter: brightness(1.15); }
+.in-goal { position: absolute; left: 12%; right: 12%; height: 2px; background: var(--text); }
+.in-col-label { font-size: 11px; color: var(--text-secondary); text-align: center; padding-top: 4px; white-space: nowrap; }
+#inTools select, #inTools input { padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 13px; background: var(--surface); color: var(--text); }
+@media (max-width: 760px) { .in-pen { grid-template-columns: 90px 1fr auto; } .in-chart { height: 160px; gap: 3px; } .in-col-label { font-size: 9px; } }
+@media print { #inTools { display: none !important; } }

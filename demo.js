@@ -188,6 +188,7 @@ function makeRouter({ buildCar, calculateDeal, getSettings, defaultCreditApp, ro
           hasTrade: false, id: uuid(), dealNumber: await store.takeNextDealNumber(q, d), leadId: lead.id, carId: car.id, status, ...calc,
           gapPremium: gap, servicePremium: svc, fiProductCost: fiCost, reserve, incentives, dealType: 'retail',
           lender: ['Ally Financial', 'Chase Auto', 'Capital One Auto', 'Toyota Financial Services'][deals.length % 4],
+          employees: { sales1: lead.sales1Id || null, fiManager: staff.karen.id, salesManager: staff.rob ? staff.rob.id : null },
           creditApp: defaultCreditApp(), dateCreated: at(days + 1, 15), deliveredAt: at(days, 17), finalizedAt: status === 'finalized' ? at(Math.max(0, days - 1), 12) : null, demo: true
         });
         car.status = 'sold';

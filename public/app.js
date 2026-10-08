@@ -169,6 +169,8 @@ themeToggleBtn.addEventListener('click', () => {
 const MODULES = [
   { key: 'dashboard', label: 'Dashboard', views: ['execdash'], permissions: ['viewDashboardStore', 'viewDashboardVariable', 'viewDashboardFixed'],
     icon: '<svg viewBox="0 0 24 24"><path d="M4 4.5h7v7H4zM13 4.5h7v4h-7zM13 10.5h7v9h-7zM4 13.5h7v6H4z"/></svg>' },
+  { key: 'insight', brand: 'Insight Domus', label: 'Insight', views: ['insightsales', 'insightleaders', 'insightfi', 'insightinventory', 'insightmarketing', 'insighttrend'], permissions: ['viewAllReports'],
+    icon: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.3 15.3L20.5 20.5"/><path d="M7.5 12.5v-2M10.5 12.5v-4.5M13.5 12.5v-3"/></svg>' },
   { key: 'crm', brand: 'CRM Domus', label: 'CRM', views: ['pipeline', 'messages', 'leads', 'board', 'duplicates', 'reports', 'assistant'],
     icon: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15.5 4.8a3.5 3.5 0 0 1 0 6.4M17.5 14.4c2.3.7 4 2.8 4 5.6"/></svg>' },
   { key: 'sales', brand: 'Desk Domus', label: 'Sales & F&I', views: ['deals'],
@@ -190,7 +192,8 @@ const VIEW_PANELS = {
   pipeline: 'pipeline', messages: 'messagesPanel', leads: 'leads', board: 'leads', duplicates: 'duplicatesPanel', deals: 'deals', inventory: 'inventory', appraisals: 'appraisals', pricing: 'pricingPanel',
   reports: 'dashboard', assistant: 'assistant', service: 'service', serviceappts: 'serviceAppts', parts: 'partsPanel', partstickets: 'partsTickets', partsorders: 'partsOrders', accounting: 'accounting', execdash: 'execDashboard',
   acctbook: 'accounting', acctcashier: 'accounting', acctpayables: 'accounting', acctschedules: 'accounting', acctjournal: 'accounting',
-  acctledger: 'accounting', acctstatements: 'accounting', acctbank: 'accounting', accttitles: 'accounting', acctsetup: 'accounting'
+  acctledger: 'accounting', acctstatements: 'accounting', acctbank: 'accounting', accttitles: 'accounting', acctsetup: 'accounting',
+  insightsales: 'insightPanel', insightleaders: 'insightPanel', insightfi: 'insightPanel', insightinventory: 'insightPanel', insightmarketing: 'insightPanel', insighttrend: 'insightPanel'
 };
 let currentView = 'pipeline';
 
@@ -201,7 +204,8 @@ const VIEW_LABELS = {
   serviceappts: 'Appointments', recon: 'Recon Domus ↗', parts: 'Parts Inventory', partstickets: 'Counter Tickets',
   partsorders: 'Special Orders & Reorder', accounting: 'Overview', acctbook: 'Book Deals', acctcashier: 'Cashier',
   acctpayables: 'Payables', acctschedules: 'Schedules', acctjournal: 'Journal Entries', acctledger: 'General Ledger',
-  acctstatements: 'Financial Statement', acctbank: 'Bank Reconciliation', accttitles: 'Title Tracking', acctsetup: 'Setup & Month-End'
+  acctstatements: 'Financial Statement', acctbank: 'Bank Reconciliation', accttitles: 'Title Tracking', acctsetup: 'Setup & Month-End',
+  insightsales: 'Sales Summary', insightleaders: 'Leaderboard', insightfi: 'F&I & Lenders', insightinventory: 'Inventory Analysis', insightmarketing: 'Marketing', insighttrend: 'Gross Trend'
 };
 const openRailGroups = new Set();
 // Screens only some people use.
@@ -292,6 +296,7 @@ function showView(view) {
   if (view === 'pricing') openPricingView();
   if (view === 'duplicates') openDuplicatesView();
   if (typeof openAccountingView === 'function' && VIEW_PANELS[view] === 'accounting') openAccountingView(view);
+  if (typeof openInsightView === 'function' && VIEW_PANELS[view] === 'insightPanel') openInsightView(view);
   // (messages-ui.js loads after this file; it opens Messages itself if the app starts there.)
   if (typeof openMessagesView === 'function') { if (view === 'messages') openMessagesView(); else stopMessagesPolling(); }
   window.scrollTo(0, 0);
