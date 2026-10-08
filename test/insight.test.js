@@ -82,6 +82,32 @@ test('F&I: product penetration by manager, and the lender report', async () => {
   assert.strictEqual(f.managers.find(m => m.id === String(fi.id)).deals, 3);
 });
 
+test('F&I summary: what each product made, per deal, final vs not, target', async () => {
+  const f = (await as(manager, 'GET', '/insight/fi')).body;
+  const t = f.totals;
+  assert.strictEqual(t.deals, 3);
+  // Deal 1's $900 product cost is shared by premium: service 2000, GAP 800.
+  assert.strictEqual(t.profit.service, Math.round((2000 - 900 * 2000 / 2800) * 100) / 100);
+  assert.strictEqual(t.profit.gap, Math.round((800 - 900 * 800 / 2800 + 700) * 100) / 100);
+  assert.deepStrictEqual([t.product, t.reserve, t.back], [2600, 800, 3400]);
+  assert.deepStrictEqual([t.counts.gap, t.counts.service, t.productCount, t.reserveCount], [2, 1, 3, 2]);
+  assert.deepStrictEqual([f.summary.gross.actual, f.summary.gross.notFinal, f.summary.gross.final], [3400, 3400, 0]);
+  assert.strictEqual(f.summary.pvr.actual, Math.round(3400 / 3 * 100) / 100);
+  assert.deepStrictEqual([f.summary.penetration.current, f.summary.penetration.target], [100, 100]);
+  assert.ok(f.summary.gross.pace >= 3400, 'month to date gets a pace');
+  const mine = f.team.find(m => m.id === String(fi.id));
+  assert.strictEqual(mine.list.length, 3);
+  assert.ok(mine.list.every(d => d.dealNumber && 'profit' in d));
+  const usedOnly = (await as(manager, 'GET', '/insight/fi?type=new')).body;
+  assert.deepStrictEqual([usedOnly.totals.deals, usedOnly.totals.back], [1, 1000]);
+  // Managers set the products-per-deal target; F&I can't.
+  assert.strictEqual(f.canSetTarget, true);
+  assert.strictEqual((await as(fi, 'PUT', '/insight/fi-target', { penetration: 150 })).status, 403);
+  assert.strictEqual((await as(manager, 'PUT', '/insight/fi-target', { penetration: 'x' })).status, 400);
+  await ok(as(manager, 'PUT', '/insight/fi-target', { penetration: 150 }));
+  assert.strictEqual((await as(fi, 'GET', '/insight/fi')).body.summary.penetration.target, 150);
+});
+
 test('inventory: cost only for managers; model pacing; aging', async () => {
   const mgr = (await as(manager, 'GET', '/insight/inventory')).body;
   assert.strictEqual(mgr.seeCost, true);
