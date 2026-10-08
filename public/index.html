@@ -224,8 +224,14 @@
             <option value="month">This month</option>
             <option value="30">Last 30 days</option>
             <option value="90">Last 90 days</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="lastmonth">Last month</option>
+            <option value="year">This year</option>
+            <option value="custom">Pick dates…</option>
           </select>
         </label>
+        <label class="pipeline-custom" hidden>From <input type="date" id="pipelineFrom" /></label>
+        <label class="pipeline-custom" hidden>To <input type="date" id="pipelineTo" /></label>
       </div>
     </div>
     <div class="pipeline-stages" id="pipelineStages"></div>
