@@ -195,6 +195,7 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
   - The sales log of every deal
 - **Heartbeat** (today, or any day you pick): ups by source, calls / texts / emails, showroom visits, appointments shown vs due, sold today and deals working, a row per person on the floor, and the appointments still coming
 - **People & Goals**: one card per salesperson and BDC rep with units, gross, per vehicle, products, close rate, activity, appointments set and shown, and pace against their own monthly goal. Managers set the goals right there
+- **Trade-ins**: the share of sold deals with a trade for the store and each salesperson, overall and by where the customer came from -- Internet (website, Autotrader, CarGurus, Facebook), Walk-in, Phone up, and Other. Split deals count as shares; new / used filter; the deal list shows which had a trade
 - **Leaderboard**: salespeople (split deals count as shares), sales managers, and F&I managers, with gross, per vehicle, products per deal, leads, and close rate
 - **F&I Summary**:
   - Tiles: back gross (not final, final, actual, where the month will land, against the same dates last year), back per deal (with products-only), products per deal against the store's target (a manager sets it; 100% = one product per deal), and chargebacks

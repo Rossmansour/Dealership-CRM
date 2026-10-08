@@ -35,6 +35,7 @@ const IN_REPORTS = [
   { area: 'Sales', key: 'sales', view: 'insightsales', label: 'Sales Summary', perm: 'viewAllReports' },
   { area: 'Sales', key: 'leaderboard', view: 'insightleaders', label: 'Leaderboard', perm: 'viewAllReports' },
   { area: 'Sales', key: 'people', view: 'insightpeople', label: 'People & Goals', perm: 'viewAllReports' },
+  { area: 'Sales', key: 'trades', view: 'insighttrades', label: 'Trade-ins', perm: 'viewAllReports' },
   { area: 'Sales', key: 'trend', view: 'insighttrend', label: 'Gross Trend', perm: 'viewAllReports' },
   { area: 'F&I', key: 'fi', view: 'insightfi', label: 'F&I Summary', perm: 'viewAllReports' },
   { area: 'Inventory', key: 'inventory', view: 'insightinventory', label: 'Inventory Analysis', perm: 'viewAllReports' },
