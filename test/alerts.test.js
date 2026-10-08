@@ -162,14 +162,15 @@ test('each person picks which alerts they get, their priority, and sound', async
   const byKey = Object.fromEntries(settings.map(s => [s.key, s]));
   assert.strictEqual(byKey.lead_assigned.enabled, true);
   assert.strictEqual(byKey.trade_needs_appraisal.enabled, false, 'manager alerts are off for salespeople by default');
-  assert.strictEqual(byKey.text_reply.available, false);
+  assert.strictEqual(byKey.email_opened.available, false);
+  assert.strictEqual(byKey.text_reply.available, true, "customers texting back is live");
   assert.deepStrictEqual(byKey.lead_assigned.delivery, { inApp: true, later: ['email', 'text', 'push'] });
 
-  await as(sales, 'PUT', '/alerts/settings', { lead_assigned: { enabled: false }, task_assigned: { enabled: true, priority: 'high', sound: true }, text_reply: { enabled: true } });
+  await as(sales, 'PUT', '/alerts/settings', { lead_assigned: { enabled: false }, task_assigned: { enabled: true, priority: 'high', sound: true }, email_opened: { enabled: true } });
   const after2 = Object.fromEntries((await as(sales, 'GET', '/alerts/settings')).body.map(s => [s.key, s]));
   assert.strictEqual(after2.lead_assigned.enabled, false);
   assert.deepStrictEqual([after2.task_assigned.priority, after2.task_assigned.sound], ['high', true]);
-  assert.strictEqual(after2.text_reply.enabled, false, "can't turn on what isn't available");
+  assert.strictEqual(after2.email_opened.enabled, false, "can't turn on what isn't available");
 
   const before = (await myAlerts(sales)).length;
   const lead = (await as(manager, 'POST', '/leads', { name: 'Muted Mia', sales1Id: sales.id })).body;

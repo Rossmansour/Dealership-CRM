@@ -163,6 +163,8 @@ function publicUser(u) {
     roleLabel: ROLES[u.role] || u.role,
     active: u.active,
     available: u.available !== false,
+    directNumber: u.direct_number || '',
+    cellPhone: u.cell_phone || '',
     lastLoginAt: u.last_login_at,
     createdAt: u.created_at,
     permissions: Object.keys(PERMISSIONS).filter(p => can(u, p))
@@ -419,9 +421,21 @@ router.post('/users', requirePermission('manageUsers'), wrap(async (req, res) =>
   }
 }));
 
-// Update name, role, active status, and/or set a new password.
+// Phone numbers in one form: +1 and 10 digits (US), or + and the digits.
+function e164(v) {
+  const digits = String(v || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits[0] === '1') return `+${digits}`;
+  return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : undefined;
+}
+
+// Update name, role, active status, phones, and/or set a new password.
 router.put('/users/:id', requirePermission('manageUsers'), wrap(async (req, res) => {
   const { name, role, active, password } = req.body || {};
+  const directNumber = 'directNumber' in (req.body || {}) ? e164(req.body.directNumber) : false;
+  const cellPhone = 'cellPhone' in (req.body || {}) ? e164(req.body.cellPhone) : false;
+  if (directNumber === undefined || cellPhone === undefined) return res.status(400).json({ error: 'That phone number doesn\'t look right.' });
   if (role !== undefined && !ROLES[role]) return res.status(400).json({ error: 'Pick a valid role.' });
   if (password !== undefined) {
     const problem = passwordProblem(password);
@@ -455,10 +469,16 @@ router.put('/users/:id', requirePermission('manageUsers'), wrap(async (req, res)
       if (admins[0].n === 0) return { status: 400, error: 'This is the only active admin. Make someone else an admin first.' };
     }
 
+    const nextDirect = directNumber === false ? user.direct_number : directNumber;
+    const nextCell = cellPhone === false ? user.cell_phone : cellPhone;
+    if (nextDirect) {
+      const { rows: taken } = await q.query('SELECT 1 FROM users WHERE direct_number = $1 AND id <> $2', [nextDirect, user.id]);
+      if (taken.length) return { status: 409, error: 'Someone else already has that direct number.' };
+    }
     const { rows: updated } = await q.query(
-      `UPDATE users SET name = $2, role = $3, active = $4, password_hash = COALESCE($5, password_hash)
+      `UPDATE users SET name = $2, role = $3, active = $4, password_hash = COALESCE($5, password_hash), direct_number = $6, cell_phone = $7
        WHERE id = $1 RETURNING *`,
-      [user.id, next.name, next.role, next.active, passwordHash]
+      [user.id, next.name, next.role, next.active, passwordHash, nextDirect, nextCell]
     );
     // Deactivating someone or resetting their password signs them out.
     if (!next.active || passwordHash) {
@@ -466,8 +486,8 @@ router.put('/users/:id', requirePermission('manageUsers'), wrap(async (req, res)
     }
 
     const changes = audit.diff(
-      { name: user.name, role: ROLES[user.role], active: user.active },
-      { name: next.name, role: ROLES[next.role], active: next.active }
+      { name: user.name, role: ROLES[user.role], active: user.active, directNumber: user.direct_number || '', cellPhone: user.cell_phone || '' },
+      { name: next.name, role: ROLES[next.role], active: next.active, directNumber: nextDirect || '', cellPhone: nextCell || '' }
     );
     if (passwordHash) changes.password = { from: '(hidden)', to: '(hidden)', hidden: true };
     if (Object.keys(changes).length) {
@@ -493,5 +513,6 @@ module.exports = {
   requirePermission,
   requireLoginForPage,
   announceSetupIfNeeded,
-  hashPassword
+  hashPassword,
+  e164
 };

@@ -325,6 +325,13 @@ const MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (dealership_id, id)
   );
+  `,
+  `
+  -- Phones: each employee's own business number (texts and calls to it land
+  -- in the CRM) and the cell phone their calls ring through to.
+  ALTER TABLE users ADD COLUMN direct_number text;
+  ALTER TABLE users ADD COLUMN cell_phone text;
+  CREATE UNIQUE INDEX users_direct_number ON users (direct_number) WHERE direct_number IS NOT NULL;
   `
 ];
 

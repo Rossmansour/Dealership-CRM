@@ -162,9 +162,9 @@ function router(deps) {
     const body = `Hi${first ? ` ${first}` : ''}, your vehicle inspection${d && d.name ? ` from ${d.name}` : ''} is ready. See what we found and approve any work here: ${link}`;
     let texted = false;
     let textError = null;
-    if (lead && lead.phone) {
-      try { texted = await deps.sendSms(lead.phone, body); } catch (err) { textError = err.message; }
-    }
+    if (lead && lead.phone && !lead.smsOptOut) {
+      try { texted = await deps.sendSms(lead.phone, body, req.user); } catch (err) { textError = err.message; }
+    } else if (lead && lead.smsOptOut) textError = 'they texted STOP';
     if (lead) {
       await store.tx(async q => {
         const current = await store.get(q, 'leads', req.dealershipId, lead.id, { forUpdate: true });
