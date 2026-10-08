@@ -17,7 +17,7 @@ This project is a simplified version of the internal tool I wish I'd had: one pl
 
 ## Features
 
-DealerDomus is made of modules, each named as its own product so stores can buy the whole thing or just the pieces they need: **CRM Domus** (customers and leads), **Desk Domus** (deals, desking, F&I), **Inventory Domus** (inventory, appraisals, market pricing), **Recon Domus** (reconditioning, in its own browser tab), **Service Domus**, **Parts Domus**, **Accounting Domus**, and **Insight Domus**. They all share one login and one set of data.
+DealerDomus is made of modules, each named as its own product so stores can buy the whole thing or just the pieces they need: **CRM Domus** (customers and leads), **Desk Domus** (deals, desking, F&I), **Inventory Domus** (inventory, appraisals, market pricing), **Recon Domus** (reconditioning, in its own browser tab), **Service Domus**, **Parts Domus**, **Accounting Domus**, and **Insight Domus** (reports, in its own browser tab). They all share one login and one set of data.
 
 **Inventory Management**
 - Add, edit, and delete vehicles (make, model, year, VIN, mileage, cost, price)
@@ -185,13 +185,16 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Dashboard → Service & Parts**: parts gross now includes counter sales
 - Techs can look parts up but don't see cost
 
-**Insight Domus** (left sidebar → Insight; admins, GM, sales managers, F&I)
+**Insight Domus** (opens in its own browser tab at `/insight`; admins, GM, sales managers, F&I, fixed ops managers)
+- Its own app with a report menu by area (store, sales, F&I, inventory, service & parts, marketing). Star a report to pin it to the top; Insight opens on your first favorite. Each report has its own link (like `/insight#heartbeat`) you can bookmark
 - Live from the deals, cars, and repair orders -- no overnight pull. Every screen takes a date range (this month by default; quick picks for last month, 30/90 days, this year), prints, and exports CSV
 - **Sales Summary**:
   - Retail units, new and used, total gross, and front / back / total per vehicle
   - Each compared to the period before and the same dates last year, with this month's pace and goal
   - A table split into final and not final, with incentives, chargebacks, and products per deal
   - The sales log of every deal
+- **Heartbeat** (today, or any day you pick): ups by source, calls / texts / emails, showroom visits, appointments shown vs due, sold today and deals working, a row per person on the floor, and the appointments still coming
+- **People & Goals**: one card per salesperson and BDC rep with units, gross, per vehicle, products, close rate, activity, appointments set and shown, and pace against their own monthly goal. Managers set the goals right there
 - **Leaderboard**: salespeople (split deals count as shares), sales managers, and F&I managers, with gross, per vehicle, products per deal, leads, and close rate
 - **F&I & Lenders**: back gross and products per deal, penetration for each product (service contract, GAP, maintenance, aftermarket, credit insurance) overall and by F&I manager, and the lender report (deals, amount financed, average APR and term, reserve)
 - **Inventory Analysis**:
@@ -209,11 +212,12 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
   - Repair orders by labor type with hours, hours per RO, effective labor rate, labor and parts gross and margin, plus counter sales by type
   - Technician productivity (hours flagged ÷ hours clocked) and advisors (ROs, hours per RO, ELR)
   - Open repair orders by age
+- **Parts Inventory** (fixed ops managers): stock value, turns, parts idle 90 / 180 / 365 days, the oldest parts, top sellers, and overstock (more than 6 months on the shelf)
 - **Expenses & Cash** (whoever can read the books):
   - Every expense account against its 6-month and 3-month averages, the last 3 months, and the same month last year
   - Cash: each receivable and payable schedule with totals, over-30-day amounts, and the oldest item
   - The 10 oldest contracts in transit, the 10 oldest deals not booked, and titles not yet at the DMV
-- Each person sees only the Insight screens their role allows, and opening Insight lands on the first one they can see
+- Each person sees only the Insight reports their role allows
 
 **Accounting Domus** (left sidebar → Accounting; admins, the GM to read, and the new **Office / Accounting** role)
 - **A real general ledger**: a full dealership chart of accounts (cash, contracts in transit, receivables, vehicle and parts inventory, floor plan, payables, sales and cost of sales by department, expenses) that the store can rename and add to. Every entry balances, and nothing is deleted: mistakes are reversed

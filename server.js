@@ -106,6 +106,7 @@ app.use(express.json());
 app.get(['/', '/index.html', '/recon.html'], auth.requireLoginForPage);
 // Recon runs in its own browser tab.
 app.get('/recon', auth.requireLoginForPage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'recon.html')));
+app.get('/insight', auth.requireLoginForPage, (req, res) => res.sendFile(path.join(__dirname, 'public', 'insight.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 // The public marketing site (no sign-in).
 app.use('/site', express.static(path.join(__dirname, 'site')));

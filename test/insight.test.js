@@ -151,3 +151,39 @@ test('expenses & cash: averages by account and what is owed to the store -- for 
   assert.ok(e.schedules.some(x => x.key === 'cit'));
   assert.ok(e.unbooked.length >= 3, 'delivered deals not booked yet');
 });
+
+test('Insight is its own app at /insight (signed in only)', async () => {
+  assert.strictEqual((await h.page('/insight', manager.cookie)).status, 200);
+  const out = await h.page('/insight');
+  assert.notStrictEqual(out.status, 200, 'not without signing in');
+});
+
+test('heartbeat: today on the floor', async () => {
+  const b = (await as(manager, 'GET', '/insight/heartbeat')).body;
+  assert.strictEqual(b.sold, 3, 'all three sold today');
+  assert.ok(b.ups >= 3);
+  const one = b.people.find(p => p.id === String(sales.id));
+  assert.strictEqual(one.sold, 1.5);
+  assert.strictEqual((await as(sales, 'GET', '/insight/heartbeat')).status, 403);
+});
+
+test('people & goals: managers set goals; each person against theirs', async () => {
+  const month = new Date().toISOString().slice(0, 7);
+  assert.strictEqual((await as(fi, 'PUT', '/insight/goals', { month, goals: {} })).status, 403, 'goals are set by sales management');
+  await ok(as(manager, 'PUT', '/insight/goals', { month, goals: { [sales.id]: { units: 10, gross: 30000 } } }));
+  const p = (await as(manager, 'GET', `/insight/people?month=${month}`)).body;
+  const one = p.people.find(x => x.id === String(sales.id));
+  assert.deepStrictEqual([one.goal.units, one.goal.gross, one.units, one.toGoal.units], [10, 30000, 1.5, 15]);
+  assert.ok(p.canSetGoals);
+});
+
+test('parts inventory: value, turns, what is not moving', async () => {
+  const svc = await h.createUser('service_manager');
+  const pm = await h.createUser('parts_manager');
+  const part = await ok(as(pm, 'POST', '/parts', { number: 'SLOW-1', description: 'Slow mover', cost: 10, price: 20 }));
+  await ok(as(pm, 'POST', `/parts/${part.id}/receive`, { qty: 5, cost: 10 }));
+  assert.strictEqual((await as(manager, 'GET', '/insight/parts')).status, 403);
+  const r = (await as(svc, 'GET', '/insight/parts')).body;
+  assert.ok(r.value >= 50);
+  assert.ok(r.idle[0].skus >= 1, 'never sold: not moving');
+});
