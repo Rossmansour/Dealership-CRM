@@ -77,21 +77,73 @@ async function marketcheck(car, cfg) {
   const isNew = car.stockType === 'new';
   const model = String(car.model || '').trim(), trim = String(car.trim || '').trim();
   const short = model.replace(/[\s-]*class$/i, '').trim();
+  const body = siteBodyType(car.bodyStyle);
   const attempts = [];
+  if (trim && body) attempts.push({ model, trim, body });
   if (trim) attempts.push({ model, trim });
+  if (body) attempts.push({ model, body });
   attempts.push({ model });
   if (short && short.toLowerCase() !== model.toLowerCase()) attempts.push({ model: short });
   let best = { listings: [], searched: '' };
   for (const a of attempts) {
-    const listings = await mcSearch({ make: car.make || '', model: a.model, ...(a.trim ? { trim: a.trim } : {}), year: years.join(','),
+    const listings = await mcSearch({ make: car.make || '', model: a.model, ...(a.trim ? { trim: a.trim } : {}), ...(a.body ? { body_type: a.body } : {}), year: years.join(','),
       car_type: isNew ? 'new' : 'used,certified', zip: cfg.zip, radius: String(cfg.radius) });
-    const searched = `${years[0] === years[years.length - 1] ? years[0] : `${years[0]}–${years[years.length - 1]}`} ${car.make} ${a.model}${a.trim ? ` ${a.trim}` : ''}, ${isNew ? 'new' : 'used & certified'}, within ${cfg.radius} mi of ${cfg.zip}`;
+    const searched = `${years[0] === years[years.length - 1] ? years[0] : `${years[0]}–${years[years.length - 1]}`} ${car.make} ${a.model}${a.trim ? ` ${a.trim}` : ''}${a.body ? ` ${a.body}` : ''}, ${isNew ? 'new' : 'used & certified'}, within ${cfg.radius} mi of ${cfg.zip}`;
     if (listings.length > best.listings.length) best = { listings, searched };
     if (listings.length >= cfg.minComps) break;
     if (!best.searched) best.searched = searched;
   }
   return best;
 }
+// The listing site's own names for a make / model / year -- models, trims,
+// and body styles that are actually for sale -- so people pick from them
+// and the market search matches. Without a market key: models from the
+// free NHTSA list, and no trims or body styles. Kept an hour in memory.
+const optionsCache = new Map();
+async function vehicleOptions({ year, make, model }) {
+  year = Number(year) || null; make = String(make || '').trim(); model = String(model || '').trim();
+  if (!year || !make) return { source: 'none', models: [], trims: [], bodyStyles: [] };
+  const key = [year, make.toLowerCase(), model.toLowerCase(), marketKey() ? 'mc' : 'nhtsa'].join('|');
+  const hit = optionsCache.get(key);
+  if (hit && Date.now() - hit.at < 3600000) return hit.value;
+  let value;
+  if (marketKey()) {
+    const facets = async (q, fields) => {
+      const params = new URLSearchParams({ api_key: marketKey(), ...q, rows: '0', facets: fields.map(f => `${f}|0|100`).join(',') });
+      const res = await fetch(`https://mc-api.marketcheck.com/v2/search/car/active?${params}`, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`Market data: ${res.status} ${res.statusText}`);
+      const f = (await res.json()).facets || {};
+      return Object.fromEntries(fields.map(k => [k, (f[k] || []).map(x => String(x.item || '').trim()).filter(Boolean)]));
+    };
+    const models = (await facets({ make, year: String(year) }, ['model'])).model;
+    // The model as the site names it (the VIN decoder may say "GLB-Class" for "GLB").
+    const siteModel = model ? (models.find(m => sameName(m, model)) || model) : '';
+    const more = siteModel ? await facets({ make, model: siteModel, year: String(year) }, ['trim', 'body_type']) : { trim: [], body_type: [] };
+    value = { source: 'marketcheck', models: sortNames(models), model: siteModel, trims: sortNames(more.trim), bodyStyles: sortNames(more.body_type) };
+  } else {
+    let models = [];
+    try {
+      const res = await fetch(`${process.env.VIN_DECODER_URL || 'https://vpic.nhtsa.dot.gov/api/vehicles'}/GetModelsForMakeYear/make/${encodeURIComponent(make)}/modelyear/${year}?format=json`, { signal: AbortSignal.timeout(10000) });
+      if (res.ok) models = ((await res.json()).Results || []).map(r => String(r.Model_Name || '').trim()).filter(Boolean);
+    } catch (err) { models = []; }
+    value = { source: 'nhtsa', models: sortNames([...new Set(models)]), model: model ? (models.find(m => sameName(m, model)) || model) : '', trims: [], bodyStyles: [] };
+  }
+  optionsCache.set(key, { at: Date.now(), value });
+  return value;
+}
+// Same name, ignoring spaces, dashes, case, and a trailing "class".
+const nameKey = v => String(v || '').toLowerCase().replace(/[\s-]*class$/, '').replace(/[^a-z0-9]/g, '');
+const sameName = (a, b) => !!nameKey(a) && nameKey(a) === nameKey(b);
+const sortNames = list => [...new Set(list)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+// A decoded body style in the listing site's words (only the clear ones).
+function siteBodyType(body) {
+  const b = String(body || '');
+  if (!b) return '';
+  for (const [re, v] of [[/sport utility|\bsuv\b/i, 'SUV'], [/pickup/i, 'Pickup'], [/minivan/i, 'Minivan'], [/convertible|cabriolet/i, 'Convertible'],
+    [/coupe/i, 'Coupe'], [/hatchback/i, 'Hatchback'], [/wagon/i, 'Wagon'], [/sedan|saloon/i, 'Sedan']]) if (re.test(b)) return v;
+  return '';
+}
+
 async function mcSearch(query) {
   const get = async q => {
     const params = new URLSearchParams({ api_key: marketKey(), ...q, rows: '50', start: '0' });
@@ -428,4 +480,9 @@ router.post('/pricing/run', allow, wrap(async (req, res) => {
   res.json(await autoPrice(req.dealershipId));
 }));
 
-module.exports = { router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, fetchMarket, marketConnected, autoPrice, autoPriceSweep, setMarketSource, pullSoon, pullsDone };
+// The names to pick from for a year / make / model (any signed-in user).
+router.get('/vehicle-options', async (req, res) => {
+  try { res.json(await vehicleOptions(req.query || {})); } catch (err) { res.json({ source: 'error', error: err.message, models: [], trims: [], bodyStyles: [] }); }
+});
+
+module.exports = { vehicleOptions, siteBodyType, router, pricingSettings, defaultPricingSettings, suggest, nextPrice, snapshot, fetchMarket, marketConnected, autoPrice, autoPriceSweep, setMarketSource, pullSoon, pullsDone };

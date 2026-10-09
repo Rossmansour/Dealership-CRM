@@ -2044,6 +2044,7 @@ function renderAppraisalDetail() {
   document.getElementById('apAddReconBtn').disabled = locked;
   document.getElementById('appraisalSaveBtn').style.display = locked ? 'none' : '';
 
+  apPickers.reset();
   renderEquipment();
   renderProviderSlots();
   renderRecalls();
@@ -2524,9 +2525,9 @@ apPtmEl.addEventListener('input', (e) => {
 // right now, so nobody has to save or click anything first.
 const apVehicleNow = () => {
   const v = id => document.getElementById(id).value.trim();
-  return { year: Number(v('apYear')) || null, make: v('apMake'), model: v('apModel'), trim: v('apTrim'), vin: v('apVin'), mileage: Number(v('apMileage')) || 0 };
+  return { year: Number(v('apYear')) || null, make: v('apMake'), model: v('apModel'), trim: v('apTrim'), bodyStyle: v('apBodyStyle'), vin: v('apVin'), mileage: Number(v('apMileage')) || 0 };
 };
-const apMarketKey = v => [v.year, v.make, v.model, v.trim, v.mileage].join('|');
+const apMarketKey = v => [v.year, v.make, v.model, v.trim, v.bodyStyle, v.mileage].join('|');
 let apMarketTimer = null;
 let apMarketPulling = null; // the key being pulled right now
 function apAutoMarket(delay = 900) {
@@ -2572,7 +2573,7 @@ async function pullAppraisalMarket({ force = false } = {}) {
     }
   } finally { if (apMarketPulling === key) { apMarketPulling = null; apPtmSync(); } }
 }
-['apYear', 'apMake', 'apModel', 'apTrim', 'apMileage'].forEach(id =>
+['apYear', 'apMake', 'apModel', 'apTrim', 'apBodyStyle', 'apMileage'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => apAutoMarket()));
 
 // ----- Recalls (live, NHTSA) -----
@@ -3096,6 +3097,103 @@ const CAR_DETAIL_INPUTS = [
   ['exteriorColor', 'carExteriorColor'], ['interiorColor', 'carInteriorColor']
 ];
 
+// ----- Model / trim / body style pick-lists -----
+// Once the year and make are in, Model, Trim, and Body Style become
+// dropdowns of the names the listing sites use for cars actually for sale
+// (a GLC comes as an SUV or a Coupe; a GLB as "GLB 250" or "AMG GLB 35"),
+// so what's picked is what the market search finds. A decoded name that's
+// the same in other words ("GLB250", "GLB-Class", "Sport Utility Vehicle")
+// is switched to the site's; one that isn't asks to be picked. "Other"
+// still lets anyone type their own.
+const vpCache = new Map();
+async function vpOptions(year, make, model) {
+  const key = [year, make, model].join('|').toLowerCase();
+  if (!vpCache.has(key)) {
+    vpCache.set(key, fetch(`${API}/vehicle-options?${new URLSearchParams({ year, make, model })}`).then(r => (r.ok ? r.json() : null)).catch(() => null)
+      .then(v => { if (!v) vpCache.delete(key); return v; }));
+  }
+  return vpCache.get(key);
+}
+const vpKey = v => String(v || '').toLowerCase().replace(/[\s-]*class$/, '').replace(/[^a-z0-9]/g, '');
+function vpBody(b) {
+  for (const [re, v] of [[/sport utility|\bsuv\b/i, 'suv'], [/pickup/i, 'pickup'], [/minivan/i, 'minivan'], [/convertible|cabriolet/i, 'convertible'],
+    [/coupe/i, 'coupe'], [/hatchback/i, 'hatchback'], [/wagon/i, 'wagon'], [/sedan|saloon/i, 'sedan']]) if (re.test(String(b || ''))) return v;
+  return vpKey(b);
+}
+const vpPickers = [];
+function vehiclePickers(ids) {
+  const el = k => document.getElementById(ids[k]);
+  const nouns = { model: 'model', trim: 'trim', body: 'body style' };
+  const sels = {};
+  for (const k of ['model', 'trim', 'body']) {
+    const input = el(k);
+    input.dataset.req = input.required ? '1' : '';
+    const sel = document.createElement('select');
+    sel.className = 'vp-select';
+    sel.hidden = true;
+    sel.setAttribute('aria-label', nouns[k]);
+    input.before(sel);
+    sels[k] = sel;
+    sel.addEventListener('change', () => {
+      if (sel.value === '__other') {
+        sel.dataset.other = '1';
+        input.hidden = false;
+        input.required = !!input.dataset.req;
+        input.value = '';
+        input.focus();
+      } else {
+        sel.dataset.other = '';
+        input.hidden = true;
+        input.value = sel.value;
+      }
+      sel.classList.remove('vp-needs');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  const same = (k, a, b) => (k === 'body' ? vpBody(a) === vpBody(b) : vpKey(a) === vpKey(b)) && !!vpKey(a);
+  function apply(k, list) {
+    const input = el(k), sel = sels[k];
+    if (!list || !list.length) {
+      sel.hidden = true; input.hidden = false; input.required = !!input.dataset.req; sel.required = false;
+      return;
+    }
+    const cur = input.value.trim();
+    const match = cur ? list.find(x => x === cur) || list.find(x => same(k, x, cur)) : null;
+    if (match && match !== cur) { input.value = match; input.dispatchEvent(new Event('input', { bubbles: true })); }
+    const other = sel.dataset.other === '1' || false;
+    const unmatched = cur && !match && !other;
+    sel.innerHTML = html`<option value="">${unmatched ? `Pick the ${nouns[k]} -- the VIN says "${cur}"` : `Pick the ${nouns[k]}…`}</option>
+      ${list.map(x => html`<option value="${x}">${x}</option>`)}<option value="__other">Other (type it)</option>`;
+    sel.value = match || (other ? '__other' : '');
+    sel.classList.toggle('vp-needs', !!unmatched);
+    sel.hidden = false;
+    sel.disabled = input.disabled;
+    input.hidden = !other;
+    input.required = other && !!input.dataset.req;
+    sel.required = !other && !!input.dataset.req;
+  }
+  let seq = 0, timer = null;
+  async function refresh() {
+    const my = ++seq;
+    const year = el('year').value.trim(), make = el('make').value.trim(), model = el('model').value.trim();
+    if (!year || !make) { ['model', 'trim', 'body'].forEach(k => apply(k, [])); return; }
+    const opts = await vpOptions(year, make, model);
+    if (my !== seq || !opts) return;
+    apply('model', opts.models);
+    // The model may have just switched to the site's name: get its trims.
+    if (opts.model && el('model').value.trim() !== model) return refresh();
+    apply('trim', opts.trims);
+    apply('body', opts.bodyStyles);
+  }
+  // A new car (or a new appraisal): forget "Other" from the last one.
+  const reset = () => { Object.values(sels).forEach(sel => { sel.dataset.other = ''; }); return refresh(); };
+  ['year', 'make', 'model'].forEach(k => el(k).addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(refresh, 450); }));
+  const picker = { refresh, reset };
+  vpPickers.push(picker);
+  return picker;
+}
+
 async function decodeVinInto({ inputId, statusId, excludeCarId, fill }) {
   const input = document.getElementById(inputId);
   const statusEl = document.getElementById(statusId);
@@ -3118,6 +3216,7 @@ async function decodeVinInto({ inputId, statusId, excludeCarId, fill }) {
     }
 
     fill(data);
+    vpPickers.forEach(p => p.reset());
     const summary = [data.year, data.make, data.model, data.trim].filter(Boolean).join(' ');
     const specs = [data.bodyStyle, data.engine, data.drivetrain].filter(Boolean).join(' · ');
     statusEl.innerHTML = html`
@@ -3173,6 +3272,7 @@ document.getElementById('addCarBtn').addEventListener('click', () => {
   updateSoldAsFields();
   updateCarGross();
   carModal.classList.add('active');
+  carPickers.reset();
 });
 
 // "Sold as" only matters once the car is sold; wholesale needs its price.
@@ -3225,6 +3325,7 @@ window.editCar = function(id) {
   renderCarPhotoGrid(car);
 
   carModal.classList.add('active');
+  carPickers.reset();
 };
 
 // Photos need a saved car to attach to, so a new car shows a note instead.
@@ -6753,3 +6854,7 @@ document.getElementById('alertSettingsSaveBtn').addEventListener('click', async 
 });
 
 init();
+
+// Pick-lists for the appraisal and the car form (see vehiclePickers).
+const apPickers = vehiclePickers({ year: 'apYear', make: 'apMake', model: 'apModel', trim: 'apTrim', body: 'apBodyStyle' });
+const carPickers = vehiclePickers({ year: 'carYear', make: 'carMake', model: 'carModel', trim: 'carTrim', body: 'carBodyStyle' });

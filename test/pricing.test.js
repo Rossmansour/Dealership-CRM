@@ -93,7 +93,7 @@ test('appraisals pull the same market, with a suggested retail', async () => {
   // What's typed on screen (not saved yet) is what gets pulled.
   r = await as(manager, 'POST', `/appraisals/${a.id}/market`, { year: 2020, make: 'Honda', model: 'Civic', trim: '', mileage: 30000 });
   assert.strictEqual(r.body.market.median, 24250, '20,000 fewer miles than the similar cars');
-  assert.strictEqual(r.body.market.for, '2020|Honda|Civic||30000');
+  assert.strictEqual(r.body.market.for, '2020|Honda|Civic|||30000');
   assert.strictEqual(r.body.mileage, 40000, 'the appraisal itself is not changed');
   const bare = (await as(manager, 'POST', '/appraisals', { vin: '' })).body;
   assert.strictEqual((await as(manager, 'POST', `/appraisals/${bare.id}/market`)).status, 400);
@@ -149,4 +149,33 @@ test('the listing search loosens when the decoded names find nothing (trim, then
     if (realKey === undefined) delete process.env.MARKETCHECK_API_KEY; else process.env.MARKETCHECK_API_KEY = realKey;
     pricing.setMarketSource(async () => listings());
   }
+});
+
+test('vehicle options: the listing site\'s models, trims, and body styles; decoded names map to them', async () => {
+  const realFetch = global.fetch, realKey = process.env.MARKETCHECK_API_KEY;
+  const asked = [];
+  global.fetch = async (url) => {
+    const q = new URL(url).searchParams;
+    asked.push(q.get('facets'));
+    const facets = q.get('model')
+      ? { trim: [{ item: 'GLC 300', count: 40 }, { item: 'AMG GLC 43', count: 8 }], body_type: [{ item: 'SUV', count: 40 }, { item: 'Coupe', count: 8 }] }
+      : { model: [{ item: 'GLC', count: 48 }, { item: 'GLB', count: 20 }, { item: 'C-Class', count: 30 }] };
+    return { ok: true, status: 200, json: async () => ({ num_found: 0, listings: [], facets }) };
+  };
+  process.env.MARKETCHECK_API_KEY = 'test-key';
+  try {
+    const o = await pricing.vehicleOptions({ year: 2024, make: 'Mercedes-Benz', model: 'GLC-Class' });
+    assert.deepStrictEqual(o.models, ['C-Class', 'GLB', 'GLC']);
+    assert.strictEqual(o.model, 'GLC', 'the decoded "GLC-Class" is the site\'s "GLC"');
+    assert.deepStrictEqual(o.trims, ['AMG GLC 43', 'GLC 300']);
+    assert.deepStrictEqual(o.bodyStyles, ['Coupe', 'SUV']);
+    assert.deepStrictEqual(asked, ['model|0|100', 'trim|0|100,body_type|0|100']);
+    assert.strictEqual(pricing.siteBodyType('Sport Utility Vehicle (SUV)/Multi-Purpose Vehicle (MPV)'), 'SUV');
+    assert.strictEqual(pricing.siteBodyType('Coupe'), 'Coupe');
+  } finally {
+    global.fetch = realFetch;
+    if (realKey === undefined) delete process.env.MARKETCHECK_API_KEY; else process.env.MARKETCHECK_API_KEY = realKey;
+  }
+  // Signed in only.
+  assert.strictEqual((await h.api('GET', '/vehicle-options?year=2024&make=Mercedes-Benz')).status, 401);
 });

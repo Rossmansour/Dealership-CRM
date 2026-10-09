@@ -3203,3 +3203,9 @@ button.ac-card:hover { border-color: var(--blue); }
 .in-ov-tiles .in-ov-tile { text-align: left; font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--border); }
 .in-ov-tiles .in-ov-tile:hover { border-color: var(--blue); }
 .in-ov-tiles .in-ov-tile.active { border-color: var(--blue); box-shadow: inset 0 -3px 0 var(--blue); }
+
+/* Model / trim / body style pick-lists */
+.vp-select { width: 100%; }
+.vp-select + input:not([hidden]) { margin-top: 4px; }
+.vp-select.vp-needs { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+.vp-select ~ input[hidden] { display: none !important; }

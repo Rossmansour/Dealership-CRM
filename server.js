@@ -2890,7 +2890,7 @@ app.post('/api/appraisals/:id/market', wrap(async (req, res) => {
   // without saving first. Anything it leaves out comes from the appraisal.
   const b = req.body || {};
   const pick = f => (b[f] !== undefined && b[f] !== null ? String(b[f]).trim().slice(0, 60) : appraisal[f]);
-  const car = { year: Number(pick('year')) || null, make: pick('make'), model: pick('model'), trim: pick('trim') || '', vin: pick('vin') || '', mileage: Number(pick('mileage')) || 0, stockType: 'used' };
+  const car = { year: Number(pick('year')) || null, make: pick('make'), model: pick('model'), trim: pick('trim') || '', bodyStyle: pick('bodyStyle') || '', vin: pick('vin') || '', mileage: Number(pick('mileage')) || 0, stockType: 'used' };
   if (!car.year || !car.make || !car.model) return res.status(400).json({ error: 'Enter the year, make, and model first (or decode the VIN).' });
   const cfg = pricing.pricingSettings((await getSettings(store.pool, req.dealershipId)));
   let market;
@@ -2902,7 +2902,7 @@ app.post('/api/appraisals/:id/market', wrap(async (req, res) => {
   market.suggestedRetail = market.median && market.count >= cfg.minComps
     ? Math.round(market.median * cfg.targetPct / 100 / cfg.roundTo) * cfg.roundTo : null;
   market.comps = market.comps.slice(0, 25);
-  market.for = [car.year, car.make, car.model, car.trim, car.mileage].join('|'); // what it was pulled for
+  market.for = [car.year, car.make, car.model, car.trim, car.bodyStyle, car.mileage].join('|'); // what it was pulled for
   const saved = await store.tx(async q => {
     const current = await store.get(q, 'appraisals', req.dealershipId, appraisal.id, { forUpdate: true });
     return current && store.save(q, 'appraisals', req.dealershipId, current.id, { ...current, market });
