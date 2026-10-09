@@ -43,6 +43,7 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
 - **Apply suggested** to the cars you pick, or turn on **auto-pricing**: once a day every car that isn't locked moves to its suggested price (by at most a set amount at a time). **Lock** a car to keep its price
 - Every price change is kept on the car (who or what changed it, and why)
 - Market data comes from MarketCheck (see *Setting up market pricing*). Until it's connected, demo cars use made-up demo listings so the screen can be tried
+- **The search loosens on its own**: VIN-decoded names don't always match the listing sites' (trim "GLB250" vs "GLB 250", model "GLB-Class" vs "GLB"), so it searches with the trim first, then without it, then with the model's short name, until it finds enough similar cars. Used cars include certified ones. The screen says what it searched, or why nothing came back
 - **Appraisals use the same market**: the Market card on an appraisal pulls the similar cars for sale nearby (adjusted to its miles), shows its rank and % of market at the internet price, and suggests a retail price. **Use as internet price** puts it in the offer calculator, which works the offer back from it
 
 **Deal Jacket -- a tab on every deal**

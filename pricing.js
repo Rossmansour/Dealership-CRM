@@ -67,15 +67,39 @@ function pricingSettings(settings) {
 
 const marketKey = () => process.env.MARKETCHECK_API_KEY || '';
 
+// The VIN decoder's names don't always match the listing sites' (trim
+// "GLB250" vs "GLB 250", model "GLB-Class" vs "GLB"), so the search starts
+// exact and loosens until it finds enough similar cars: without the trim,
+// then the model's short name. Used cars include certified ones.
 async function marketcheck(car, cfg) {
   const years = [];
   for (let y = n(car.year) - cfg.yearRange; y <= n(car.year) + cfg.yearRange; y++) years.push(y);
-  const params = new URLSearchParams({
-    api_key: marketKey(), make: car.make || '', model: car.model || '', year: years.join(','),
-    car_type: car.stockType === 'new' ? 'new' : 'used', zip: cfg.zip, radius: String(cfg.radius), rows: '50', start: '0'
-  });
-  if (car.trim) params.set('trim', car.trim);
-  const res = await fetch(`https://mc-api.marketcheck.com/v2/search/car/active?${params}`, { signal: AbortSignal.timeout(15000) });
+  const isNew = car.stockType === 'new';
+  const model = String(car.model || '').trim(), trim = String(car.trim || '').trim();
+  const short = model.replace(/[\s-]*class$/i, '').trim();
+  const attempts = [];
+  if (trim) attempts.push({ model, trim });
+  attempts.push({ model });
+  if (short && short.toLowerCase() !== model.toLowerCase()) attempts.push({ model: short });
+  let best = { listings: [], searched: '' };
+  for (const a of attempts) {
+    const listings = await mcSearch({ make: car.make || '', model: a.model, ...(a.trim ? { trim: a.trim } : {}), year: years.join(','),
+      car_type: isNew ? 'new' : 'used,certified', zip: cfg.zip, radius: String(cfg.radius) });
+    const searched = `${years[0] === years[years.length - 1] ? years[0] : `${years[0]}–${years[years.length - 1]}`} ${car.make} ${a.model}${a.trim ? ` ${a.trim}` : ''}, ${isNew ? 'new' : 'used & certified'}, within ${cfg.radius} mi of ${cfg.zip}`;
+    if (listings.length > best.listings.length) best = { listings, searched };
+    if (listings.length >= cfg.minComps) break;
+    if (!best.searched) best.searched = searched;
+  }
+  return best;
+}
+async function mcSearch(query) {
+  const get = async q => {
+    const params = new URLSearchParams({ api_key: marketKey(), ...q, rows: '50', start: '0' });
+    return fetch(`https://mc-api.marketcheck.com/v2/search/car/active?${params}`, { signal: AbortSignal.timeout(15000) });
+  };
+  let res = await get(query);
+  // If the listing site won't take used + certified together, ask for used alone.
+  if (!res.ok && res.status === 400 && query.car_type === 'used,certified') res = await get({ ...query, car_type: 'used' });
   if (!res.ok) throw new Error(`Market data: ${res.status} ${res.statusText}`);
   const body = await res.json();
   return (body.listings || []).map(l => ({
@@ -111,7 +135,8 @@ async function fetchMarket(car, cfg) {
   if (marketSource) return { source: 'test', listings: await marketSource(car, cfg) };
   if (marketKey()) {
     if (!cfg.zip) throw new Error("Set the store's ZIP code in pricing settings first.");
-    return { source: 'marketcheck', listings: await marketcheck(car, cfg) };
+    const found = await marketcheck(car, cfg);
+    return { source: 'marketcheck', listings: found.listings, searched: found.searched };
   }
   if (car.demo) return { source: 'demo', listings: demoListings(car) };
   return null;
@@ -127,7 +152,7 @@ function snapshot(car, cfg, market) {
   const median = prices.length ? (prices.length % 2 ? prices[(prices.length - 1) / 2] : Math.round((prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2)) : null;
   const days = comps.filter(c => c.daysListed !== null).map(c => c.daysListed);
   return {
-    at: new Date().toISOString(), source: market.source, count: comps.length, median,
+    at: new Date().toISOString(), source: market.source, searched: market.searched || '', count: comps.length, median,
     low: prices.length ? prices[0] : null, high: prices.length ? prices[prices.length - 1] : null,
     avgDaysListed: days.length ? Math.round(days.reduce((s, d) => s + d, 0) / days.length) : null,
     comps: comps.slice(0, 40)

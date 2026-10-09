@@ -122,3 +122,31 @@ test('cars get their market on their own: added, changed miles, and once a day',
   const settings = (await as(manager, 'GET', '/pricing')).body.settings;
   assert.ok(settings.lastPull && settings.lastPull.at, 'the sweep ran for a store without auto-pricing');
 });
+
+test('the listing search loosens when the decoded names find nothing (trim, then "-Class")', async () => {
+  const realFetch = global.fetch, realKey = process.env.MARKETCHECK_API_KEY;
+  const asked = [];
+  global.fetch = async (url) => {
+    const q = new URL(url).searchParams;
+    asked.push({ model: q.get('model'), trim: q.get('trim'), type: q.get('car_type') });
+    // The site knows this car as model "GLB", any trim.
+    const hit = q.get('model') === 'GLB' && !q.get('trim');
+    const listings = hit ? Array.from({ length: 4 }, (_, i) => ({ vin: `G${i}`, heading: '2025 Mercedes-Benz GLB 250', price: 40000 + i * 1000, miles: 9000 + i * 1000, dom: 10, vdp_url: `https://example.com/${i}` })) : [];
+    return { ok: true, status: 200, json: async () => ({ listings }) };
+  };
+  process.env.MARKETCHECK_API_KEY = 'test-key';
+  pricing.setMarketSource(null);
+  try {
+    const cfg = { ...pricing.defaultPricingSettings(), zip: '85001' };
+    const car = { year: 2025, make: 'Mercedes-Benz', model: 'GLB-Class', trim: 'GLB250', mileage: 11000, stockType: 'used' };
+    const m = pricing.snapshot(car, cfg, await pricing.fetchMarket(car, cfg));
+    assert.deepStrictEqual(asked.map(a => [a.model, a.trim]), [['GLB-Class', 'GLB250'], ['GLB-Class', null], ['GLB', null]]);
+    assert.ok(asked.every(a => a.type === 'used,certified'), 'used includes certified');
+    assert.strictEqual(m.count, 4);
+    assert.match(m.searched, /2024–2026 Mercedes-Benz GLB, used & certified, within \d+ mi of 85001/);
+  } finally {
+    global.fetch = realFetch;
+    if (realKey === undefined) delete process.env.MARKETCHECK_API_KEY; else process.env.MARKETCHECK_API_KEY = realKey;
+    pricing.setMarketSource(async () => listings());
+  }
+});
