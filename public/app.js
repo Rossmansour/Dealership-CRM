@@ -1997,6 +1997,7 @@ window.openAppraisal = async function(id) {
   document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active'));
   if (fromDeal) closeDealFullPage();
   currentAppraisal = JSON.parse(JSON.stringify(a));
+  apMarketError = '';
   document.getElementById('appraisalListView').style.display = 'none';
   document.getElementById('appraisalDetailView').style.display = 'block';
   document.body.classList.add('wide-page'); // three columns need more than the normal page width
@@ -2259,7 +2260,7 @@ function renderAppraisalMarket() {
       ${m.suggestedRetail ? html`<div class="ap-market-suggest">Suggested retail <strong>${money(m.suggestedRetail)}</strong>
         ${open ? html`<button type="button" class="btn-primary btn-small" id="apUseMarketBtn">Use as internet price</button>` : ''}
         <span class="audit-note">The offer calculator works the appraisal back from it (internet price − recon − pack − profit).</span></div>`
-      : html`<p class="audit-note">${m.count ? `Only ${m.count} similar car${m.count === 1 ? '' : 's'} nearby -- not enough to suggest a price.` : 'No similar cars found nearby.'}</p>`}
+      : html`<p class="audit-note">${m.count ? `Only ${m.count} similar car${m.count === 1 ? '' : 's'} nearby -- not enough to suggest a price.` : 'No similar cars found nearby.'}${m.searched ? ` Searched ${m.searched}.` : ''}</p>`}
       ${m.comps.length ? html`<button type="button" class="link-btn" id="apCompsToggle">${apMarketOpen ? 'Hide' : 'Show'} the ${m.comps.length} similar cars</button>
         ${apMarketOpen ? html`<table class="pr-comps"><thead><tr><th>Similar car</th><th>Miles</th><th>Price</th><th>Adjusted</th><th>Days</th><th>Dealer</th></tr></thead><tbody>
           ${m.comps.map(c => html`<tr><td>${c.url ? html`<a href="${c.url}" target="_blank" rel="noopener">${c.title}</a>` : c.title}</td><td>${Number(c.miles).toLocaleString()}</td>
@@ -2305,11 +2306,21 @@ function apPtmSetPrice(price) {
   setAppraisalDirty(true);
   updateOfferCalc();
 }
+// Why there's no bar yet, in plain words.
+let apMarketError = '';
+function apPtmStatus() {
+  if (!providerList.some(x => x.key === 'market' && x.status === 'live')) return 'Not available yet -- fills in once market data is connected.';
+  const m = currentAppraisal && currentAppraisal.market;
+  if (apMarketPulling) return 'Pulling the market…';
+  if (apMarketError) return /^couldn/i.test(apMarketError) ? apMarketError : `Couldn't get the market: ${apMarketError}`;
+  if (m && !(m.comps || []).length) return `No similar cars for sale found${m.searched ? ` (searched ${m.searched})` : ''}. Try a wider radius or more model years in Market Pricing → Pricing rules.`;
+  return 'Fills in on its own once the year, make, and model are in.';
+}
 function apPtmSync() {
   const el = document.getElementById('apPtm');
   if (!el || !currentAppraisal) return;
   const m = apPtmMarket();
-  const key = `${currentAppraisal.id}|${currentAppraisal.status}|${m ? `${m.at}|${apPtmView}` : 'none'}`;
+  const key = `${currentAppraisal.id}|${currentAppraisal.status}|${m ? `${m.at}|${apPtmView}` : `none|${apPtmStatus()}`}`;
   if (apPtmBuiltFor !== key) {
     apPtmBuiltFor = key;
     const locked = currentAppraisal.status !== 'open';
@@ -2336,9 +2347,7 @@ function apPtmSync() {
             : 'Each dot is a similar car for sale nearby, by miles and listed price -- click one to open its listing. The dashed line is the market trend. Drag up or down to set the internet price.'}</p>
         </div>
       </div>`
-      : html`<p class="audit-note">${providerList.some(x => x.key === 'market' && x.status === 'live')
-          ? 'Fills in once the market is pulled (enter the year, make, and model).'
-          : 'Not available yet -- fills in once market data is connected.'}</p>`;
+      : html`<p class="audit-note">${apPtmStatus()}</p>`;
   }
   if (m) apPtmUpdate(m);
 }
@@ -2536,6 +2545,8 @@ async function pullAppraisalMarket({ force = false } = {}) {
   if (!force && m && m.for === key && Date.now() - new Date(m.at).getTime() < 24 * 3600000) return;
   if (apMarketPulling === key) return;
   apMarketPulling = key;
+  apMarketError = '';
+  apPtmSync();
   const btn = document.getElementById('apMarketBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Pulling…'; }
   try {
@@ -2553,11 +2564,13 @@ async function pullAppraisalMarket({ force = false } = {}) {
     if (apMarketKey(apVehicleNow()) !== key) apAutoMarket(0);
   } catch (err) {
     if (currentAppraisal && currentAppraisal.id === a.id) {
+      apMarketError = err.message;
+      apMarketPulling = null;
       renderAppraisalMarket();
       const note = document.querySelector('#apMarketPlug .audit-note');
       if (note) note.textContent = err.message;
     }
-  } finally { if (apMarketPulling === key) apMarketPulling = null; }
+  } finally { if (apMarketPulling === key) { apMarketPulling = null; apPtmSync(); } }
 }
 ['apYear', 'apMake', 'apModel', 'apTrim', 'apMileage'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => apAutoMarket()));
