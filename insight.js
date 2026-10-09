@@ -13,6 +13,8 @@
 //                wholesale results, and open ROs on stock cars
 //   marketing    sales by ZIP code, by customer age range, and by lead source
 //   trend        gross by month against the goals, month and year to date
+//   overview     the GM's view of everything: open ROs, car sales, trade-ins,
+//                inventory, and the policy money accounting has posted
 //   store        the whole store's month: gross by department, expenses
 //                (from the books, else the GM's numbers), net, where the
 //                month will land, and fixed absorption
@@ -185,7 +187,7 @@ const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch
 // Sales reports are for sales and F&I management; the whole-store numbers
 // for the GM; service & parts for fixed ops; expenses and cash for whoever
 // can read the books.
-const PERMISSION = { store: 'viewDashboardStore', fixed: 'viewDashboardFixed', parts: 'viewDashboardFixed', expenses: 'viewAccounting' };
+const PERMISSION = { overview: 'viewDashboardStore', store: 'viewDashboardStore', fixed: 'viewDashboardFixed', parts: 'viewDashboardFixed', expenses: 'viewAccounting' };
 router.use('/insight/:report', (req, res, next) => auth.requirePermission(PERMISSION[req.params.report] || 'viewAllReports')(req, res, next));
 
 router.get('/insight/sales', wrap(async (req, res) => {
@@ -612,6 +614,80 @@ router.get('/insight/expenses', wrap(async (req, res) => {
   const titlesOpen = data.deals.filter(d => SOLD.includes(d.status) && !((d.titleTracking || {}).dmvSubmitted)).length;
   res.json({ month, months: monthsBack.slice(0, 3).reverse(), lines, totals: { mtd: round2(lines.reduce((s, l) => s + l.mtd, 0)), avg3: round2(lines.reduce((s, l) => s + l.avg3, 0)), lastYear: round2(lines.reduce((s, l) => s + l.lastYear, 0)) },
     schedules, oldestCit, unbooked, titlesOpen });
+}));
+
+// ---------- Overview: the GM's view of the whole store ----------
+// Everything open or done in the range, each item linking back to where it
+// lives: repair orders still open, cars sold, trades taken in, what's in
+// stock, and the policy money (goodwill the store paid) once accounting has
+// posted it to a policy account.
+const POLICY_DEPTS = { policy_new: 'sales', policy_used: 'sales', policy_service: 'service', policy_parts: 'parts' };
+router.get('/insight/overview', wrap(async (req, res) => {
+  const data = await loadAll(req.dealershipId);
+  const r = range(req, data.tz);
+  const service = require('./service');
+  const acct = require('./accounting');
+  const settings = await service.settingsOf(store.pool, req.dealershipId);
+  const pay = new Map([...data.staff.values()].map(u => [u.id, u.pay || {}]));
+  const name = id => (id ? (data.staff.get(String(id)) || {}).name || 'Former employee' : '');
+  const now = Date.now();
+  const openROs = data.ros.filter(ro => service.OPEN_STATUSES.includes(ro.status)).map(ro => {
+    const tt = service.totals(ro, settings, pay);
+    return { id: ro.id, roNumber: ro.roNumber, status: ro.status, customer: ro.customerName || (ro.carId ? 'Internal / recon' : '--'), advisor: name(ro.advisorId) || 'Unassigned',
+      vehicle: [ro.vehicle && ro.vehicle.year, ro.vehicle && ro.vehicle.make, ro.vehicle && ro.vehicle.model].filter(Boolean).join(' '),
+      days: Math.max(0, Math.floor((now - new Date(ro.openedAt)) / DAY)), sale: round2(tt.laborSale + tt.partsSale), promised: ro.promisedAt || null };
+  }).sort((a, b) => b.days - a.days);
+  const sold = data.sold.filter(s => inRange(s.soldAt, r)).sort((a, b) => b.soldAt - a.soldAt);
+  const dealById = new Map(data.deals.map(d => [d.id, d]));
+  const sales = sold.map(s => ({
+    id: s.id, dealNumber: s.dealNumber, day: new Date(s.soldAt).toISOString(), customer: s.customer, vehicle: s.vehicle, stockNumber: s.stockNumber, type: s.type, final: s.final,
+    salespeople: s.salespeople.map(name).filter(Boolean), lender: s.lender || 'Cash', front: round2(s.front + s.incentives), back: s.back, total: round2(s.front + s.incentives + s.back), trade: s.hasTrade
+  }));
+  const trades = [];
+  for (const s of sold) {
+    const d = dealById.get(s.id) || {};
+    if (!s.hasTrade) continue;
+    const list = Array.isArray(d.trades) && d.trades.length ? d.trades
+      : [{ year: d.tradeYear, make: d.tradeMake, model: d.tradeModel, vin: d.tradeVin, mileage: d.tradeMileage, allowance: d.tradeInValue, payoff: d.tradeInPayoff, acv: d.tradeAcv }];
+    const car = d.tradeCarId ? data.carById.get(d.tradeCarId) : null;
+    list.forEach((t, i) => trades.push({
+      dealId: s.id, dealNumber: s.dealNumber, day: new Date(s.soldAt).toISOString(), customer: s.customer,
+      vehicle: [t.year, t.make, t.model].filter(Boolean).join(' ') || 'Trade', vin: t.vin || '', miles: n(t.mileage) || null,
+      allowance: n(t.allowance), acv: n(t.acv) || null, payoff: n(t.payoff),
+      overAllowance: n(t.acv) ? round2(n(t.allowance) - n(t.acv)) : null,
+      carId: i === 0 && car ? car.id : null, stockNumber: i === 0 && car ? car.stockNumber || '' : '', carStatus: i === 0 && car ? car.status : ''
+    }));
+  }
+  const inventory = data.cars.filter(c => c.status !== 'sold').map(c => ({
+    id: c.id, stockNumber: c.stockNumber || '', vehicle: carName(c), type: c.stockType === 'new' ? 'new' : 'used', status: c.status || 'available',
+    miles: n(c.mileage) || null, price: n(c.price) || null, cost: n(c.cost) || null,
+    age: c.dateAdded ? Math.max(0, Math.floor((now - new Date(c.dateAdded)) / DAY)) : null
+  })).sort((a, b) => (b.age ?? -1) - (a.age ?? -1));
+  // Policy: what accounting posted to the policy accounts in the range.
+  await acct.ensureChart(store.pool, req.dealershipId);
+  const { rows } = await store.pool.query(
+    `SELECT l.posted_on, l.amount, l.control, l.control_name, l.memo, a.number, a.name, a.system_key, e.entry_number, e.memo AS entry_memo, e.journal
+     FROM journal_lines l JOIN gl_accounts a ON a.dealership_id = l.dealership_id AND a.number = l.account
+     JOIN journal_entries e ON e.dealership_id = l.dealership_id AND e.id = l.entry_id
+     WHERE l.dealership_id = $1 AND a.system_key = ANY($2) AND l.posted_on >= $3 AND l.posted_on <= $4
+     ORDER BY l.posted_on DESC, e.entry_number DESC`, [req.dealershipId, Object.keys(POLICY_DEPTS), r.from, r.to]);
+  const policy = rows.map(x => ({
+    day: acct.dayStr(x.posted_on), entry: x.entry_number, journal: x.journal, account: x.number, accountName: x.name, dept: POLICY_DEPTS[x.system_key],
+    amount: round2(x.amount), control: x.control || '', name: x.control_name || '', memo: x.memo || x.entry_memo || ''
+  }));
+  const policyTotals = Object.fromEntries(['sales', 'service', 'parts'].map(k => [k, round2(policy.filter(p => p.dept === k).reduce((t, p) => t + p.amount, 0))]));
+  const sum = (list, f) => round2(list.reduce((t, x) => t + n(x[f]), 0));
+  res.json({
+    from: r.from, to: r.to, 
+    summary: {
+      openROs: openROs.length, openROsOver3: openROs.filter(o => o.days > 3).length, openSale: sum(openROs, 'sale'),
+      units: sales.length, newUnits: sales.filter(x => x.type === 'new').length, usedUnits: sales.filter(x => x.type === 'used').length, gross: sum(sales, 'total'),
+      trades: trades.length, tradeAllowance: sum(trades, 'allowance'),
+      inStock: inventory.length, stockCost: sum(inventory, 'cost'), over60: inventory.filter(c => c.age > 60).length,
+      policy: round2(policyTotals.sales + policyTotals.service + policyTotals.parts), policyTotals
+    },
+    openROs, sales, trades, inventory, policy
+  });
 }));
 
 // ---------- Heartbeat: today ----------

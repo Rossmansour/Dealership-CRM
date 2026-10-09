@@ -227,3 +227,30 @@ test('trade-ins: % of deals with a trade, for the store and each salesperson, by
   assert.strictEqual(t.deals.filter(d => d.trade).length, 1);
   assert.strictEqual((await as(manager, 'GET', '/insight/trades?type=new')).body.store.all.deals, 1);
 });
+
+test('store overview: open ROs, car sales, trade-ins, inventory, and posted policy -- GM and admins only', async () => {
+  const gm = await h.createUser('general_manager');
+  assert.strictEqual((await as(manager, 'GET', '/insight/overview')).status, 403);
+  // Policy money: accounting posts it; the GM only sees it.
+  const today = new Date().toISOString().slice(0, 10);
+  await ok(as(admin, 'POST', '/accounting/entries', { date: today, memo: 'Goodwill brake job', lines: [
+    { account: '6170', debit: 250, control: 'RO-1001', controlName: 'Pat Policy', memo: 'Brakes on us' }, { account: '1000', credit: 250 }] }));
+  await ok(as(admin, 'POST', '/accounting/entries', { date: today, memo: 'Parts at no charge', lines: [
+    { account: '6180', debit: 40, memo: 'Wiper blades' }, { account: '1000', credit: 40 }] }));
+  const day = k => new Date(Date.now() + k * 86400000).toISOString().slice(0, 10);
+  // A few days either side, so the store's time zone vs UTC doesn't matter.
+  const o = (await as(gm, 'GET', `/insight/overview?from=${day(-2)}&to=${day(2)}`)).body;
+  assert.strictEqual(o.summary.units, 5);
+  assert.strictEqual(o.sales.length, 5);
+  assert.ok(o.sales.every(d => d.id && d.dealNumber));
+  assert.strictEqual(o.trades.length, 1);
+  assert.strictEqual(o.trades[0].vehicle, 'Kia Soul');
+  assert.strictEqual(o.trades[0].allowance, 4000);
+  assert.ok(o.inventory.some(c => c.stockNumber === 'TAC9' && c.cost === 31000));
+  assert.ok(o.inventory.every(c => c.status !== 'sold'));
+  assert.deepStrictEqual(o.summary.policyTotals, { sales: 0, service: 250, parts: 40 });
+  assert.strictEqual(o.summary.policy, 290);
+  const brakes = o.policy.find(p => p.control === 'RO-1001');
+  assert.deepStrictEqual([brakes.dept, brakes.name, brakes.memo, brakes.amount], ['service', 'Pat Policy', 'Brakes on us', 250]);
+  assert.ok(Array.isArray(o.openROs));
+});

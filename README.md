@@ -210,6 +210,13 @@ DealerDomus is made of modules, each named as its own product so stores can buy 
   - Wholesale results and cars with open repair orders
 - **Marketing**: sales by ZIP code, by customer age range (from credit applications; birthdates never leave the server), and by lead source, plus leads in and close rate by source
 - **Gross Trend**: the last 12 months against the monthly goals, and year to date
+- **Store Overview** (GM and admins; where they land when Insight opens): the whole store on one page. Five tiles -- open ROs, cars sold, trade-ins, in stock, and policy -- each opening its list, with a search box and CSV:
+  - **Open ROs** (as of now): status, customer, vehicle, advisor, days open, and what's on it so far
+  - **Car sales** in the date range: deal, customer, vehicle, salesperson, lender, front / back / total, and whether there was a trade
+  - **Trade-ins** in the date range: the trade, its deal, allowance, ACV, over / under-allowance, payoff, and the stock number it went in as
+  - **Inventory** (as of now): every car in stock with days in stock, miles, price, and cost
+  - **Policy**: goodwill the store paid for in sales, service, and parts, once accounting posts it to a policy account (6150 new, 6160 used, 6170 service, 6180 parts). The GM views it here; accounting does the posting
+  - Every RO, deal, and car opens in the main app
 - **Store Summary** (GM and admins):
   - The month by department: gross (live, not waiting for booking), expenses (from the books, else what the GM entered), and net
   - Where gross, expenses and net will land at this pace

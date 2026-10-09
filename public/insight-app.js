@@ -29,6 +29,7 @@ const userCan = p => !!currentUser && currentUser.permissions.includes(p);
 
 // Every report, by area, and who can open it.
 const IN_REPORTS = [
+  { area: 'Store', key: 'overview', view: 'insightoverview', label: 'Store Overview', perm: 'viewDashboardStore' },
   { area: 'Store', key: 'store', view: 'insightstore', label: 'Store Summary', perm: 'viewDashboardStore' },
   { area: 'Store', key: 'expenses', view: 'insightexpenses', label: 'Expenses & Cash', perm: 'viewAccounting' },
   { area: 'Sales', key: 'heartbeat', view: 'insightheartbeat', label: 'Heartbeat (today)', perm: 'viewAllReports' },
