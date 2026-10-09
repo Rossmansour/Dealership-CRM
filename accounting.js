@@ -133,6 +133,7 @@ const CHART = [
   ['6150', 'Policy expense - new', 'expense', 'new', 'variable', false, 'policy_new'],
   ['6160', 'Policy expense - used', 'expense', 'used', 'variable', false, 'policy_used'],
   ['6170', 'Policy expense - service', 'expense', 'service', 'variable', false, 'policy_service'],
+  ['6180', 'Policy expense - parts', 'expense', 'parts', 'variable', false, 'policy_parts'],
   ['6200', 'Advertising - new', 'expense', 'new', 'variable', false, 'adv_new'],
   ['6210', 'Advertising - used', 'expense', 'used', 'variable', false, 'adv_used'],
   ['6220', 'Advertising - service & parts', 'expense', 'service', 'variable', false, 'adv_service'],
@@ -163,10 +164,16 @@ const GROUP_LABELS = {
 };
 
 // The standard chart goes in the first time the books are touched.
+// Accounts added to the standard chart later are filled in for stores that
+// already have their books.
+const CHART_KEYS = CHART.filter(c => c[6]).length;
 async function ensureChart(q, dealershipId) {
-  const { rows } = await q.query('SELECT 1 FROM gl_accounts WHERE dealership_id = $1 LIMIT 1', [dealershipId]);
-  if (rows.length) return;
+  const { rows } = await q.query('SELECT count(system_key) AS keys FROM gl_accounts WHERE dealership_id = $1', [dealershipId]);
+  if (Number(rows[0].keys) >= CHART_KEYS) return;
+  const { rows: have } = await q.query('SELECT system_key FROM gl_accounts WHERE dealership_id = $1 AND system_key IS NOT NULL', [dealershipId]);
+  const known = new Set(have.map(r => r.system_key));
   for (const [number, name, type, dept, grp, scheduled, key] of CHART) {
+    if (key && known.has(key)) continue;
     await q.query(
       `INSERT INTO gl_accounts (dealership_id, number, name, type, dept, grp, scheduled, system_key)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`,

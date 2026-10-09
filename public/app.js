@@ -2955,6 +2955,12 @@ function renderOutcome() {
   document.getElementById('apLostBtn').onclick = () => appraisalAction('lost', { reason: document.getElementById('apLostReason').value });
 }
 
+// A car from a link: its inventory screen, opened for editing when allowed.
+function openCarById(carId) {
+  showView('inventory');
+  if (userCan('editInventory') && cars.some(c => c.id === carId)) editCar(carId);
+}
+
 window.openCarFromAppraisal = function(carId) {
   if (!showAppraisalList()) return;
   showView('inventory');
@@ -6508,9 +6514,11 @@ async function init() {
   if (settingsRes.ok) appSettings = await settingsRes.json();
   const loaded = loadAll();
   startAlertPolling();
-  // Links from Insight: /#deal=<id> opens that deal.
+  // Links from Insight: /#deal=<id> opens that deal, /#car=<id> that car.
   const hashDeal = new URLSearchParams(location.hash.slice(1)).get('deal');
   if (hashDeal) { history.replaceState(null, '', '/'); loaded.then(() => openDealWorkspace(hashDeal)); }
+  const hashCar = new URLSearchParams(location.hash.slice(1)).get('car');
+  if (hashCar) { history.replaceState(null, '', '/'); loaded.then(() => openCarById(hashCar)); }
   // Links from the Recon tab: /#ro=<id> opens that repair order.
   const hashRo = new URLSearchParams(location.hash.slice(1)).get('ro');
   if (hashRo && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(hashRo); }
@@ -6518,6 +6526,8 @@ async function init() {
 window.addEventListener('hashchange', () => {
   const dealId = new URLSearchParams(location.hash.slice(1)).get('deal');
   if (dealId && currentUser) { history.replaceState(null, '', '/'); openDealWorkspace(dealId); return; }
+  const carId = new URLSearchParams(location.hash.slice(1)).get('car');
+  if (carId && currentUser) { history.replaceState(null, '', '/'); openCarById(carId); return; }
   const id = new URLSearchParams(location.hash.slice(1)).get('ro');
   if (id && currentUser && userCan('viewService')) { history.replaceState(null, '', '/'); openRoById(id); }
 });

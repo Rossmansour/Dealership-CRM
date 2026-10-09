@@ -3198,3 +3198,8 @@ button.ac-card:hover { border-color: var(--blue); }
 .ap-history-info { flex-basis: 100%; font-size: 13px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-alt); }
 .ap-history-info .audit-note { display: block; margin-top: 2px; }
 .history-chip[aria-expanded="true"] { border-style: solid; border-color: var(--blue); }
+
+/* Insight: store overview tiles double as tabs */
+.in-ov-tiles .in-ov-tile { text-align: left; font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--border); }
+.in-ov-tiles .in-ov-tile:hover { border-color: var(--blue); }
+.in-ov-tiles .in-ov-tile.active { border-color: var(--blue); box-shadow: inset 0 -3px 0 var(--blue); }

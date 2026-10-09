@@ -47,8 +47,80 @@ async function openInsightView(view) {
   ins.view = view;
   inBody().innerHTML = html`<p class="audit-note">Loading…</p>`;
   try {
-    await ({ insightheartbeat: inHeartbeat, insightpeople: inPeople, insighttrades: inTrades, insightparts: inParts, insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
+    await ({ insightoverview: inOverview, insightheartbeat: inHeartbeat, insightpeople: inPeople, insighttrades: inTrades, insightparts: inParts, insightstore: inStore, insightfixed: inFixed, insightexpenses: inExpenses, insightsales: inSales, insightleaders: inLeaders, insightfi: inFi, insightinventory: inInventory, insightmarketing: inMarketing, insighttrend: inTrend })[view]();
   } catch (err) { inBody().innerHTML = html`<p class="ac-error">${err.message}</p>`; }
+}
+
+// ---------- Store overview (the GM's view) ----------
+// Everything at once, each line opening where it lives in the main app.
+const OV_TABS = [['ros', 'Open ROs'], ['sales', 'Car sales'], ['trades', 'Trade-ins'], ['inventory', 'Inventory'], ['policy', 'Policy']];
+const OV_RO_STATUS = { open: 'Open', in_progress: 'In progress', waiting_parts: 'Waiting on parts', ready: 'Ready' };
+const inMain = (hash, label) => html`<a href="/#${hash}" target="dealerdomus-main">${label}</a>`;
+async function inOverview() {
+  const o = await inGet(`/insight/overview?${inRangeQs()}`);
+  ins.ov = o;
+  const S = o.summary;
+  inHead('Store Overview', `${inShortDate(`${o.from}T12:00`)} – ${inShortDate(`${o.to}T12:00`)} · open ROs and inventory are as of now; sales, trades, and policy use the dates`);
+  const tile = (tab, label, value, sub) => html`<button type="button" class="ac-card in-ov-tile ${(ins.ovTab || 'ros') === tab ? 'active' : ''}" data-in-ov-tab="${tab}">
+    <span class="ac-card-label">${label}</span><span class="ac-card-value">${value}</span><span class="ac-card-sub">${sub}</span></button>`;
+  inBody().innerHTML = html`<div class="ac-cards ac-cards-small in-ov-tiles">
+      ${tile('ros', 'Open ROs', S.openROs, `${S.openROsOver3} open over 3 days · ${inMoney(S.openSale)} so far`)}
+      ${tile('sales', 'Cars sold', S.units, `${S.newUnits} new · ${S.usedUnits} used · ${inMoney(S.gross)} gross`)}
+      ${tile('trades', 'Trade-ins', S.trades, `${inMoney(S.tradeAllowance)} in allowances`)}
+      ${tile('inventory', 'In stock', S.inStock, `${inMoney(S.stockCost)} at cost · ${S.over60} over 60 days`)}
+      ${tile('policy', 'Policy', inMoney(S.policy), `Sales ${inMoney(S.policyTotals.sales)} · Service ${inMoney(S.policyTotals.service)} · Parts ${inMoney(S.policyTotals.parts)}`)}
+    </div>
+    <div class="in-tabs" role="tablist">${OV_TABS.map(([k, label]) => html`<button type="button" role="tab" data-in-ov-tab="${k}">${label}</button>`)}</div>
+    <div class="ac-box in-scroll in-ov-panel"></div>`;
+  inOvRender();
+}
+function inOvRender() {
+  const o = ins.ov, tab = ins.ovTab || 'ros';
+  document.querySelectorAll('[data-in-ov-tab]').forEach(b => { const on = b.dataset.inOvTab === tab; b.classList.toggle('active', on); if (b.getAttribute('role') === 'tab') b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+  const q = (ins.ovFilter || '').toLowerCase();
+  const match = (...vals) => !q || vals.join(' ').toLowerCase().includes(q);
+  const empty = (cols, text) => html`<tr><td colspan="${cols}" class="audit-note">${q ? 'Nothing matches the filter.' : text}</td></tr>`;
+  let table;
+  if (tab === 'ros') {
+    const list = o.openROs.filter(r => match(r.roNumber, r.customer, r.vehicle, r.advisor, OV_RO_STATUS[r.status]));
+    ins.last = { name: 'open-ros', rows: [['RO', 'Status', 'Customer', 'Vehicle', 'Advisor', 'Days open', 'So far'], ...list.map(r => [r.roNumber, OV_RO_STATUS[r.status] || r.status, r.customer, r.vehicle, r.advisor, r.days, r.sale])] };
+    table = html`<table class="data-table ac-table"><thead><tr><th>RO</th><th>Status</th><th>Customer</th><th>Vehicle</th><th>Advisor</th><th class="num">Days open</th><th class="num">So far</th></tr></thead><tbody>
+      ${list.length ? list.map(r => html`<tr><td>${inMain(`ro=${r.id}`, `RO-${r.roNumber}`)}</td><td>${OV_RO_STATUS[r.status] || r.status}</td><td>${r.customer}</td><td>${r.vehicle || '--'}</td><td>${r.advisor}</td>
+        <td class="num ${r.days > 3 ? 'ac-late' : ''}">${r.days}</td><td class="num">${inMoney(r.sale)}</td></tr>`) : empty(7, 'No open repair orders.')}</tbody></table>`;
+  } else if (tab === 'sales') {
+    const list = o.sales.filter(d => match(d.dealNumber, d.customer, d.vehicle, d.stockNumber, d.salespeople.join(' '), d.lender));
+    ins.last = { name: `car-sales-${o.from}-${o.to}`, rows: [['Deal', 'Date', 'Customer', 'Vehicle', 'Stock', 'New/Used', 'Salesperson', 'Lender', 'Front', 'Back', 'Total', 'Trade', 'Final'], ...list.map(d => [d.dealNumber, d.day.slice(0, 10), d.customer, d.vehicle, d.stockNumber, d.type, d.salespeople.join(' / '), d.lender, d.front, d.back, d.total, d.trade ? 'Yes' : 'No', d.final ? 'Yes' : 'No'])] };
+    table = html`<table class="data-table ac-table"><thead><tr><th>Deal</th><th>Date</th><th>Customer</th><th>Vehicle</th><th>Salesperson</th><th>Lender</th><th class="num">Front</th><th class="num">Back</th><th class="num">Total</th><th>Trade</th></tr></thead><tbody>
+      ${list.length ? list.map(d => html`<tr><td>${inMain(`deal=${d.id}`, `Deal ${d.dealNumber || '--'}`)}<div class="audit-note">${d.final ? 'Final' : 'Not final'}</div></td><td>${inShortDate(d.day)}</td><td>${d.customer}</td>
+        <td>${d.vehicle}<div class="audit-note">${d.stockNumber ? `#${d.stockNumber} · ` : ''}${d.type === 'new' ? 'New' : 'Used'}</div></td><td>${d.salespeople.join(', ') || '--'}</td><td>${d.lender}</td>
+        <td class="num">${inMoney(d.front)}</td><td class="num">${inMoney(d.back)}</td><td class="num"><strong>${inMoney(d.total)}</strong></td><td>${d.trade ? 'Yes' : ''}</td></tr>`) : empty(10, 'No cars sold in this range.')}</tbody></table>`;
+  } else if (tab === 'trades') {
+    const list = o.trades.filter(t => match(t.dealNumber, t.customer, t.vehicle, t.vin, t.stockNumber));
+    ins.last = { name: `trade-ins-${o.from}-${o.to}`, rows: [['Deal', 'Date', 'Customer', 'Trade', 'VIN', 'Miles', 'Allowance', 'ACV', 'Over/under', 'Payoff', 'Stock'], ...list.map(t => [t.dealNumber, t.day.slice(0, 10), t.customer, t.vehicle, t.vin, t.miles ?? '', t.allowance, t.acv ?? '', t.overAllowance ?? '', t.payoff, t.stockNumber])] };
+    table = html`<table class="data-table ac-table"><thead><tr><th>Trade</th><th>Deal</th><th>Customer</th><th class="num">Allowance</th><th class="num">ACV</th><th class="num">Over / under</th><th class="num">Payoff</th><th>In stock as</th></tr></thead><tbody>
+      ${list.length ? list.map(t => html`<tr><td><strong>${t.vehicle}</strong><div class="audit-note">${[t.vin, t.miles ? `${Number(t.miles).toLocaleString()} mi` : ''].filter(Boolean).join(' · ')}</div></td>
+        <td>${inMain(`deal=${t.dealId}`, `Deal ${t.dealNumber || '--'}`)}<div class="audit-note">${inShortDate(t.day)}</div></td><td>${t.customer}</td>
+        <td class="num">${inMoney(t.allowance)}</td><td class="num">${t.acv === null ? '--' : inMoney(t.acv)}</td><td class="num ${t.overAllowance > 0 ? 'ac-late' : ''}">${t.overAllowance === null ? '--' : inMoney(t.overAllowance)}</td>
+        <td class="num">${inMoney(t.payoff)}</td><td>${t.carId ? inMain(`car=${t.carId}`, `#${t.stockNumber || 'car'}`) : html`<span class="audit-note">Not stocked in yet</span>`}</td></tr>`) : empty(8, 'No trade-ins in this range.')}</tbody></table>`;
+  } else if (tab === 'inventory') {
+    const list = o.inventory.filter(c => match(c.stockNumber, c.vehicle, c.type, c.status));
+    ins.last = { name: 'inventory', rows: [['Stock', 'Vehicle', 'New/Used', 'Status', 'Days', 'Miles', 'Price', 'Cost'], ...list.map(c => [c.stockNumber, c.vehicle, c.type, c.status, c.age ?? '', c.miles ?? '', c.price ?? '', c.cost ?? ''])] };
+    table = html`<table class="data-table ac-table"><thead><tr><th>Stock</th><th>Vehicle</th><th>Status</th><th class="num">Days</th><th class="num">Miles</th><th class="num">Price</th><th class="num">Cost</th></tr></thead><tbody>
+      ${list.length ? list.map(c => html`<tr><td>${inMain(`car=${c.id}`, c.stockNumber ? `#${c.stockNumber}` : 'Open')}</td><td>${c.vehicle}<div class="audit-note">${c.type === 'new' ? 'New' : 'Used'}</div></td>
+        <td>${c.status.replace('_', ' ')}</td><td class="num ${c.age > 60 ? 'ac-late' : ''}">${c.age ?? '--'}</td><td class="num">${c.miles ? Number(c.miles).toLocaleString() : '--'}</td>
+        <td class="num">${inMoney(c.price)}</td><td class="num">${inMoney(c.cost)}</td></tr>`) : empty(7, 'Nothing in stock.')}</tbody></table>`;
+  } else {
+    const list = o.policy.filter(p => match(p.dept, p.accountName, p.control, p.name, p.memo, p.entry));
+    const dept = { sales: 'Sales', service: 'Service', parts: 'Parts' };
+    ins.last = { name: `policy-${o.from}-${o.to}`, rows: [['Date', 'Entry', 'Department', 'Account', 'Control', 'Name', 'Memo', 'Amount'], ...list.map(p => [p.day, `J-${p.entry}`, dept[p.dept], `${p.account} ${p.accountName}`, p.control, p.name, p.memo, p.amount])] };
+    table = html`<table class="data-table ac-table"><thead><tr><th>Date</th><th>Department</th><th>For</th><th>What</th><th>Entry</th><th class="num">Amount</th></tr></thead><tbody>
+      ${list.length ? list.map(p => html`<tr><td>${inShortDate(`${p.day}T12:00`)}</td><td><strong>${dept[p.dept]}</strong><div class="audit-note">${p.account} ${p.accountName}</div></td>
+        <td>${p.control || '--'}${p.name ? html`<div class="audit-note">${p.name}</div>` : ''}</td><td>${p.memo || '--'}</td><td>J-${p.entry}</td><td class="num ${p.amount < 0 ? '' : 'ac-late'}">${inMoney(p.amount)}</td></tr>`)
+        : empty(6, 'No policy posted in this range.')}</tbody></table>
+      <p class="audit-note">Policy is goodwill the store paid for -- repairs, parts, or deal fixes given to customers. It shows here once accounting posts it to a policy account (6150 new, 6160 used, 6170 service, 6180 parts). Reversals show as negative lines.</p>`;
+  }
+  document.querySelector('.in-ov-panel').innerHTML = String(html`<div class="in-fi-bar"><input type="search" id="inOvFilter" placeholder="Search this list" value="${ins.ovFilter || ''}" aria-label="Search this list" /></div>
+    <div class="table-scroll">${table}</div>`);
 }
 
 // ---------- Sales summary ----------
@@ -558,16 +630,19 @@ inRoot.addEventListener('change', (e) => {
   }
 });
 inRoot.addEventListener('input', (e) => {
-  if (e.target.id !== 'inFiFilter') return;
-  ins.fiFilter = e.target.value;
+  if (!['inFiFilter', 'inOvFilter'].includes(e.target.id)) return;
+  const id = e.target.id;
+  if (id === 'inFiFilter') ins.fiFilter = e.target.value; else ins.ovFilter = e.target.value;
   const at = e.target.selectionStart;
-  inFiRender();
-  const box = document.getElementById('inFiFilter');
+  if (id === 'inFiFilter') inFiRender(); else inOvRender();
+  const box = document.getElementById(id);
   box.focus(); box.setSelectionRange(at, at);
 });
 inRoot.addEventListener('click', (e) => {
   if (e.target.closest('[data-in-refresh]')) return openInsightView(ins.view);
   if (e.target.closest('[data-in-goals]')) return inGoalsForm();
+  const ovTab = e.target.closest('[data-in-ov-tab]');
+  if (ovTab) { ins.ovTab = ovTab.dataset.inOvTab; ins.ovFilter = ''; return inOvRender(); }
   const fiTab = e.target.closest('[data-in-fi-tab]');
   if (fiTab) { ins.fiTab = fiTab.dataset.inFiTab; return inFiRender(); }
   const fiOpen = e.target.closest('[data-in-fi-open]');
